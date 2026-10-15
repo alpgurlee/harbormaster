@@ -69,3 +69,31 @@ fn tells_separate_sockets_apart() {
     assert!(a.is_some() && b.is_some());
     assert_ne!(a, b);
 }
+
+#[test]
+fn keeps_two_sockets_one_process_holds_on_the_same_endpoint() {
+    use socket2::{Domain, Socket, Type};
+
+    let open = |port: u16| {
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket.set_reuse_port(true).unwrap();
+        let address: std::net::SocketAddr = (std::net::Ipv4Addr::LOCALHOST, port).into();
+        socket.bind(&address.into()).unwrap();
+        socket.listen(8).unwrap();
+        socket
+    };
+    let first = open(0);
+    let port = first.local_addr().unwrap().as_socket().unwrap().port();
+    let _second = open(port);
+
+    let own = std::process::id();
+    let sockets: Vec<_> = listeners()
+        .unwrap()
+        .into_iter()
+        .filter(|listener| listener.owner.pid.0 == own && listener.port == port)
+        .map(|listener| listener.socket)
+        .collect();
+
+    assert_eq!(sockets.len(), 2, "both sockets should be reported: {sockets:?}");
+    assert_ne!(sockets[0], sockets[1]);
+}

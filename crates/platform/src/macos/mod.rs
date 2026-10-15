@@ -41,8 +41,9 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
         if !process::bsd_info(pid).is_ok_and(|after| process::key_of(pid, &after) == owner) {
             continue;
         }
+        // A process can hold one socket under several descriptors.
         for (address, port, socket) in sockets {
-            if seen.insert((owner, address, port)) {
+            if seen.insert((owner, socket)) {
                 listeners.push(Listener {
                     owner,
                     address,
