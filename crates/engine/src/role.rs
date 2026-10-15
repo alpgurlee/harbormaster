@@ -106,8 +106,17 @@ pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
         return Role::Runner;
     }
     let first_arg = args.and_then(|args| args.get(1)).map(String::as_str);
+    // A process title (npm sets "npm run dev") replaces argv on macOS.
+    let title = args
+        .and_then(|args| args.first())
+        .and_then(|first| first.split_whitespace().next())
+        .map(normalize);
+    let titled_as_package_manager =
+        title.is_some_and(|title| PACKAGE_MANAGERS.contains(&title.as_str()));
     match name {
-        "node" if first_arg.is_some_and(is_package_manager_script) => Role::Runner,
+        "node" if titled_as_package_manager || first_arg.is_some_and(is_package_manager_script) => {
+            Role::Runner
+        }
         "bun" | "deno" if matches!(first_arg, Some("run" | "task" | "x")) => Role::Runner,
         "dotnet"
             if args.is_some_and(|args| {
@@ -247,6 +256,14 @@ mod tests {
 
         assert_eq!(role("node", Some(&npm)), Role::Runner);
         assert_eq!(role("node.exe", Some(&pnpm)), Role::Runner);
+    }
+
+    #[test]
+    fn recognises_a_package_manager_that_renamed_its_process() {
+        // npm sets process.title, which overwrites argv on macOS.
+        let titled = args(&["npm run dev   ", "", ""]);
+
+        assert_eq!(role("node", Some(&titled)), Role::Runner);
     }
 
     #[test]
