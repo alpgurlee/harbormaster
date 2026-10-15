@@ -249,10 +249,16 @@ impl Scanner {
         );
         // Stopping must never reach the system, another user or a database,
         // nor promise a free port while someone outside keeps the socket.
+        let os_component = owner_details
+            .exe
+            .known()
+            .is_some_and(|exe| is_os_component(exe));
         let protected = if service::is_system(owner) {
             Some(Protection::System)
         } else if owner.owner != Owner::CurrentUser || someone_elses {
             Some(Protection::OtherUser)
+        } else if os_component {
+            Some(Protection::System)
         } else if service::is_session_boundary(owner, tree, args_of) {
             Some(Protection::Session)
         } else if database {
@@ -354,6 +360,19 @@ fn classify(
     } else {
         Classification::Other
     }
+}
+
+/// Parts of the OS that run as the user, such as macOS's ControlCenter
+/// (AirPlay on :5000). Runtimes the OS ships in /usr/bin stay stoppable.
+fn is_os_component(exe: &Path) -> bool {
+    let path = exe.to_string_lossy().replace('\\', "/").to_lowercase();
+    let windows = path
+        .get(1..)
+        .is_some_and(|rest| rest.starts_with(":/windows/"));
+    windows
+        || ["/system/", "/usr/libexec/", "/usr/sbin/", "/sbin/"]
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
 }
 
 /// Desktop apps on macOS, except the Python.app wrapper that python.org and
@@ -667,6 +686,59 @@ mod tests {
                 .any(|member| member.name == "postgres")
         );
         assert_eq!(snapshot.services[0].protected, Some(Protection::Database));
+    }
+
+    #[test]
+    fn protects_parts_of_the_os_that_run_as_the_user() {
+        let home = tempfile::tempdir().unwrap();
+        let control_center =
+            "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter";
+        let procs = [
+            proc(
+                700,
+                1,
+                "ControlCenter",
+                control_center,
+                &[control_center],
+                home.path(),
+            ),
+            proc(
+                701,
+                1,
+                "rapportd",
+                "/usr/libexec/rapportd",
+                &["/usr/libexec/rapportd"],
+                home.path(),
+            ),
+            proc(
+                702,
+                1,
+                "ruby",
+                "/usr/bin/ruby",
+                &["ruby", "-run", "-e", "httpd", ".", "-p", "8000"],
+                home.path(),
+            ),
+        ];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(700, 5000), (701, 50594), (702, 8000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        let protection = |port: u16| {
+            snapshot
+                .services
+                .iter()
+                .find(|service| service.ports[0].port == port)
+                .unwrap()
+                .protected
+        };
+        assert_eq!(protection(5000), Some(Protection::System));
+        assert_eq!(protection(50594), Some(Protection::System));
+        assert_eq!(protection(8000), None);
     }
 
     #[test]
