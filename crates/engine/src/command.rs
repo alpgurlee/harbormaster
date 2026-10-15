@@ -121,8 +121,8 @@ fn mask_argument(argument: &str) -> (String, bool) {
             token.to_string()
         };
         match secret(&token) {
-            Some(Secret::Assigned(name)) => {
-                words.push(format!("{name}={HIDDEN}"));
+            Some(Secret::Kept(prefix)) => {
+                words.push(format!("{prefix}{HIDDEN}"));
                 break;
             }
             Some(Secret::Follows(flag)) => {
@@ -140,11 +140,14 @@ fn mask_argument(argument: &str) -> (String, bool) {
 }
 
 enum Secret {
-    /// `--token=abc`, `API_KEY=abc`: the name in front of the value.
-    Assigned(String),
-    /// `--token`, `Bearer`: the value comes next.
+    /// `--token=abc`, `Cookie:abc`: what comes before the value, separator included.
+    Kept(String),
+    /// `--token`, `Bearer`, `Authorization:`: the value comes next.
     Follows(String),
 }
+
+/// Headers whose whole value is a credential, whatever its scheme.
+const SECRET_HEADERS: &[&str] = &["authorization:", "cookie:"];
 
 fn secret(token: &str) -> Option<Secret> {
     // Quotes and escapes don't change what a shell hands on: `"--to\ken=x"` is `--token=x`.
@@ -165,10 +168,22 @@ fn secret(token: &str) -> Option<Secret> {
         for (at, _) in head.match_indices('=') {
             let name = &head[..at];
             if is_secret_flag(name) || mentions_a_credential(identifier_at_end(name)) {
-                return Some(Secret::Assigned(token[..offset + at].to_string()));
+                return Some(Secret::Kept(token[..=offset + at].to_string()));
             }
         }
         offset += piece.len() + 1;
+    }
+    // Lowercasing ASCII keeps every byte where it was.
+    let lowered = token.to_ascii_lowercase();
+    if let Some(end) = SECRET_HEADERS
+        .iter()
+        .find_map(|header| lowered.find(header).map(|at| at + header.len()))
+    {
+        return Some(if end == token.len() {
+            Secret::Follows(token)
+        } else {
+            Secret::Kept(token[..end].to_string())
+        });
     }
     let last = token.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
     let follows =
@@ -197,9 +212,12 @@ fn mentions_a_credential(name: &str) -> bool {
     CREDENTIAL_PARTS.iter().any(|part| name.contains(part))
 }
 
-/// Masks the password in the authority and any credential in the query string.
+/// Query keys that carry a credential without saying so in their name.
+const QUERY_CREDENTIALS: &[&str] = &["key", "sig", "signature", "auth", "jwt", "sid"];
+
+/// Masks credentials in the authority and in the query string.
 fn mask_url(word: &str) -> String {
-    let word = mask_url_password(word);
+    let word = mask_url_user(word);
     let Some((base, query)) = word.split_once('?') else {
         return word;
     };
@@ -209,29 +227,37 @@ fn mask_url(word: &str) -> String {
     let query: Vec<String> = query
         .split('&')
         .map(|pair| match pair.split_once('=') {
-            Some((key, _)) if mentions_a_credential(key) => format!("{key}=***"),
+            Some((key, _))
+                if mentions_a_credential(key)
+                    || QUERY_CREDENTIALS
+                        .iter()
+                        .any(|known| key.eq_ignore_ascii_case(known)) =>
+            {
+                format!("{key}={HIDDEN}")
+            }
             _ => pair.to_string(),
         })
         .collect();
     format!("{base}?{}", query.join("&"))
 }
 
-/// `scheme://user:password@host` → `scheme://user:***@host`
-fn mask_url_password(word: &str) -> String {
+/// `scheme://user:password@host` → `scheme://user:***@host`. A user name
+/// alone may be a token (`https://ghp_…@github.com`), so it goes entirely.
+fn mask_url_user(word: &str) -> String {
     let Some(scheme_end) = word.find("://") else {
         return word.to_string();
     };
-    let authority_start = scheme_end + 3;
-    let Some(at) = word[authority_start..]
-        .find('@')
-        .map(|at| authority_start + at)
-    else {
+    let start = scheme_end + 3;
+    let authority = word[start..]
+        .find(['/', '?', '#'])
+        .map_or(&word[start..], |end| &word[start..start + end]);
+    let Some(at) = authority.rfind('@') else {
         return word.to_string();
     };
-    match word[authority_start..at].find(':') {
-        Some(colon) => format!("{}***{}", &word[..authority_start + colon + 1], &word[at..]),
-        None => word.to_string(),
-    }
+    let kept = authority[..at]
+        .find(':')
+        .map_or(start, |colon| start + colon + 1);
+    format!("{}{HIDDEN}{}", &word[..kept], &word[start + at..])
 }
 
 #[cfg(test)]
@@ -363,7 +389,7 @@ mod tests {
                 "Authorization: Bearer abc.def",
                 "http://localhost:3000"
             ]),
-            "curl -H Authorization: Bearer *** http://localhost:3000"
+            "curl -H Authorization: *** http://localhost:3000"
         );
         assert_eq!(
             show(&["open", "http://localhost:3000/cb?token=abc&mode=dev"]),
@@ -476,6 +502,51 @@ mod tests {
     fn survives_names_that_are_not_ascii() {
         assert_eq!(show(&["x", "é=1", "--ünïcode=2"]), "x é=1 --ünïcode=2");
         assert_eq!(show(&["x", "ключ_token=1", "y"]), "x ключ_token=*** y");
+    }
+
+    #[test]
+    fn hides_a_token_used_as_the_user_name_in_a_url() {
+        assert_eq!(
+            show(&["git", "clone", "https://ghp_abc123@github.com/o/r.git"]),
+            "git clone https://***@github.com/o/r.git"
+        );
+    }
+
+    #[test]
+    fn leaves_an_at_sign_in_the_path_alone() {
+        assert_eq!(
+            show(&["npm", "view", "https://registry.npmjs.org/@types/node"]),
+            "npm view https://registry.npmjs.org/@types/node"
+        );
+    }
+
+    #[test]
+    fn hides_every_kind_of_authorization_and_cookie_header() {
+        assert_eq!(
+            show(&[
+                "curl",
+                "-H",
+                "Authorization: Basic dXNlcjpwYXNz",
+                "http://x"
+            ]),
+            "curl -H Authorization: *** http://x"
+        );
+        assert_eq!(
+            show(&["curl", "-H", "Cookie: session=abc; theme=dark"]),
+            "curl -H Cookie: ***"
+        );
+        assert_eq!(
+            show(&["curl", "--header=Proxy-Authorization:Digest abc"]),
+            "curl --header=Proxy-Authorization:***"
+        );
+    }
+
+    #[test]
+    fn masks_query_keys_that_carry_credentials() {
+        assert_eq!(
+            show(&["open", "https://maps.example.com/api?key=AIza1&q=x&sig=s1"]),
+            "open https://maps.example.com/api?key=***&q=x&sig=***"
+        );
     }
 
     #[test]
