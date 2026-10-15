@@ -34,7 +34,8 @@ pub struct Service {
     /// Stable while the root process lives: `<pid>-<start>`.
     pub id: String,
     pub classification: Classification,
-    pub protected: bool,
+    /// Why stopping it from here is refused, if it is.
+    pub protected: Option<Protection>,
     pub ports: Vec<Port>,
     pub project: Option<Project>,
     pub command: Option<String>,
@@ -43,6 +44,8 @@ pub struct Service {
     pub memory_bytes: Option<u64>,
     pub cpu_percent: Option<f64>,
     pub processes: Vec<Member>,
+    /// Every process holding one of its sockets, members or not.
+    pub holders: Vec<Holder>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -54,9 +57,27 @@ pub enum Classification {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Protection {
+    System,
+    /// Runs as another user, root included.
+    OtherUser,
+    Database,
+    /// A process outside the service holds its socket too, so stopping the
+    /// service would not free the port.
+    SharedSocket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Port {
     pub port: u16,
     pub address: IpAddr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Holder {
+    pub pid: u32,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -215,8 +236,32 @@ impl Scanner {
             project.is_some(),
             database,
         );
-        // Stopping must never reach the system, another user, or a database.
-        let protected = classification == Classification::System || someone_elses || database;
+        // Stopping must never reach the system, another user or a database,
+        // nor promise a free port while someone outside keeps the socket.
+        let protected = if service::is_system(owner) {
+            Some(Protection::System)
+        } else if owner.owner != Owner::CurrentUser || someone_elses {
+            Some(Protection::OtherUser)
+        } else if database {
+            Some(Protection::Database)
+        } else if group
+            .holders
+            .iter()
+            .any(|holder| !group.members.contains(holder))
+        {
+            Some(Protection::SharedSocket)
+        } else {
+            None
+        };
+        let holders = group
+            .holders
+            .iter()
+            .filter_map(|key| tree.get(key.pid))
+            .map(|entry| Holder {
+                pid: entry.key.pid.0,
+                name: entry.name.clone(),
+            })
+            .collect();
 
         Some(Service {
             id: format!("{}-{}", root.key.pid.0, root.key.start.0),
@@ -229,6 +274,7 @@ impl Scanner {
             memory_bytes: sum(members.iter().map(|member| member.memory_bytes)),
             cpu_percent: sum(members.iter().map(|member| member.cpu_percent)),
             processes: members,
+            holders,
         })
     }
 
@@ -302,7 +348,7 @@ mod tests {
         Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, StartTime,
     };
 
-    use super::{Classification, Input, Scanner, Snapshot};
+    use super::{Classification, Input, Protection, Scanner, Snapshot};
 
     struct Proc {
         entry: ProcessEntry,
@@ -337,19 +383,31 @@ mod tests {
         home: &Path,
         now: Instant,
     ) -> Snapshot {
+        let sockets: Vec<(u32, u16, Option<u64>)> =
+            ports.iter().map(|&(pid, port)| (pid, port, None)).collect();
+        scan_sockets(scanner, procs, &sockets, home, now)
+    }
+
+    fn scan_sockets(
+        scanner: &mut Scanner,
+        procs: &[Proc],
+        sockets: &[(u32, u16, Option<u64>)],
+        home: &Path,
+        now: Instant,
+    ) -> Snapshot {
         let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
-        let listeners: Vec<Listener> = ports
+        let listeners: Vec<Listener> = sockets
             .iter()
-            .map(|(pid, port)| Listener {
+            .map(|&(pid, port, socket)| Listener {
                 owner: procs
                     .iter()
-                    .find(|p| p.entry.key.pid == Pid(*pid))
+                    .find(|p| p.entry.key.pid == Pid(pid))
                     .unwrap()
                     .entry
                     .key,
                 address: IpAddr::from([127, 0, 0, 1]),
-                port: *port,
-                socket: None,
+                port,
+                socket,
             })
             .collect();
         let details = |key: ProcessKey| {
@@ -425,7 +483,7 @@ mod tests {
         assert_eq!(service.command.as_deref(), Some("npm run dev"));
         assert_eq!(service.ports[0].port, 3000);
         assert_eq!(service.memory_bytes, Some(200 * 1024 * 1024));
-        assert!(!service.protected);
+        assert_eq!(service.protected, None);
     }
 
     #[test]
@@ -463,7 +521,7 @@ mod tests {
             &["/usr/sbin/httpd"],
             Path::new("/"),
         );
-        daemon.entry.owner = Owner::System;
+        daemon.entry.owner = Owner::OtherUser;
 
         let snapshot = scan(
             &mut Scanner::default(),
@@ -474,6 +532,7 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].classification, Classification::System);
+        assert_eq!(snapshot.services[0].protected, Some(Protection::OtherUser));
     }
 
     #[test]
@@ -497,7 +556,7 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].classification, Classification::Dev);
-        assert!(snapshot.services[0].protected);
+        assert_eq!(snapshot.services[0].protected, Some(Protection::Database));
     }
 
     #[test]
@@ -521,7 +580,7 @@ mod tests {
             Instant::now(),
         );
 
-        assert!(snapshot.services[0].protected);
+        assert_eq!(snapshot.services[0].protected, Some(Protection::System));
     }
 
     #[test]
@@ -575,7 +634,49 @@ mod tests {
                 .iter()
                 .any(|member| member.name == "postgres")
         );
-        assert!(snapshot.services[0].protected);
+        assert_eq!(snapshot.services[0].protected, Some(Protection::Database));
+    }
+
+    #[test]
+    fn protects_a_service_whose_socket_is_held_outside_it_too() {
+        let home = tempfile::tempdir().unwrap();
+        let mut launchd = proc(
+            1,
+            0,
+            "launchd",
+            "/sbin/launchd",
+            &["/sbin/launchd"],
+            Path::new("/"),
+        );
+        launchd.entry.owner = Owner::System;
+        let server = proc(
+            20,
+            1,
+            "node",
+            "/usr/local/bin/node",
+            &["node", "/srv/a.js"],
+            home.path(),
+        );
+
+        let snapshot = scan_sockets(
+            &mut Scanner::default(),
+            &[launchd, server],
+            &[(1, 8000, Some(77)), (20, 8000, Some(77))],
+            home.path(),
+            Instant::now(),
+        );
+
+        let service = &snapshot.services[0];
+        assert_eq!(service.classification, Classification::Dev);
+        assert_eq!(service.protected, Some(Protection::SharedSocket));
+        let holders: Vec<(u32, &str)> = service
+            .holders
+            .iter()
+            .map(|holder| (holder.pid, holder.name.as_str()))
+            .collect();
+        assert_eq!(holders, [(1, "launchd"), (20, "node")]);
+        let members: Vec<u32> = service.processes.iter().map(|member| member.pid).collect();
+        assert_eq!(members, [20]);
     }
 
     #[test]

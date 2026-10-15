@@ -62,7 +62,7 @@ mod tests {
             services: vec![Service {
                 id: "1-1".into(),
                 classification: Classification::Dev,
-                protected: false,
+                protected: None,
                 ports: vec![Port {
                     port,
                     address: IpAddr::from([127, 0, 0, 1]),
@@ -73,6 +73,7 @@ mod tests {
                 memory_bytes: None,
                 cpu_percent: None,
                 processes: Vec::new(),
+                holders: Vec::new(),
             }],
         }
     }
