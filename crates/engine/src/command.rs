@@ -63,7 +63,7 @@ pub(crate) fn display(args: &[String]) -> String {
 }
 
 /// `…/node_modules/.bin/vite` → `vite`, `…/node_modules/@storybook/cli/…` → `@storybook/cli`.
-fn package_name(path: &str) -> Option<String> {
+pub(crate) fn package_name(path: &str) -> Option<String> {
     let path = path.replace('\\', "/");
     let (_, inside) = path.rsplit_once("node_modules/")?;
     let mut segments = inside.split('/').filter(|segment| !segment.is_empty());

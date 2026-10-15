@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 use harbormaster_platform::{Listener, Owner, Pid, ProcessEntry, ProcessKey};
 
-use crate::role::{Role, normalize, role, runs_a_script};
+use crate::role::{Role, is_dev_supervisor, normalize, role, runs_a_script};
 use crate::tree::ProcessTree;
 
 const SYSTEM_PROCESSES: &[&str] = &[
@@ -83,7 +83,7 @@ pub(crate) fn group(
             continue;
         };
         let root = climb(top, tree, args_of, &is_foreign);
-        let members = members(root, tree, &is_foreign);
+        let members = members(root, tree, args_of, &is_foreign);
         let service = by_root.entry(root.key.pid).or_insert_with(|| Grouped {
             root: root.key,
             members,
@@ -147,10 +147,24 @@ fn is_climbable(entry: &ProcessEntry, tree: &ProcessTree<'_>, args_of: ArgsOf<'_
     if is_system(entry) {
         return false;
     }
-    match role(&entry.name, args_of(entry).as_deref()) {
-        Role::Runner | Role::Runtime => true,
-        Role::Shell => is_runner_shell(entry, tree, args_of, 0),
+    let args = args_of(entry);
+    match role(&entry.name, args.as_deref()) {
+        Role::Runner => true,
+        Role::Runtime => is_dev_supervisor(&entry.name, args.as_deref()),
+        Role::Shell => is_runner_shell(entry, tree, args_of),
         Role::Terminal | Role::Agent | Role::Other => false,
+    }
+}
+
+/// Never part of a service: the user's shells, terminals, coding agents and the system.
+fn is_session_boundary(entry: &ProcessEntry, tree: &ProcessTree<'_>, args_of: ArgsOf<'_>) -> bool {
+    if is_system(entry) {
+        return true;
+    }
+    match role(&entry.name, args_of(entry).as_deref()) {
+        Role::Terminal | Role::Agent => true,
+        Role::Shell => !is_runner_shell(entry, tree, args_of),
+        Role::Runner | Role::Runtime | Role::Other => false,
     }
 }
 
@@ -160,19 +174,12 @@ pub(crate) fn is_runner_shell(
     entry: &ProcessEntry,
     tree: &ProcessTree<'_>,
     args_of: ArgsOf<'_>,
-    depth: u8,
 ) -> bool {
-    if depth > 4 || !runs_a_script(args_of(entry).as_deref()) {
+    if !runs_a_script(args_of(entry).as_deref()) {
         return false;
     }
-    let Some(parent) = tree.parent(entry.key.pid) else {
-        return false;
-    };
-    match role(&parent.name, args_of(parent).as_deref()) {
-        Role::Runner => true,
-        Role::Shell => is_runner_shell(parent, tree, args_of, depth + 1),
-        _ => false,
-    }
+    tree.parent(entry.key.pid)
+        .is_some_and(|parent| role(&parent.name, args_of(parent).as_deref()) == Role::Runner)
 }
 
 pub(crate) fn is_system(entry: &ProcessEntry) -> bool {
@@ -185,6 +192,7 @@ pub(crate) fn is_system(entry: &ProcessEntry) -> bool {
 fn members(
     root: &ProcessEntry,
     tree: &ProcessTree<'_>,
+    args_of: ArgsOf<'_>,
     is_foreign: &dyn Fn(Pid) -> bool,
 ) -> Vec<ProcessKey> {
     let mut found = Vec::new();
@@ -196,6 +204,9 @@ fn members(
         }
         found.push(entry.key);
         for child in tree.children(entry.key.pid) {
+            if is_session_boundary(child, tree, args_of) {
+                continue;
+            }
             if !tree
                 .subtree(child.key.pid)
                 .iter()
@@ -409,6 +420,67 @@ mod tests {
 
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].endpoints.len(), 2);
+    }
+
+    #[test]
+    fn never_climbs_into_a_plain_runtime_parent() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", "/srv/supervisor.js"])
+            .process(30, 20, "node", &["node", "/srv/server.js"])
+            .listening(30, 4000);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(30));
+        assert_eq!(pids(&services[0].members), [30]);
+    }
+
+    #[test]
+    fn climbs_through_a_dev_server_that_supervises_its_worker() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", NPM, "run", "dev"])
+            .process(30, 20, "sh", &["sh", "-c", "next dev"])
+            .process(
+                40,
+                30,
+                "node",
+                &["node", "/app/node_modules/next/dist/bin/next", "dev"],
+            )
+            .process(50, 40, "next-server", &["next-server (v16.0.1)"])
+            .listening(50, 3000);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(20));
+        assert_eq!(pids(&services[0].members), [20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn stops_at_a_script_shell_that_a_shell_started() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", NPM, "run", "dev"])
+            .process(30, 20, "sh", &["sh", "-c", "bash ./dev.sh"])
+            .process(40, 30, "bash", &["bash", "./dev.sh"])
+            .process(50, 40, "node", &["node", "/srv/server.js"])
+            .listening(50, 4000);
+
+        assert_eq!(machine.services()[0].root.pid, Pid(50));
+    }
+
+    #[test]
+    fn leaves_interactive_shells_and_agents_below_a_server_out_of_it() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", "/srv/server.js"])
+            .process(30, 20, "zsh", &["-zsh"])
+            .process(40, 20, "claude", &["claude"])
+            .process(50, 20, "node", &["node", "/srv/worker.js"])
+            .listening(20, 4000);
+
+        assert_eq!(pids(&machine.services()[0].members), [20, 50]);
     }
 
     #[test]

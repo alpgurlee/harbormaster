@@ -130,27 +130,75 @@ fn is_package_manager_script(script: &str) -> bool {
         .any(|manager| script.contains(&format!("/node_modules/{manager}/")))
 }
 
-/// A shell that runs a command or a script and exits, as package managers do
-/// with `sh -c "next dev"` or `cmd /d /s /c "next dev"`. Interactive shells
-/// carry at most option flags.
+/// `sh -c "next dev"` or `cmd /d /s /c "next dev"`: a shell given one command
+/// string to run, as package managers do. A shell running a script file or
+/// sitting at a prompt is somebody's session.
 pub(crate) fn runs_a_script(args: Option<&[String]>) -> bool {
+    let Some((program, rest)) = args.and_then(|args| args.split_first()) else {
+        return false;
+    };
+    let lowered = |arg: &String| arg.to_lowercase();
+    match normalize(program.trim_start_matches('-')).as_str() {
+        "cmd" => {
+            for arg in rest.iter().map(lowered) {
+                match arg.as_str() {
+                    "/k" => return false,
+                    "/c" => return true,
+                    _ => {}
+                }
+            }
+            false
+        }
+        "powershell" | "pwsh" => rest.iter().map(lowered).any(|arg| {
+            matches!(
+                arg.as_str(),
+                "-command" | "-c" | "-file" | "-encodedcommand"
+            )
+        }),
+        _ => {
+            for arg in rest {
+                if arg.starts_with("--") {
+                    continue;
+                }
+                match arg.strip_prefix('-') {
+                    Some(flags) if flags.contains('c') => return true,
+                    Some(_) => continue,
+                    // A positional before -c is a script file.
+                    None => return false,
+                }
+            }
+            false
+        }
+    }
+}
+
+/// Dev servers that run their real server in a child process and restart it,
+/// so stopping only the child would bring it straight back.
+const DEV_SUPERVISORS: &[&str] = &[
+    "next",
+    "nuxt",
+    "astro",
+    "nodemon",
+    "ts-node-dev",
+    "react-scripts",
+    "storybook",
+    "@storybook/cli",
+];
+
+pub(crate) fn is_dev_supervisor(name: &str, args: Option<&[String]>) -> bool {
+    if role(name, args) != Role::Runtime {
+        return false;
+    }
     let Some(args) = args else {
         return false;
     };
-    args.iter().skip(1).any(|arg| {
-        let lower = arg.to_lowercase();
-        match lower.as_str() {
-            "-c" | "/c" | "-command" | "-file" => true,
-            "/k" | "-noexit" => false,
-            _ if lower.starts_with("--") => false,
-            // Bundled POSIX flags such as -lc or -ilc.
-            _ if lower.starts_with('-') => lower.len() <= 4 && lower.contains('c'),
-            // cmd switches such as /d, /s, /q.
-            _ if lower.starts_with('/') && lower.len() <= 3 => false,
-            // A command string or a script path.
-            _ => true,
-        }
-    })
+    let watches = args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--watch" | "--reload" | "watch" | "runserver"));
+    let tool = args
+        .get(1)
+        .and_then(|script| crate::command::package_name(script));
+    watches || tool.is_some_and(|tool| DEV_SUPERVISORS.contains(&tool.as_str()))
 }
 
 /// Lowercase, without `.exe`, and with Python's version suffix folded away.
@@ -243,6 +291,19 @@ mod tests {
             "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js",
         ]);
         assert_eq!(role("node", Some(&claude_via_node)), Role::Agent);
+    }
+
+    #[test]
+    fn only_counts_explicit_command_strings_as_scripts() {
+        assert!(!runs_a_script(Some(&args(&["cmd", "/k", "echo hello"]))));
+        assert!(!runs_a_script(Some(&args(&["sh", "script.sh"]))));
+        assert!(runs_a_script(Some(&args(&["bash", "-lc", "npm run dev"]))));
+        assert!(runs_a_script(Some(&args(&[
+            "pwsh.exe",
+            "-NoLogo",
+            "-Command",
+            "npm run dev"
+        ]))));
     }
 
     #[test]
