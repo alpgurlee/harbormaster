@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 use harbormaster_platform::{Listener, Owner, Pid, ProcessEntry, ProcessKey};
 
-use crate::role::{Role, is_dev_supervisor, normalize, role, runs_a_script};
+use crate::role::{Role, is_dev_supervisor, is_runner_by_title, normalize, role, runs_a_script};
 use crate::tree::ProcessTree;
 
 const SYSTEM_PROCESSES: &[&str] = &[
@@ -163,6 +163,9 @@ fn climb<'a>(
             break;
         }
         current = parent;
+        if is_runner_by_title(&parent.name, args_of(parent).as_deref()) {
+            break;
+        }
     }
     current
 }
@@ -549,6 +552,22 @@ mod tests {
 
         assert_eq!(services[0].root.pid, Pid(20));
         assert_eq!(pids(&services[0].members), [20, 30]);
+    }
+
+    #[test]
+    fn goes_no_higher_than_a_runner_known_only_by_its_title() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", NPM, "run", "dev"])
+            .process(30, 20, "node", &["npm run dev"])
+            .process(31, 20, "node", &["node", "/srv/worker.js"])
+            .process(40, 30, "node", &["node", "/srv/server.js"])
+            .listening(40, 4000);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(30));
+        assert_eq!(pids(&services[0].members), [30, 40]);
     }
 
     #[test]

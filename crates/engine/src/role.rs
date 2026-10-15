@@ -107,12 +107,8 @@ pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
     }
     let first_arg = args.and_then(|args| args.get(1)).map(String::as_str);
     match name {
-        "node"
-            if is_titled_package_manager(args)
-                || first_arg.is_some_and(is_package_manager_script) =>
-        {
-            Role::Runner
-        }
+        "node" if first_arg.is_some_and(is_package_manager_script) => Role::Runner,
+        "node" if is_titled_package_manager(args) => Role::Runner,
         "bun" | "deno" if matches!(first_arg, Some("run" | "task" | "x")) => Role::Runner,
         "dotnet"
             if args.is_some_and(|args| {
@@ -129,11 +125,20 @@ pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
 }
 
 /// npm sets its process title ("npm run dev"), which replaces argv on macOS.
-/// The title is easy to fake, but a faker can only group its own children.
 fn is_titled_package_manager(args: Option<&[String]>) -> bool {
     args.and_then(|args| args.first())
         .and_then(|first| first.split_whitespace().next())
         .is_some_and(|title| PACKAGE_MANAGERS.contains(&normalize(title).as_str()))
+}
+
+/// A runner only its process title vouches for. Titles are easy to fake, so
+/// a climb may stop at such a runner but never pass it.
+pub(crate) fn is_runner_by_title(name: &str, args: Option<&[String]>) -> bool {
+    normalize(name) == "node"
+        && is_titled_package_manager(args)
+        && !args
+            .and_then(|args| args.get(1))
+            .is_some_and(|script| is_package_manager_script(script))
 }
 
 fn is_package_manager_script(script: &str) -> bool {
