@@ -181,8 +181,10 @@ const SHELL_OPERATORS: &[char] = &[';', '|', '&', '(', ')', '<', '>'];
 /// `API_TOKEN` in `true;API_TOKEN`.
 fn identifier_at_end(text: &str) -> &str {
     let start = text
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map_or(0, |at| at + 1);
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map_or(0, |(at, c)| at + c.len_utf8());
     &text[start..]
 }
 
@@ -468,6 +470,12 @@ mod tests {
             show(&["sh", "-c", "curl https://h/a?x=1;API_TOKEN=secret run"]),
             "sh -c curl https://h/a?x=1;API_TOKEN=***"
         );
+    }
+
+    #[test]
+    fn survives_names_that_are_not_ascii() {
+        assert_eq!(show(&["x", "é=1", "--ünïcode=2"]), "x é=1 --ünïcode=2");
+        assert_eq!(show(&["x", "ключ_token=1", "y"]), "x ключ_token=*** y");
     }
 
     #[test]
