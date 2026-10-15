@@ -106,15 +106,11 @@ pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
         return Role::Runner;
     }
     let first_arg = args.and_then(|args| args.get(1)).map(String::as_str);
-    // A process title (npm sets "npm run dev") replaces argv on macOS.
-    let title = args
-        .and_then(|args| args.first())
-        .and_then(|first| first.split_whitespace().next())
-        .map(normalize);
-    let titled_as_package_manager =
-        title.is_some_and(|title| PACKAGE_MANAGERS.contains(&title.as_str()));
     match name {
-        "node" if titled_as_package_manager || first_arg.is_some_and(is_package_manager_script) => {
+        "node"
+            if is_titled_package_manager(args)
+                || first_arg.is_some_and(is_package_manager_script) =>
+        {
             Role::Runner
         }
         "bun" | "deno" if matches!(first_arg, Some("run" | "task" | "x")) => Role::Runner,
@@ -130,6 +126,14 @@ pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
         _ if RUNTIMES.contains(&name) => Role::Runtime,
         _ => Role::Other,
     }
+}
+
+/// npm sets its process title ("npm run dev"), which replaces argv on macOS.
+/// The title is easy to fake, but a faker can only group its own children.
+fn is_titled_package_manager(args: Option<&[String]>) -> bool {
+    args.and_then(|args| args.first())
+        .and_then(|first| first.split_whitespace().next())
+        .is_some_and(|title| PACKAGE_MANAGERS.contains(&normalize(title).as_str()))
 }
 
 fn is_package_manager_script(script: &str) -> bool {

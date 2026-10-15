@@ -513,6 +513,41 @@ mod tests {
     }
 
     #[test]
+    fn climbs_into_a_titled_package_manager_through_its_script_shell() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["npm run dev", "", ""])
+            .process(30, 20, "sh", &["sh", "-c", "vite"])
+            .process(40, 30, "node", &["node", "/app/node_modules/.bin/vite"])
+            .listening(40, 5173);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(20));
+        assert_eq!(pids(&services[0].members), [20, 30, 40]);
+    }
+
+    #[test]
+    fn climbs_into_a_titled_package_manager_whose_shell_became_the_server() {
+        // `sh -c "vite --host"` execs vite in place, so npm is its parent.
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["npm run dev   ", "", ""])
+            .process(
+                30,
+                20,
+                "node",
+                &["node", "/app/node_modules/.bin/vite", "--host"],
+            )
+            .listening(30, 5173);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(20));
+        assert_eq!(pids(&services[0].members), [20, 30]);
+    }
+
+    #[test]
     fn never_climbs_into_a_plain_runtime_parent() {
         let machine = Machine::new()
             .process(10, 1, "zsh", &["-zsh"])
