@@ -15,39 +15,33 @@ const CREDENTIAL_PARTS: &[&str] = &[
 
 /// What someone would have typed to start the process, with secrets masked.
 pub(crate) fn display(args: &[String]) -> String {
-    let Some((program, rest)) = args.split_first() else {
+    // A process title leaves blank and empty arguments behind it.
+    let args: Vec<&str> = args
+        .iter()
+        .map(|arg| arg.trim())
+        .filter(|arg| !arg.is_empty())
+        .collect();
+    let Some((&program, rest)) = args.split_first() else {
         return String::new();
     };
     let runtime = normalize(program);
     let mut words: Vec<String> = Vec::with_capacity(args.len());
-    match runtime.as_str() {
+    let rest = match runtime.as_str() {
         "node" | "bun" | "deno" if rest.first().is_some_and(|arg| is_path(arg)) => {
-            match package_name(&rest[0]) {
+            match package_name(rest[0]) {
                 Some(package) => words.push(package),
-                None => words.extend([runtime.clone(), file_name(&rest[0])]),
+                None => words.extend([runtime.clone(), file_name(rest[0])]),
             }
-            words.extend(rest[1..].iter().cloned());
+            &rest[1..]
         }
-        "python" if rest.len() >= 2 && rest[0] == "-m" => words.extend(rest[1..].iter().cloned()),
+        "python" if rest.len() >= 2 && rest[0] == "-m" => &rest[1..],
         _ => {
             words.push(file_name(program));
-            words.extend(rest.iter().cloned());
+            rest
         }
-    }
-    // Split words a process title padded or a shell received as one string,
-    // so secrets inside `sh -c "server --token=…"` are masked too.
-    let tokens: Vec<String> = words
-        .iter()
-        .flat_map(|word| word.split_whitespace())
-        .map(|token| {
-            if is_path(token) {
-                file_name(token)
-            } else {
-                token.to_string()
-            }
-        })
-        .collect();
-    mask(tokens).join(" ")
+    };
+    words.extend(rest.iter().map(|arg| arg.to_string()));
+    mask(&words).join(" ")
 }
 
 /// `…/node_modules/.bin/vite` → `vite`, `…/node_modules/@storybook/cli/…` → `@storybook/cli`.
@@ -75,29 +69,79 @@ fn file_name(path: &str) -> String {
         .to_string()
 }
 
-fn mask(words: Vec<String>) -> Vec<String> {
+const HIDDEN: &str = "***";
+
+fn mask(words: &[String]) -> Vec<String> {
     let mut masked = Vec::with_capacity(words.len());
     let mut hide_next = false;
     for word in words {
         if hide_next {
-            masked.push("***".to_string());
+            masked.push(HIDDEN.to_string());
             hide_next = false;
-        } else if let Some((flag, _)) = word.split_once('=')
-            && is_secret_flag(flag)
-        {
-            masked.push(format!("{flag}=***"));
-        } else if let Some((name, _)) = word.split_once('=')
-            && is_secret_name(name)
-        {
-            masked.push(format!("{name}=***"));
-        } else if is_secret_flag(&word) || word.eq_ignore_ascii_case("bearer") {
-            masked.push(word);
-            hide_next = true;
         } else {
-            masked.push(mask_url(&word));
+            let (text, value_follows) = mask_argument(word);
+            masked.push(text);
+            hide_next = value_follows;
         }
     }
     masked
+}
+
+/// An argument with spaces may be a shell's command string or a process
+/// title, where quoting can carry a value past the next space, so everything
+/// after a secret in it is hidden. Also says whether the argument ended on a
+/// flag whose value is the next argument.
+fn mask_argument(argument: &str) -> (String, bool) {
+    let mut words = Vec::new();
+    let mut tokens = argument.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        let token = if is_path(token) {
+            file_name(token)
+        } else {
+            token.to_string()
+        };
+        match secret(&token) {
+            Some(Secret::Assigned(name)) => {
+                words.push(format!("{name}={HIDDEN}"));
+                break;
+            }
+            Some(Secret::Follows(flag)) => {
+                words.push(flag);
+                if tokens.peek().is_none() {
+                    return (words.join(" "), true);
+                }
+                words.push(HIDDEN.to_string());
+                break;
+            }
+            None => words.push(mask_url(&token)),
+        }
+    }
+    (words.join(" "), false)
+}
+
+enum Secret {
+    /// `--token=abc`, `API_KEY=abc`: the name in front of the value.
+    Assigned(String),
+    /// `--token`, `Bearer`: the value comes next.
+    Follows(String),
+}
+
+fn secret(token: &str) -> Option<Secret> {
+    // Quotes and escapes don't change what a shell hands on: `"--to\ken=x"` is `--token=x`.
+    let token: String = token
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
+        .collect();
+    match token.split_once('=') {
+        Some((name, _)) if is_secret_flag(name) || is_secret_name(name) => {
+            Some(Secret::Assigned(name.to_string()))
+        }
+        Some(_) => None,
+        None if is_secret_flag(&token) || token.eq_ignore_ascii_case("bearer") => {
+            Some(Secret::Follows(token))
+        }
+        None => None,
+    }
 }
 
 fn is_secret_flag(word: &str) -> bool {
@@ -109,8 +153,9 @@ fn mentions_a_credential(name: &str) -> bool {
     CREDENTIAL_PARTS.iter().any(|part| name.contains(part))
 }
 
-/// `GITHUB_TOKEN`, `X_API_KEY`, `DB_PASSWORD`…
+/// `GITHUB_TOKEN`, `X_API_KEY`, PowerShell's `$env:DB_PASSWORD`…
 fn is_secret_name(name: &str) -> bool {
+    let name = name.rsplit(':').next().unwrap_or(name);
     !name.is_empty()
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && mentions_a_credential(name)
@@ -287,6 +332,62 @@ mod tests {
         assert_eq!(
             show(&["open", "http://localhost:3000/cb?token=abc&mode=dev"]),
             "open http://localhost:3000/cb?token=***&mode=dev"
+        );
+    }
+
+    #[test]
+    fn hides_a_whole_argument_after_a_secret_flag() {
+        assert_eq!(
+            show(&["server", "--password", "alpha beta", "--port", "80"]),
+            "server --password *** --port 80"
+        );
+    }
+
+    #[test]
+    fn hides_the_rest_of_a_shell_string_after_a_secret() {
+        assert_eq!(
+            show(&["sh", "-c", "server --password 'alpha beta' --port 80"]),
+            "sh -c server --password ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "server --token=\"a b\" --port 80"]),
+            "sh -c server --token=***"
+        );
+    }
+
+    #[test]
+    fn sees_through_quotes_and_escapes_around_a_secret_flag() {
+        assert_eq!(
+            show(&["sh", "-c", "server \"--token=abc\""]),
+            "sh -c server --token=***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "server --pass\"word\" hunter2"]),
+            "sh -c server --password ***"
+        );
+    }
+
+    #[test]
+    fn masks_powershell_environment_assignments() {
+        assert_eq!(
+            show(&["pwsh", "-Command", "$env:API_TOKEN='x'; npm run dev"]),
+            "pwsh -Command $env:API_TOKEN=***"
+        );
+    }
+
+    #[test]
+    fn masks_secrets_in_a_process_title() {
+        assert_eq!(
+            show(&["server --password alpha beta", "", ""]),
+            "server --password ***"
+        );
+    }
+
+    #[test]
+    fn hides_the_next_argument_when_a_shell_string_ends_with_a_secret_flag() {
+        assert_eq!(
+            show(&["sh", "-c", "server --password", "hunter2"]),
+            "sh -c server --password ***"
         );
     }
 
