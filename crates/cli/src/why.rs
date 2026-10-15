@@ -25,22 +25,39 @@ pub(crate) fn lines(port: u16, report: &PortReport<'_>) -> Vec<String> {
 }
 
 fn holder(port: u16, service: &Service) -> Vec<String> {
-    let Some(process) = service.processes.first() else {
+    let Some(root) = service.processes.first() else {
         return vec![format!(":{port} is in use.")];
     };
     let name = service
         .project
         .as_ref()
-        .map_or(&process.name, |project| &project.name);
-    let mut lines = vec![format!(
-        ":{port} is used by {} (pid {}).",
-        printable(name),
-        process.pid
-    )];
+        .map_or(&root.name, |project| &project.name);
+    let root_holds_it = service.holders.iter().all(|holder| holder.pid == root.pid);
+    let mut lines = Vec::new();
+    if root_holds_it {
+        lines.push(format!(
+            ":{port} is used by {} (pid {}).",
+            printable(name),
+            root.pid
+        ));
+    } else {
+        lines.push(format!(":{port} is used by {}.", printable(name)));
+        let holders: Vec<String> = service
+            .holders
+            .iter()
+            .map(|holder| format!("{} (pid {})", printable(&holder.name), holder.pid))
+            .collect();
+        lines.push(format!("  held by: {}", holders.join(", ")));
+    }
     if let Some(command) = &service.command
         && command != name
     {
-        lines.push(format!("  started with: {}", printable(command)));
+        let command = printable(command);
+        lines.push(if root_holds_it {
+            format!("  started with: {command}")
+        } else {
+            format!("  started with: {command} (pid {})", root.pid)
+        });
     }
     let airplay =
         matches!(port, 5000 | 7000) && service.processes.iter().any(|p| p.name == "ControlCenter");
@@ -57,7 +74,7 @@ fn holder(port: u16, service: &Service) -> Vec<String> {
 mod tests {
     use std::net::IpAddr;
 
-    use harbormaster_engine::{Classification, Member, Port, PortReport, Service};
+    use harbormaster_engine::{Classification, Holder, Member, Port, PortReport, Project, Service};
 
     use super::lines;
 
@@ -82,7 +99,20 @@ mod tests {
                 memory_bytes: None,
                 cpu_percent: None,
             }],
-            holders: Vec::new(),
+            holders: vec![Holder {
+                pid: 772,
+                name: name.into(),
+            }],
+        }
+    }
+
+    fn member(pid: u32, command: &str) -> Member {
+        Member {
+            pid,
+            name: "node".into(),
+            command: Some(command.into()),
+            memory_bytes: None,
+            cpu_percent: None,
         }
     }
 
@@ -98,6 +128,33 @@ mod tests {
         let lines = lines(80, &PortReport::FreeOnEveryInterface);
 
         assert!(lines[0].contains("0.0.0.0"), "{lines:?}");
+    }
+
+    #[test]
+    fn names_the_process_holding_the_socket_and_the_one_that_started_it() {
+        let mut server = service("node", "npm run dev", 5173);
+        server.project = Some(Project {
+            name: "inkwell-web".into(),
+            root: "/dev/inkwell/web".into(),
+            repo_root: None,
+            framework: None,
+            branch: None,
+            worktree: false,
+        });
+        server.processes = vec![member(94786, "npm run dev"), member(94826, "vite --host")];
+        server.holders = vec![Holder {
+            pid: 94826,
+            name: "node".into(),
+        }];
+
+        assert_eq!(
+            lines(5173, &PortReport::InUse(vec![&server])),
+            [
+                ":5173 is used by inkwell-web.",
+                "  held by: node (pid 94826)",
+                "  started with: npm run dev (pid 94786)",
+            ]
+        );
     }
 
     #[test]
