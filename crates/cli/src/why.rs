@@ -6,6 +6,9 @@ use crate::format::printable;
 pub(crate) fn lines(port: u16, report: &PortReport<'_>) -> Vec<String> {
     match report {
         PortReport::Free => vec![format!(":{port} is free.")],
+        PortReport::FreeOnEveryInterface => vec![format!(
+            ":{port} is free for a server that listens on every interface (0.0.0.0). On 127.0.0.1 only root may use ports below 1024."
+        )],
         PortReport::InUseUnseen => vec![format!(
             ":{port} is in use or reserved by the system, but no process Harbormaster can see listens on it. It may belong to another user or to the system."
         )],
@@ -88,6 +91,13 @@ mod tests {
         let lines = lines(5000, &PortReport::InUseUnseen);
 
         assert!(lines[0].contains("or reserved by the system"), "{lines:?}");
+    }
+
+    #[test]
+    fn explains_a_privileged_port_that_only_binds_on_every_interface() {
+        let lines = lines(80, &PortReport::FreeOnEveryInterface);
+
+        assert!(lines[0].contains("0.0.0.0"), "{lines:?}");
     }
 
     #[test]

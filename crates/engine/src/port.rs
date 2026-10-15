@@ -9,6 +9,9 @@ use crate::{Service, Snapshot};
 pub enum PortReport<'a> {
     InUse(Vec<&'a Service>),
     Free,
+    /// Refused on loopback, free on every interface: macOS keeps ports below
+    /// 1024 on 127.0.0.1 for root but lets anyone bind them on 0.0.0.0.
+    FreeOnEveryInterface,
     /// Binding fails as if it were taken, yet no process we can see listens:
     /// another user's or the system's process, or a port the system reserves.
     InUseUnseen,
@@ -42,7 +45,18 @@ pub fn explain_port<'a>(
         return PortReport::InUseUnseen;
     }
     if any(BindProbe::Denied) {
-        return PortReport::Denied;
+        let everywhere = [
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        ]
+        .map(|address| probe(address, port));
+        return if everywhere.contains(&BindProbe::InUse) {
+            PortReport::InUseUnseen
+        } else if everywhere.contains(&BindProbe::Free) {
+            PortReport::FreeOnEveryInterface
+        } else {
+            PortReport::Denied
+        };
     }
     // A missing address, such as no IPv6 loopback, says nothing about the port.
     let failures: Vec<String> = probes
@@ -131,6 +145,25 @@ mod tests {
         assert_eq!(
             explain_port(80, &snapshot, &|_, _| BindProbe::Denied),
             PortReport::Denied
+        );
+    }
+
+    #[test]
+    fn says_when_a_port_is_free_only_for_servers_on_every_interface() {
+        let snapshot = Snapshot {
+            services: Vec::new(),
+        };
+        let probe = |address: IpAddr, _| {
+            if address.is_loopback() {
+                BindProbe::Denied
+            } else {
+                BindProbe::Free
+            }
+        };
+
+        assert_eq!(
+            explain_port(80, &snapshot, &probe),
+            PortReport::FreeOnEveryInterface
         );
     }
 
