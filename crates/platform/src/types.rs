@@ -67,4 +67,8 @@ pub struct Listener {
     pub owner: ProcessKey,
     pub address: IpAddr,
     pub port: u16,
+    /// Identifies the socket itself within one scan, so processes that share
+    /// it (a reloader and its worker) can be told from unrelated processes that
+    /// bound the same port with SO_REUSEPORT. `None` where the OS doesn't say.
+    pub socket: Option<u64>,
 }

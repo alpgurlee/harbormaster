@@ -48,13 +48,15 @@ pub(crate) fn group(
         })
         .collect();
 
-    // Processes holding the same socket serve together, e.g. a reloader and its worker.
     let mut sets = DisjointSets::default();
-    let mut holder_of_endpoint: HashMap<(IpAddr, u16), Pid> = HashMap::new();
+    // Only processes holding the very same socket serve together, e.g. a
+    // reloader and its worker. Unrelated processes that bound one port with
+    // SO_REUSEPORT stay apart.
+    let mut holder_of_socket: HashMap<u64, Pid> = HashMap::new();
     for listener in &listeners {
         sets.add(listener.owner.pid);
-        if let Some(holder) =
-            holder_of_endpoint.insert((listener.address, listener.port), listener.owner.pid)
+        if let Some(socket) = listener.socket
+            && let Some(holder) = holder_of_socket.insert(socket, listener.owner.pid)
         {
             sets.union(holder, listener.owner.pid);
         }
@@ -283,7 +285,13 @@ mod tests {
             self
         }
 
-        fn listening(mut self, pid: u32, port: u16) -> Self {
+        fn listening(self, pid: u32, port: u16) -> Self {
+            let socket = u64::from(pid) * 100_000 + u64::from(port);
+            self.sharing(pid, port, socket)
+        }
+
+        /// A socket that several processes hold, e.g. inherited across fork.
+        fn sharing(mut self, pid: u32, port: u16, socket: u64) -> Self {
             let owner = self
                 .processes
                 .iter()
@@ -294,6 +302,7 @@ mod tests {
                 owner,
                 address: IpAddr::from([127, 0, 0, 1]),
                 port,
+                socket: Some(socket),
             });
             self
         }
@@ -397,8 +406,8 @@ mod tests {
                     "from multiprocessing.spawn import spawn_main",
                 ],
             )
-            .listening(2, 8000)
-            .listening(3, 8000);
+            .sharing(2, 8000, 77)
+            .sharing(3, 8000, 77);
 
         let services = machine.services();
 
@@ -406,6 +415,18 @@ mod tests {
         assert_eq!(services[0].root.pid, Pid(2));
         assert_eq!(pids(&services[0].members), [2, 3]);
         assert_eq!(services[0].endpoints.len(), 1);
+    }
+
+    #[test]
+    fn keeps_independent_sockets_on_one_port_apart() {
+        let machine = Machine::new()
+            .process(1, 0, "zsh", &["-zsh"])
+            .process(20, 1, "node", &["node", "/srv/a.js"])
+            .process(30, 1, "node", &["node", "/srv/b.js"])
+            .listening(20, 8000)
+            .listening(30, 8000);
+
+        assert_eq!(machine.services().len(), 2);
     }
 
     #[test]

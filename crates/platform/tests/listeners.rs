@@ -56,3 +56,16 @@ fn identifies_the_owner_by_the_same_key_as_the_process_table() {
 
     assert_eq!(owner, entry.key);
 }
+
+#[test]
+fn tells_separate_sockets_apart() {
+    let first = TcpListener::bind("127.0.0.1:0").unwrap();
+    let second = TcpListener::bind("127.0.0.1:0").unwrap();
+    let a = find_own(first.local_addr().unwrap().port()).unwrap().socket;
+    let b = find_own(second.local_addr().unwrap().port())
+        .unwrap()
+        .socket;
+
+    assert!(a.is_some() && b.is_some());
+    assert_ne!(a, b);
+}

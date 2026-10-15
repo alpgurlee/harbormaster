@@ -28,7 +28,7 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
         let Some(descriptors) = file_descriptors(pid) else {
             continue;
         };
-        let sockets: Vec<(IpAddr, u16)> = descriptors
+        let sockets: Vec<(IpAddr, u16, u64)> = descriptors
             .iter()
             .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_SOCKET as u32)
             .filter_map(|descriptor| tcp_listen_address(pid, descriptor.proc_fd))
@@ -41,12 +41,13 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
         if !process::bsd_info(pid).is_ok_and(|after| process::key_of(pid, &after) == owner) {
             continue;
         }
-        for (address, port) in sockets {
+        for (address, port, socket) in sockets {
             if seen.insert((owner, address, port)) {
                 listeners.push(Listener {
                     owner,
                     address,
                     port,
+                    socket: Some(socket),
                 });
             }
         }
@@ -106,7 +107,7 @@ fn file_descriptors(pid: libc::pid_t) -> Option<Vec<libc::proc_fdinfo>> {
     Some(descriptors)
 }
 
-fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16)> {
+fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16, u64)> {
     let info: SocketFDInfo = pidfdinfo(pid, fd).ok()?;
     if !matches!(SocketInfoKind::from(info.psi.soi_kind), SocketInfoKind::Tcp) {
         return None;
@@ -128,5 +129,11 @@ fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16)> {
         return None;
     };
     // The kernel keeps the port in network byte order in the low 16 bits.
-    Some((address, u16::from_be(inet.insi_lport as u16)))
+    // `soi_so` is the kernel's socket address: the same for every process
+    // holding this socket, different for each socket.
+    Some((
+        address,
+        u16::from_be(inet.insi_lport as u16),
+        info.psi.soi_so,
+    ))
 }

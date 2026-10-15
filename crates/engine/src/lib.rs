@@ -349,6 +349,7 @@ mod tests {
                     .key,
                 address: IpAddr::from([127, 0, 0, 1]),
                 port: *port,
+                socket: None,
             })
             .collect();
         let details = |key: ProcessKey| {
