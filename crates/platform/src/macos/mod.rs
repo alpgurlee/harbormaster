@@ -1,5 +1,6 @@
 mod procargs;
 mod process;
+mod signal;
 
 use std::collections::HashSet;
 use std::ffi::c_int;
@@ -13,6 +14,7 @@ use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 use crate::Listener;
 
 pub(crate) use process::{details, processes};
+pub(crate) use signal::{is_running, signal};
 
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;

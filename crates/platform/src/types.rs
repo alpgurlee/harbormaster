@@ -72,3 +72,20 @@ pub struct Listener {
     /// bound the same port with SO_REUSEPORT. `None` where the OS doesn't say.
     pub socket: Option<u64>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    /// Ask the process to exit (SIGTERM).
+    Terminate,
+    /// End it without asking (SIGKILL).
+    Kill,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalOutcome {
+    Sent,
+    /// It already exited, or its pid now belongs to another process.
+    Gone,
+    Denied,
+    Failed(String),
+}
