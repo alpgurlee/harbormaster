@@ -33,45 +33,79 @@ pub fn explain_port<'a>(
         return PortReport::InUse(holders);
     }
 
-    let probes: Vec<(IpAddr, BindProbe)> = [
-        IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(Ipv6Addr::LOCALHOST),
-    ]
-    .into_iter()
-    .map(|address| (address, probe(address, port)))
-    .collect();
-    let any = |wanted: BindProbe| probes.iter().any(|(_, outcome)| *outcome == wanted);
-    if any(BindProbe::InUse) {
+    let mut probes = probe_each(
+        &[
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ],
+        port,
+        probe,
+    );
+    let loopback_denied = probes
+        .iter()
+        .any(|(_, outcome)| *outcome == BindProbe::Denied);
+    if loopback_denied {
+        // macOS refuses ports below 1024 on loopback but not on every interface.
+        probes.extend(probe_each(
+            &[
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            ],
+            port,
+            probe,
+        ));
+    }
+    let any = |wanted: &BindProbe| probes.iter().any(|(_, outcome)| outcome == wanted);
+    if any(&BindProbe::InUse) {
         return PortReport::InUseUnseen;
     }
-    if any(BindProbe::Denied) {
-        let everywhere = [
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-        ]
-        .map(|address| probe(address, port));
-        return if everywhere.contains(&BindProbe::InUse) {
-            PortReport::InUseUnseen
-        } else if everywhere.contains(&BindProbe::Free) {
+    let verdict = if loopback_denied {
+        if probes[2..]
+            .iter()
+            .any(|(_, outcome)| *outcome == BindProbe::Free)
+        {
             PortReport::FreeOnEveryInterface
         } else {
             PortReport::Denied
-        };
-    }
-    // A missing address, such as no IPv6 loopback, says nothing about the port.
-    let failures: Vec<String> = probes
-        .iter()
-        .filter_map(|(address, outcome)| match outcome {
-            BindProbe::Failed(reason) => Some(format!("{address}: {reason}")),
-            _ => None,
-        })
-        .collect();
-    if !failures.is_empty() {
-        PortReport::Unknown(failures.join("; "))
-    } else if any(BindProbe::Free) {
+        }
+    } else if any(&BindProbe::Free) {
         PortReport::Free
     } else {
         PortReport::Unknown("this machine has no loopback address".into())
+    };
+    // A missing address, such as no IPv6 loopback, says nothing about the
+    // port; any other failure means we can't promise it is free.
+    let failures: Vec<String> = probes
+        .iter()
+        .filter_map(|(address, outcome)| match outcome {
+            BindProbe::Failed(reason) => Some(format!("{}: {reason}", bracketed(*address))),
+            _ => None,
+        })
+        .collect();
+    match verdict {
+        PortReport::Free | PortReport::FreeOnEveryInterface if !failures.is_empty() => {
+            PortReport::Unknown(failures.join("; "))
+        }
+        verdict => verdict,
+    }
+}
+
+fn probe_each(
+    addresses: &[IpAddr],
+    port: u16,
+    probe: &dyn Fn(IpAddr, u16) -> BindProbe,
+) -> Vec<(IpAddr, BindProbe)> {
+    addresses
+        .iter()
+        .map(|&address| (address, probe(address, port)))
+        .collect()
+}
+
+/// `[::1]`, so an IPv6 address reads clearly before a colon.
+fn bracketed(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => format!("[{v6}]"),
     }
 }
 
@@ -199,7 +233,24 @@ mod tests {
 
         assert_eq!(
             explain_port(3000, &snapshot, &probe),
-            PortReport::Unknown("::1: boom".into())
+            PortReport::Unknown("[::1]: boom".into())
+        );
+    }
+
+    #[test]
+    fn never_calls_a_port_free_while_a_probe_failed() {
+        let snapshot = Snapshot {
+            services: Vec::new(),
+        };
+        let probe = |address: IpAddr, _| match address {
+            IpAddr::V4(v4) if v4.is_loopback() => BindProbe::Denied,
+            IpAddr::V4(_) => BindProbe::Free,
+            IpAddr::V6(_) => BindProbe::Failed("boom".into()),
+        };
+
+        assert_eq!(
+            explain_port(80, &snapshot, &probe),
+            PortReport::Unknown("[::1]: boom; [::]: boom".into())
         );
     }
 }
