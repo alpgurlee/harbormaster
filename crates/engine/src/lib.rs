@@ -67,6 +67,8 @@ pub enum Protection {
     System,
     /// Runs as another user, root included.
     OtherUser,
+    /// The user's own shell, terminal or coding agent holds the socket.
+    Session,
     Database,
     /// A process outside the service holds its socket too, so stopping the
     /// service would not free the port.
@@ -251,6 +253,8 @@ impl Scanner {
             Some(Protection::System)
         } else if owner.owner != Owner::CurrentUser || someone_elses {
             Some(Protection::OtherUser)
+        } else if service::is_session_boundary(owner, tree, args_of) {
+            Some(Protection::Session)
         } else if database {
             Some(Protection::Database)
         } else if group
@@ -662,6 +666,40 @@ mod tests {
                 .any(|member| member.name == "postgres")
         );
         assert_eq!(snapshot.services[0].protected, Some(Protection::Database));
+    }
+
+    #[test]
+    fn protects_a_socket_that_only_the_users_session_holds() {
+        let home = tempfile::tempdir().unwrap();
+        let helper = "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)";
+        let procs = [
+            proc(
+                10,
+                1,
+                "Code Helper (Plugin)",
+                helper,
+                &[helper],
+                home.path(),
+            ),
+            proc(20, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+        ];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(10, 51234), (20, 7000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert!(
+            snapshot
+                .services
+                .iter()
+                .all(|service| service.protected == Some(Protection::Session)),
+            "{:?}",
+            snapshot.services
+        );
     }
 
     #[test]

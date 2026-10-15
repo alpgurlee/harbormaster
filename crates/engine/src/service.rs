@@ -181,7 +181,11 @@ fn is_climbable(entry: &ProcessEntry, tree: &ProcessTree<'_>, args_of: ArgsOf<'_
 }
 
 /// Never part of a service: the user's shells, terminals, coding agents and the system.
-fn is_session_boundary(entry: &ProcessEntry, tree: &ProcessTree<'_>, args_of: ArgsOf<'_>) -> bool {
+pub(crate) fn is_session_boundary(
+    entry: &ProcessEntry,
+    tree: &ProcessTree<'_>,
+    args_of: ArgsOf<'_>,
+) -> bool {
     if is_system(entry) {
         return true;
     }
