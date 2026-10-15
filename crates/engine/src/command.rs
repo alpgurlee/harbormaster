@@ -1,28 +1,16 @@
 use crate::role::normalize;
 
-const SECRET_NAME_PARTS: &[&str] = &[
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASSWD",
-    "API_KEY",
-    "APIKEY",
-    "ACCESS_KEY",
-    "PRIVATE_KEY",
-    "CREDENTIAL",
-];
-const SECRET_FLAGS: &[&str] = &[
+/// Parts of a flag or variable name that mark its value as a credential.
+const CREDENTIAL_PARTS: &[&str] = &[
     "token",
-    "auth-token",
+    "secret",
     "password",
     "passwd",
-    "secret",
-    "client-secret",
     "api-key",
     "apikey",
-    "api_key",
     "access-key",
     "private-key",
+    "credential",
 ];
 
 /// What someone would have typed to start the process, with secrets masked.
@@ -102,27 +90,49 @@ fn mask(words: Vec<String>) -> Vec<String> {
             && is_secret_name(name)
         {
             masked.push(format!("{name}=***"));
-        } else if is_secret_flag(&word) {
+        } else if is_secret_flag(&word) || word.eq_ignore_ascii_case("bearer") {
             masked.push(word);
             hide_next = true;
         } else {
-            masked.push(mask_url_password(&word));
+            masked.push(mask_url(&word));
         }
     }
     masked
 }
 
 fn is_secret_flag(word: &str) -> bool {
-    word.starts_with('-')
-        && SECRET_FLAGS.contains(&word.trim_start_matches('-').to_lowercase().as_str())
+    word.starts_with('-') && mentions_a_credential(word.trim_start_matches('-'))
+}
+
+fn mentions_a_credential(name: &str) -> bool {
+    let name = name.to_ascii_lowercase().replace('_', "-");
+    CREDENTIAL_PARTS.iter().any(|part| name.contains(part))
 }
 
 /// `GITHUB_TOKEN`, `X_API_KEY`, `DB_PASSWORD`…
 fn is_secret_name(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
     !name.is_empty()
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && SECRET_NAME_PARTS.iter().any(|part| upper.contains(part))
+        && mentions_a_credential(name)
+}
+
+/// Masks the password in the authority and any credential in the query string.
+fn mask_url(word: &str) -> String {
+    let word = mask_url_password(word);
+    let Some((base, query)) = word.split_once('?') else {
+        return word;
+    };
+    if !base.contains("://") {
+        return word;
+    }
+    let query: Vec<String> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((key, _)) if mentions_a_credential(key) => format!("{key}=***"),
+            _ => pair.to_string(),
+        })
+        .collect();
+    format!("{base}?{}", query.join("&"))
 }
 
 /// `scheme://user:password@host` → `scheme://user:***@host`
@@ -245,6 +255,39 @@ mod tests {
     #[test]
     fn drops_the_padding_a_process_title_leaves_behind() {
         assert_eq!(show(&["npm run dev   ", "", "  "]), "npm run dev");
+    }
+
+    #[test]
+    fn masks_any_flag_whose_name_mentions_a_credential() {
+        assert_eq!(
+            show(&["deploy", "--github-token", "ghp_1"]),
+            "deploy --github-token ***"
+        );
+        assert_eq!(
+            show(&["api", "--db-password=pw", "--port", "80"]),
+            "api --db-password=*** --port 80"
+        );
+        assert_eq!(
+            show(&["api", "--client_secret", "s"]),
+            "api --client_secret ***"
+        );
+    }
+
+    #[test]
+    fn masks_bearer_tokens_and_secret_query_parameters() {
+        assert_eq!(
+            show(&[
+                "curl",
+                "-H",
+                "Authorization: Bearer abc.def",
+                "http://localhost:3000"
+            ]),
+            "curl -H Authorization: Bearer *** http://localhost:3000"
+        );
+        assert_eq!(
+            show(&["open", "http://localhost:3000/cb?token=abc&mode=dev"]),
+            "open http://localhost:3000/cb?token=***&mode=dev"
+        );
     }
 
     #[test]
