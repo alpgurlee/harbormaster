@@ -52,13 +52,24 @@ pub(crate) fn resolve(start: &Path, home: &Path) -> Option<Project> {
     let name = manifest.name.unwrap_or_else(|| folder_name(&root));
     let (repo_root, git) = git.unzip();
     Some(Project {
-        name,
+        name: shortened(&name, NAME_LIMIT),
         root,
         repo_root,
         framework: manifest.framework,
-        branch: git.as_ref().and_then(|git| git.branch.clone()),
+        branch: git
+            .as_ref()
+            .and_then(|git| git.branch.as_deref())
+            .map(|branch| shortened(branch, BRANCH_LIMIT)),
         worktree: git.is_some_and(|git| git.worktree),
     })
+}
+
+/// A manifest or HEAD file can hold anything; nothing longer is shown.
+const NAME_LIMIT: usize = 100;
+const BRANCH_LIMIT: usize = 255;
+
+fn shortened(text: &str, limit: usize) -> String {
+    text.chars().take(limit).collect()
 }
 
 /// Folders that hold installed tools rather than projects. Homebrew, for one,
@@ -404,13 +415,7 @@ fn composer_json(json: &str) -> Manifest {
 
 fn dotnet_project(folder: &Path) -> Option<Manifest> {
     let entries = std::fs::read_dir(folder).ok()?;
-    let project = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "csproj" || extension == "sln")
-        })?;
+    let project = first_project_file(entries.filter_map(Result::ok).map(|entry| entry.path()))?;
     let contents = read_small_file(&project).unwrap_or_default();
     let web = contents.contains("Microsoft.NET.Sdk.Web");
     Some(Manifest {
@@ -418,6 +423,17 @@ fn dotnet_project(folder: &Path) -> Option<Manifest> {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned()),
         framework: Some(named(if web { "ASP.NET Core" } else { ".NET" })),
+    })
+}
+
+/// How many directory entries to look through for a .NET project. Every
+/// folder from the working directory up is searched, and some are huge.
+const DIRECTORY_BUDGET: usize = 256;
+
+fn first_project_file(entries: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
+    entries.take(DIRECTORY_BUDGET).find(|path| {
+        path.extension()
+            .is_some_and(|extension| extension == "csproj" || extension == "sln")
     })
 }
 
@@ -478,7 +494,9 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{Framework, resolve};
+    use std::path::PathBuf;
+
+    use super::{DIRECTORY_BUDGET, Framework, first_project_file, resolve};
 
     fn write(path: &Path, contents: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -507,6 +525,38 @@ mod tests {
         assert_eq!(project.name, "acme-store");
         assert_eq!(project.root, app);
         assert_eq!(project.framework, framework("Next.js", Some(16)));
+    }
+
+    #[test]
+    fn keeps_names_and_branches_to_a_readable_length() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("acme");
+        let long = "x".repeat(10_000);
+        write(
+            &repo.join("package.json"),
+            &format!(r#"{{"name":"{long}"}}"#),
+        );
+        write(
+            &repo.join(".git/HEAD"),
+            &format!("ref: refs/heads/{long}\n"),
+        );
+
+        let project = resolve(&repo, home.path()).unwrap();
+
+        assert_eq!(project.name.chars().count(), 100);
+        assert_eq!(project.branch.unwrap().chars().count(), 255);
+    }
+
+    #[test]
+    fn looks_at_a_bounded_number_of_entries_for_a_dotnet_project() {
+        let crowd = (0..DIRECTORY_BUDGET).map(|n| PathBuf::from(format!("file{n}.txt")));
+        let late = crowd.chain([PathBuf::from("Api.csproj")]);
+
+        assert_eq!(first_project_file(late), None);
+        assert_eq!(
+            first_project_file([PathBuf::from("Api.csproj")].into_iter()),
+            Some(PathBuf::from("Api.csproj"))
+        );
     }
 
     #[test]

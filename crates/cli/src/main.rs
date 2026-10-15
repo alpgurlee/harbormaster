@@ -13,6 +13,7 @@ use harbormaster_engine::{Classification, Input, Scanner, Service, Snapshot};
 /// How long to wait between the two samples a CPU reading needs.
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
 const COMMAND_WIDTH: usize = 60;
+const NAME_WIDTH: usize = 32;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -94,36 +95,37 @@ fn list(ListArgs { all, json }: ListArgs) -> anyhow::Result<u8> {
     if all {
         rows[0].insert(0, "KIND".into());
     }
-    for service in services {
-        let mut row = vec![
-            ports(service),
-            service
-                .project
-                .as_ref()
-                .map_or("-".into(), |project| project.name.clone()),
-            service
-                .project
-                .as_ref()
-                .and_then(|project| project.branch.clone())
-                .unwrap_or_default(),
-            service.memory_bytes.map(format::bytes).unwrap_or_default(),
-            service
-                .cpu_percent
-                .map(|cpu| format!("{cpu:.1}%"))
-                .unwrap_or_default(),
-            format::uptime(Duration::from_secs(now.saturating_sub(service.started_at))),
-            format::truncate(
-                service.command.as_deref().unwrap_or_default(),
-                COMMAND_WIDTH,
-            ),
-        ];
-        if all {
-            row.insert(0, format!("{:?}", service.classification).to_lowercase());
-        }
-        rows.push(row);
-    }
+    rows.extend(services.into_iter().map(|service| row(service, now, all)));
     print!("{}", format::table(&rows));
     Ok(0)
+}
+
+fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
+    let project = service.project.as_ref();
+    let mut row = vec![
+        ports(service),
+        format::truncate(project.map_or("-", |project| &project.name), NAME_WIDTH),
+        format::truncate(
+            project
+                .and_then(|project| project.branch.as_deref())
+                .unwrap_or_default(),
+            NAME_WIDTH,
+        ),
+        service.memory_bytes.map(format::bytes).unwrap_or_default(),
+        service
+            .cpu_percent
+            .map(|cpu| format!("{cpu:.1}%"))
+            .unwrap_or_default(),
+        format::uptime(Duration::from_secs(now.saturating_sub(service.started_at))),
+        format::truncate(
+            service.command.as_deref().unwrap_or_default(),
+            COMMAND_WIDTH,
+        ),
+    ];
+    if all {
+        row.insert(0, format!("{:?}", service.classification).to_lowercase());
+    }
+    row
 }
 
 fn explain(port: u16) -> anyhow::Result<u8> {
@@ -173,7 +175,9 @@ fn scan(scanner: &mut Scanner, home: &Path) -> anyhow::Result<Snapshot> {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Command};
+    use harbormaster_engine::{Classification, Project, Service};
+
+    use super::{Cli, Command, NAME_WIDTH, row};
 
     #[test]
     fn takes_the_list_flags_without_naming_the_list_command() {
@@ -181,6 +185,36 @@ mod tests {
 
         assert!(cli.command.is_none());
         assert!(cli.list.all && cli.list.json);
+    }
+
+    #[test]
+    fn keeps_long_project_and_branch_names_from_widening_the_table() {
+        let service = Service {
+            id: "1-1".into(),
+            classification: Classification::Dev,
+            protected: None,
+            ports: Vec::new(),
+            project: Some(Project {
+                name: "n".repeat(100),
+                root: "/x".into(),
+                repo_root: None,
+                framework: None,
+                branch: Some("b".repeat(255)),
+                worktree: false,
+            }),
+            command: None,
+            started_at: 0,
+            memory_bytes: None,
+            cpu_percent: None,
+            processes: Vec::new(),
+            holders: Vec::new(),
+            ancestors: Vec::new(),
+        };
+
+        let row = row(&service, 0, false);
+
+        assert_eq!(row[1].chars().count(), NAME_WIDTH);
+        assert_eq!(row[2].chars().count(), NAME_WIDTH);
     }
 
     #[test]
