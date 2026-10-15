@@ -15,12 +15,9 @@ const CREDENTIAL_PARTS: &[&str] = &[
 
 /// What someone would have typed to start the process, with secrets masked.
 pub(crate) fn display(args: &[String]) -> String {
-    // A process title leaves blank and empty arguments behind it.
-    let args: Vec<&str> = args
-        .iter()
-        .map(|arg| arg.trim())
-        .filter(|arg| !arg.is_empty())
-        .collect();
+    // A process title leaves blank and empty arguments behind it. They stay
+    // until masking is done, so `--password ""` keeps its empty value.
+    let args: Vec<&str> = args.iter().map(|arg| arg.trim()).collect();
     let Some((&program, rest)) = args.split_first() else {
         return String::new();
     };
@@ -41,7 +38,11 @@ pub(crate) fn display(args: &[String]) -> String {
         }
     };
     words.extend(rest.iter().map(|arg| arg.to_string()));
-    mask(&words).join(" ")
+    let masked: Vec<String> = mask(&words)
+        .into_iter()
+        .filter(|word| !word.is_empty())
+        .collect();
+    masked.join(" ")
 }
 
 /// `…/node_modules/.bin/vite` → `vite`, `…/node_modules/@storybook/cli/…` → `@storybook/cli`.
@@ -72,12 +73,21 @@ fn file_name(path: &str) -> String {
 const HIDDEN: &str = "***";
 
 fn mask(words: &[String]) -> Vec<String> {
+    // The environment sits right after the arguments in memory, and a
+    // process that rewrote its arguments can shift some of it into view. Only
+    // the tail can be that, so any assignment there is masked.
+    let tail = words
+        .iter()
+        .rposition(|word| !word.is_empty() && assignment_name(word).is_none())
+        .map_or(0, |last| last + 1);
     let mut masked = Vec::with_capacity(words.len());
     let mut hide_next = false;
-    for word in words {
+    for (index, word) in words.iter().enumerate() {
         if hide_next {
             masked.push(HIDDEN.to_string());
             hide_next = false;
+        } else if let Some(name) = assignment_name(word).filter(|_| index >= tail) {
+            masked.push(format!("{name}={HIDDEN}"));
         } else {
             let (text, value_follows) = mask_argument(word);
             masked.push(text);
@@ -85,6 +95,16 @@ fn mask(words: &[String]) -> Vec<String> {
         }
     }
     masked
+}
+
+/// `NAME` in `NAME=value`, for a shell-style variable name.
+fn assignment_name(word: &str) -> Option<&str> {
+    let (name, _) = word.split_once('=')?;
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    let valid = (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    valid.then_some(name)
 }
 
 /// An argument with spaces may be a shell's command string or a process
@@ -132,16 +152,29 @@ fn secret(token: &str) -> Option<Secret> {
         .chars()
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
         .collect();
-    match token.split_once('=') {
-        Some((name, _)) if is_secret_flag(name) || is_secret_name(name) => {
-            Some(Secret::Assigned(name.to_string()))
+    // A URL's query is mask_url's business.
+    let head = match (token.find("://"), token.find('?')) {
+        (Some(scheme), Some(query)) if scheme < query => &token[..query],
+        _ => &token[..],
+    };
+    // Any `=` can end a name: `true;API_TOKEN=x`, `--env=API_TOKEN=x`, `$env:API_TOKEN=x`.
+    for (at, _) in head.match_indices('=') {
+        let name = &head[..at];
+        if is_secret_flag(name) || mentions_a_credential(identifier_at_end(name)) {
+            return Some(Secret::Assigned(name.to_string()));
         }
-        Some(_) => None,
-        None if is_secret_flag(&token) || token.eq_ignore_ascii_case("bearer") => {
-            Some(Secret::Follows(token))
-        }
-        None => None,
     }
+    let follows =
+        !head.contains('=') && (is_secret_flag(&token) || token.eq_ignore_ascii_case("bearer"));
+    follows.then_some(Secret::Follows(token))
+}
+
+/// `API_TOKEN` in `true;API_TOKEN`.
+fn identifier_at_end(text: &str) -> &str {
+    let start = text
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map_or(0, |at| at + 1);
+    &text[start..]
 }
 
 fn is_secret_flag(word: &str) -> bool {
@@ -151,14 +184,6 @@ fn is_secret_flag(word: &str) -> bool {
 fn mentions_a_credential(name: &str) -> bool {
     let name = name.to_ascii_lowercase().replace('_', "-");
     CREDENTIAL_PARTS.iter().any(|part| name.contains(part))
-}
-
-/// `GITHUB_TOKEN`, `X_API_KEY`, PowerShell's `$env:DB_PASSWORD`…
-fn is_secret_name(name: &str) -> bool {
-    let name = name.rsplit(':').next().unwrap_or(name);
-    !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && mentions_a_credential(name)
 }
 
 /// Masks the password in the authority and any credential in the query string.
@@ -292,8 +317,8 @@ mod tests {
             "env X_API_KEY=*** node a.js"
         );
         assert_eq!(
-            show(&["env", "GITHUB_TOKEN=ghp_1", "PORT=3000"]),
-            "env GITHUB_TOKEN=*** PORT=3000"
+            show(&["env", "GITHUB_TOKEN=ghp_1", "PORT=3000", "node", "a.js"]),
+            "env GITHUB_TOKEN=*** PORT=3000 node a.js"
         );
     }
 
@@ -388,6 +413,35 @@ mod tests {
         assert_eq!(
             show(&["sh", "-c", "server --password", "hunter2"]),
             "sh -c server --password ***"
+        );
+    }
+
+    #[test]
+    fn an_empty_secret_still_counts_as_the_flags_value() {
+        assert_eq!(
+            show(&["server", "--password", "", "--token", "sentinel"]),
+            "server --password *** --token ***"
+        );
+    }
+
+    #[test]
+    fn finds_an_assignment_wherever_its_name_ends() {
+        assert_eq!(
+            show(&["sh", "-c", "true;API_TOKEN=sentinel server"]),
+            "sh -c true;API_TOKEN=***"
+        );
+        assert_eq!(
+            show(&["docker", "run", "--env=API_TOKEN=sentinel", "img"]),
+            "docker run --env=API_TOKEN=*** img"
+        );
+    }
+
+    #[test]
+    fn masks_trailing_assignments_that_may_be_the_environment() {
+        assert_eq!(show(&["aXb", "SESSION=sentinel"]), "aXb SESSION=***");
+        assert_eq!(
+            show(&["env", "PORT=3000", "node", "a.js"]),
+            "env PORT=3000 node a.js"
         );
     }
 
