@@ -11,6 +11,8 @@ const CREDENTIAL_PARTS: &[&str] = &[
     "access-key",
     "private-key",
     "credential",
+    "auth",
+    "cookie",
 ];
 
 /// What someone would have typed to start the process, with secrets masked.
@@ -146,9 +148,6 @@ enum Secret {
     Follows(String),
 }
 
-/// Headers whose whole value is a credential, whatever its scheme.
-const SECRET_HEADERS: &[&str] = &["authorization:", "cookie:"];
-
 fn secret(token: &str) -> Option<Secret> {
     // Quotes and escapes don't change what a shell hands on: `"--to\ken=x"` is `--token=x`.
     let token: String = token
@@ -164,41 +163,37 @@ fn secret(token: &str) -> Option<Secret> {
             (Some(scheme), Some(query)) if scheme < query => &piece[..query],
             _ => piece,
         };
-        // Any `=` can end a name: `--env=API_TOKEN=x`, `$env:API_TOKEN=x`.
-        for (at, _) in head.match_indices('=') {
+        // Any `=` or `:` can end a name: `--env=API_TOKEN=x`, `$env:API_TOKEN=x`,
+        // `X-Api-Key:x`, `{"password":"x"}`.
+        for (at, separator) in head.match_indices(['=', ':']) {
+            // A header name ending the word, `Authorization:`, has its value next.
+            if separator == ":" && offset + at + 1 == token.len() {
+                break;
+            }
             let name = &head[..at];
-            if is_secret_flag(name) || mentions_a_credential(identifier_at_end(name)) {
+            if is_secret_flag(name) || mentions_a_credential(name_at_end(name)) {
                 return Some(Secret::Kept(token[..=offset + at].to_string()));
             }
         }
         offset += piece.len() + 1;
     }
-    // Lowercasing ASCII keeps every byte where it was.
-    let lowered = token.to_ascii_lowercase();
-    if let Some(end) = SECRET_HEADERS
-        .iter()
-        .find_map(|header| lowered.find(header).map(|at| at + header.len()))
-    {
-        return Some(if end == token.len() {
-            Secret::Follows(token)
-        } else {
-            Secret::Kept(token[..end].to_string())
-        });
-    }
     let last = token.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
-    let follows =
-        !last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer"));
+    let header = last
+        .strip_suffix(':')
+        .is_some_and(|name| mentions_a_credential(name_at_end(name)));
+    let follows = header
+        || (!last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer")));
     follows.then_some(Secret::Follows(token))
 }
 
 const SHELL_OPERATORS: &[char] = &[';', '|', '&', '(', ')', '<', '>'];
 
-/// `API_TOKEN` in `true;API_TOKEN`.
-fn identifier_at_end(text: &str) -> &str {
+/// `API_TOKEN` in `true;API_TOKEN`, `X-Api-Key` in `-HX-Api-Key`.
+fn name_at_end(text: &str) -> &str {
     let start = text
         .char_indices()
         .rev()
-        .find(|&(_, c)| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|&(_, c)| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
         .map_or(0, |(at, c)| at + c.len_utf8());
     &text[start..]
 }
@@ -241,23 +236,27 @@ fn mask_url(word: &str) -> String {
     format!("{base}?{}", query.join("&"))
 }
 
-/// `scheme://user:password@host` → `scheme://user:***@host`. A user name
-/// alone may be a token (`https://ghp_…@github.com`), so it goes entirely.
+/// `scheme://user:password@host` → `scheme://user:***@host`.
 fn mask_url_user(word: &str) -> String {
     let Some(scheme_end) = word.find("://") else {
         return word.to_string();
     };
     let start = scheme_end + 3;
-    let authority = word[start..]
-        .find(['/', '?', '#'])
-        .map_or(&word[start..], |end| &word[start..start + end]);
-    let Some(at) = authority.rfind('@') else {
-        return word.to_string();
-    };
-    let kept = authority[..at]
-        .find(':')
-        .map_or(start, |colon| start + colon + 1);
-    format!("{}{HIDDEN}{}", &word[..kept], &word[start + at..])
+    let rest = &word[start..];
+    // Passwords often hold `@`, `/` or `#` unencoded, so after a colon
+    // everything up to the last `@` goes.
+    if let Some(at) = rest.rfind('@')
+        && let Some(colon) = rest[..at].find(':')
+    {
+        return format!("{}{HIDDEN}{}", &word[..=start + colon], &word[start + at..]);
+    }
+    // A user name alone may be a token (`https://ghp_…@github.com`). It ends
+    // where the host does, so `/@types/node` in a path stays.
+    let authority = rest.find(['/', '?', '#']).map_or(rest, |end| &rest[..end]);
+    match authority.rfind('@') {
+        Some(at) => format!("{}{HIDDEN}{}", &word[..start], &word[start + at..]),
+        None => word.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -509,6 +508,30 @@ mod tests {
         assert_eq!(
             show(&["git", "clone", "https://ghp_abc123@github.com/o/r.git"]),
             "git clone https://***@github.com/o/r.git"
+        );
+    }
+
+    #[test]
+    fn masks_passwords_that_hold_url_characters() {
+        assert_eq!(
+            show(&["psql", "postgres://u:p#ss@h/db"]),
+            "psql postgres://u:***@h/db"
+        );
+        assert_eq!(
+            show(&["psql", "postgres://u:p@ss/w@h/db"]),
+            "psql postgres://u:***@h/db"
+        );
+    }
+
+    #[test]
+    fn masks_values_after_a_credential_name_and_a_colon() {
+        assert_eq!(
+            show(&["curl", "-H", "X-Api-Key: abc", "http://x"]),
+            "curl -H X-Api-Key: *** http://x"
+        );
+        assert_eq!(
+            show(&["app", "--config", "{\"password\":\"x\"}"]),
+            "app --config {password:***"
         );
     }
 
