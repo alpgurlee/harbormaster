@@ -164,18 +164,20 @@ impl Scanner {
             .collect();
         let owner_details = details_of(owner.key);
 
-        let folder = owner_details
-            .cwd
-            .known()
-            .cloned()
-            .or_else(|| details_of(root.key).cwd.known().cloned())
-            .or_else(|| {
-                owner_details
-                    .exe
-                    .known()
-                    .and_then(|exe| exe.parent().map(Path::to_path_buf))
-            });
-        let project = folder.and_then(|folder| self.project_for(&folder, input));
+        // The working folder usually names the project; a binary started from
+        // elsewhere (`/tmp` running `repo/target/debug/api`) still lives in it.
+        let candidates = [
+            owner_details.cwd.known().cloned(),
+            details_of(root.key).cwd.known().cloned(),
+            owner_details
+                .exe
+                .known()
+                .and_then(|exe| exe.parent().map(Path::to_path_buf)),
+        ];
+        let project = candidates
+            .into_iter()
+            .flatten()
+            .find_map(|folder| self.project_for(&folder, input));
 
         let is_database =
             |entry: &&ProcessEntry| DATABASES.contains(&normalize(&entry.name).as_str());
@@ -573,6 +575,42 @@ mod tests {
                 .any(|member| member.name == "postgres")
         );
         assert!(snapshot.services[0].protected);
+    }
+
+    #[test]
+    fn finds_the_project_from_the_executable_when_the_working_folder_has_none() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("gateway");
+        fs::create_dir_all(repo.join("target/debug")).unwrap();
+        fs::write(repo.join("Cargo.toml"), "[package]\nname = \"gateway\"\n").unwrap();
+        let elsewhere = home.path().join("scratch");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let exe = repo.join("target/debug/gateway");
+        let procs = [proc(
+            20,
+            1,
+            "gateway",
+            exe.to_str().unwrap(),
+            &[exe.to_str().unwrap()],
+            &elsewhere,
+        )];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(20, 8080)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert_eq!(
+            snapshot.services[0]
+                .project
+                .as_ref()
+                .map(|p| p.name.as_str()),
+            Some("gateway")
+        );
+        assert_eq!(snapshot.services[0].classification, Classification::Dev);
     }
 
     #[test]
