@@ -156,7 +156,7 @@ impl Scanner {
         input: Input<'_>,
     ) -> Option<Service> {
         let root = tree.get(group.root.pid)?;
-        let owner = group.owners.first().and_then(|key| tree.get(key.pid))?;
+        let owner = tree.get(group.owner.pid)?;
         let members: Vec<&ProcessEntry> = group
             .members
             .iter()

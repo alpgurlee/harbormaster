@@ -29,7 +29,11 @@ pub(crate) struct Grouped {
     pub(crate) root: ProcessKey,
     /// The root first, then everything it started, breadth first.
     pub(crate) members: Vec<ProcessKey>,
-    pub(crate) owners: Vec<ProcessKey>,
+    /// The socket holder that does the serving.
+    pub(crate) owner: ProcessKey,
+    /// Every process holding one of the sockets. The system or the user's
+    /// shell may be among them without being a member.
+    pub(crate) holders: Vec<ProcessKey>,
     pub(crate) endpoints: Vec<(IpAddr, u16)>,
 }
 
@@ -81,18 +85,36 @@ pub(crate) fn group(
     let mut by_root: BTreeMap<Pid, Grouped> = BTreeMap::new();
     for (group, SharedSockets { owners, endpoints }) in sockets {
         let is_foreign = |pid: Pid| group_of.get(&pid).is_some_and(|other| *other != group);
-        let Some(top) = topmost(&owners, tree) else {
-            continue;
+        // launchd activating a socket or a shell that inherited one holds it
+        // too, but never leads the service.
+        let servers: BTreeSet<ProcessKey> = owners
+            .iter()
+            .copied()
+            .filter(|owner| {
+                tree.get(owner.pid)
+                    .is_some_and(|entry| !is_session_boundary(entry, tree, args_of))
+            })
+            .collect();
+        let (owner, root, members) = match topmost(&servers, tree) {
+            Some(top) => {
+                let root = climb(top, tree, args_of, &is_foreign);
+                (top.key, root.key, members(root, tree, args_of, &is_foreign))
+            }
+            None => {
+                let Some(top) = topmost(&owners, tree) else {
+                    continue;
+                };
+                (top.key, top.key, vec![top.key])
+            }
         };
-        let root = climb(top, tree, args_of, &is_foreign);
-        let members = members(root, tree, args_of, &is_foreign);
-        let service = by_root.entry(root.key.pid).or_insert_with(|| Grouped {
-            root: root.key,
+        let service = by_root.entry(root.pid).or_insert_with(|| Grouped {
+            root,
             members,
-            owners: Vec::new(),
+            owner,
+            holders: Vec::new(),
             endpoints: Vec::new(),
         });
-        service.owners.extend(owners);
+        service.holders.extend(owners);
         service.endpoints.extend(endpoints);
     }
     by_root.into_values().collect()
@@ -441,6 +463,53 @@ mod tests {
 
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].endpoints.len(), 2);
+    }
+
+    #[test]
+    fn never_roots_a_service_at_a_system_process_that_shares_its_socket() {
+        let machine = Machine::new()
+            .process(1, 0, "launchd", &[])
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 1, "node", &["node", "/srv/a.js"])
+            .process(30, 1, "node", &["node", "/srv/b.js"])
+            .sharing(1, 8000, 77)
+            .sharing(20, 8000, 77);
+
+        let services = machine.services();
+
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].root.pid, Pid(20));
+        assert_eq!(pids(&services[0].members), [20]);
+        assert_eq!(pids(&services[0].holders), [1, 20]);
+    }
+
+    #[test]
+    fn a_socket_only_the_system_holds_brings_in_nothing_else() {
+        let machine = Machine::new()
+            .process(1, 0, "launchd", &[])
+            .process(20, 1, "node", &["node", "/srv/a.js"])
+            .listening(1, 22);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(1));
+        assert_eq!(pids(&services[0].members), [1]);
+    }
+
+    #[test]
+    fn never_roots_a_service_at_the_users_shell_that_shares_its_socket() {
+        let machine = Machine::new()
+            .process(5, 1, "Terminal", &[])
+            .process(10, 5, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", "/srv/a.js"])
+            .sharing(10, 3000, 77)
+            .sharing(20, 3000, 77);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(20));
+        assert_eq!(pids(&services[0].members), [20]);
+        assert_eq!(pids(&services[0].holders), [10, 20]);
     }
 
     #[test]
