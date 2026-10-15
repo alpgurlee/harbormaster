@@ -67,3 +67,27 @@ fn reports_gone_for_a_process_that_has_exited() {
 
     assert_eq!(details(key).cwd, Field::Gone);
 }
+
+#[test]
+fn reads_empty_arguments_without_reaching_the_environment() {
+    use std::os::unix::process::CommandExt;
+
+    let mut child = Command::new("/usr/bin/yes")
+        .arg0("")
+        .args(["", "x"])
+        .env_clear()
+        .env("SECRET", "value")
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let key = find(child.id()).key;
+    let info = details(key);
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert_eq!(
+        info.args,
+        Field::Known(vec![String::new(), String::new(), "x".to_string()])
+    );
+}

@@ -55,25 +55,29 @@ fn raw(pid: libc::pid_t) -> io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-/// Layout: argc (native int), the exec path, NUL padding, then argc strings.
-/// The environment follows, which we deliberately never read here.
+/// Layout: argc (native int), the exec path, NULs that pad it to a pointer
+/// boundary, then argc strings. The environment follows, which we
+/// deliberately never read here.
 fn parse(buffer: &[u8]) -> Option<Vec<String>> {
     let argc_bytes = buffer.get(..size_of::<c_int>())?;
     let argc = c_int::from_ne_bytes(argc_bytes.try_into().ok()?);
     let argc = usize::try_from(argc).ok()?;
 
-    let mut rest = &buffer[size_of::<c_int>()..];
-    let exec_path_end = rest.iter().position(|&byte| byte == 0)?;
-    rest = &rest[exec_path_end..];
-    let first_arg = rest.iter().position(|&byte| byte != 0)?;
-    // The terminator plus at most seven bytes of pointer padding; anything
-    // longer means empty arguments, and the boundary can no longer be trusted.
-    if first_arg > size_of::<usize>() {
+    let strings = &buffer[size_of::<c_int>()..];
+    let path_end = strings.iter().position(|&byte| byte == 0)? + 1;
+    // Knowing exactly where argv starts keeps empty arguments from shifting
+    // the environment into view. Anything but NULs there means we misread.
+    let argv_start = path_end.next_multiple_of(size_of::<usize>());
+    if strings
+        .get(path_end..argv_start)?
+        .iter()
+        .any(|&byte| byte != 0)
+    {
         return None;
     }
-    rest = &rest[first_arg..];
 
-    let mut arguments = Vec::with_capacity(argc);
+    let mut rest = &strings[argv_start..];
+    let mut arguments = Vec::with_capacity(argc.min(rest.len()));
     for _ in 0..argc {
         let end = rest.iter().position(|&byte| byte == 0)?;
         arguments.push(String::from_utf8_lossy(&rest[..end]).into_owned());
@@ -96,7 +100,7 @@ mod tests {
     fn skips_the_exec_path_and_its_padding() {
         let raw = buffer(
             2,
-            b"/usr/local/bin/node\0\0\0\0node\0server.js\0PATH=/usr/bin\0",
+            b"/usr/local/bin/node\0\0\0\0\0node\0server.js\0PATH=/usr/bin\0",
         );
 
         assert_eq!(parse(&raw), Some(vec!["node".into(), "server.js".into()]));
@@ -110,10 +114,24 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_guess_when_an_empty_argv0_blurs_the_boundary() {
-        // Padding never exceeds seven bytes; more NULs mean empty arguments,
-        // and guessing could surface an environment entry as an argument.
-        let raw = buffer(1, b"/bin/x\0\0\0\0\0\0\0\0\0SECRET=value\0");
+    fn keeps_empty_arguments_where_the_process_had_them() {
+        // Captured from `yes` started with argv ["", "", "x"].
+        let raw = buffer(3, b"/usr/bin/yes\0\0\0\0\0\0x\0SECRET=value\0\0");
+
+        assert_eq!(parse(&raw), Some(vec!["".into(), "".into(), "x".into()]));
+    }
+
+    #[test]
+    fn never_mistakes_the_environment_for_an_empty_argv0() {
+        // The path ends on byte 7, one NUL pads it to 8, then argv[0] is empty.
+        let raw = buffer(1, b"/bin/x\0\0\0SECRET=value\0");
+
+        assert_eq!(parse(&raw), Some(vec!["".into()]));
+    }
+
+    #[test]
+    fn refuses_padding_that_is_not_blank() {
+        let raw = buffer(1, b"/bin/x\0Zsh\0");
 
         assert_eq!(parse(&raw), None);
     }
