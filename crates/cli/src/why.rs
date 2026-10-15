@@ -6,8 +6,8 @@ use crate::format::printable;
 pub(crate) fn lines(port: u16, report: &PortReport<'_>) -> Vec<String> {
     match report {
         PortReport::Free => vec![format!(":{port} is free.")],
-        PortReport::HiddenOwner => vec![format!(
-            ":{port} is taken by a process Harbormaster can't see, usually one run by another user or the system."
+        PortReport::InUseUnseen => vec![format!(
+            ":{port} is in use or reserved by the system, but no process Harbormaster can see listens on it. It may belong to another user or to the system."
         )],
         PortReport::Denied => vec![format!(":{port} can't be used: the system refused it.")],
         PortReport::Unknown(reason) => vec![format!(
@@ -81,6 +81,13 @@ mod tests {
             }],
             holders: Vec::new(),
         }
+    }
+
+    #[test]
+    fn does_not_claim_a_process_holds_a_port_the_system_may_reserve() {
+        let lines = lines(5000, &PortReport::InUseUnseen);
+
+        assert!(lines[0].contains("or reserved by the system"), "{lines:?}");
     }
 
     #[test]

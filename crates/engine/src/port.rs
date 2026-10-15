@@ -9,8 +9,9 @@ use crate::{Service, Snapshot};
 pub enum PortReport<'a> {
     InUse(Vec<&'a Service>),
     Free,
-    /// Something holds it, but not a process this user can inspect.
-    HiddenOwner,
+    /// Binding fails as if it were taken, yet no process we can see listens:
+    /// another user's or the system's process, or a port the system reserves.
+    InUseUnseen,
     Denied,
     Unknown(String),
 }
@@ -29,22 +30,34 @@ pub fn explain_port<'a>(
         return PortReport::InUse(holders);
     }
 
-    let probes = [
-        probe(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
-        probe(IpAddr::V6(Ipv6Addr::LOCALHOST), port),
-    ];
-    if probes.contains(&BindProbe::InUse) {
-        PortReport::HiddenOwner
-    } else if probes.contains(&BindProbe::Denied) {
-        PortReport::Denied
-    } else if probes[0] == BindProbe::Free {
-        // An IPv6 failure on its own usually means the machine has no IPv6.
+    let probes: Vec<(IpAddr, BindProbe)> = [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+    ]
+    .into_iter()
+    .map(|address| (address, probe(address, port)))
+    .collect();
+    let any = |wanted: BindProbe| probes.iter().any(|(_, outcome)| *outcome == wanted);
+    if any(BindProbe::InUse) {
+        return PortReport::InUseUnseen;
+    }
+    if any(BindProbe::Denied) {
+        return PortReport::Denied;
+    }
+    // A missing address, such as no IPv6 loopback, says nothing about the port.
+    let failures: Vec<String> = probes
+        .iter()
+        .filter_map(|(address, outcome)| match outcome {
+            BindProbe::Failed(reason) => Some(format!("{address}: {reason}")),
+            _ => None,
+        })
+        .collect();
+    if !failures.is_empty() {
+        PortReport::Unknown(failures.join("; "))
+    } else if any(BindProbe::Free) {
         PortReport::Free
     } else {
-        match &probes[0] {
-            BindProbe::Failed(reason) => PortReport::Unknown(reason.clone()),
-            _ => PortReport::Unknown(String::new()),
-        }
+        PortReport::Unknown("this machine has no loopback address".into())
     }
 }
 
@@ -105,7 +118,7 @@ mod tests {
 
         assert_eq!(
             explain_port(3000, &snapshot, &|_, _| BindProbe::InUse),
-            PortReport::HiddenOwner
+            PortReport::InUseUnseen
         );
     }
 
@@ -128,12 +141,31 @@ mod tests {
         };
         let probe = |address: IpAddr, _| {
             if address.is_ipv6() {
-                BindProbe::Failed("no IPv6".into())
+                BindProbe::Unavailable
             } else {
                 BindProbe::Free
             }
         };
 
         assert_eq!(explain_port(3000, &snapshot, &probe), PortReport::Free);
+    }
+
+    #[test]
+    fn does_not_hide_an_unexpected_ipv6_failure_behind_a_free_ipv4() {
+        let snapshot = Snapshot {
+            services: Vec::new(),
+        };
+        let probe = |address: IpAddr, _| {
+            if address.is_ipv6() {
+                BindProbe::Failed("boom".into())
+            } else {
+                BindProbe::Free
+            }
+        };
+
+        assert_eq!(
+            explain_port(3000, &snapshot, &probe),
+            PortReport::Unknown("::1: boom".into())
+        );
     }
 }

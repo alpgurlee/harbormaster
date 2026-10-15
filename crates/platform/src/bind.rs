@@ -10,6 +10,8 @@ pub enum BindProbe {
     InUse,
     /// The OS refused, e.g. a privileged port or a range Windows reserved.
     Denied,
+    /// This machine has no such address, e.g. no IPv6 loopback.
+    Unavailable,
     Failed(String),
 }
 
@@ -20,17 +22,28 @@ pub fn probe_bind(address: IpAddr, port: u16) -> BindProbe {
     let target = SocketAddr::new(address, port);
     let socket = match Socket::new(Domain::for_address(target), Type::STREAM, None) {
         Ok(socket) => socket,
-        Err(error) => return BindProbe::Failed(error.to_string()),
+        Err(error) => return failure(&error),
     };
     if address.is_ipv6() && socket.set_only_v6(true).is_err() {
         return BindProbe::Failed("could not restrict the probe to IPv6".into());
     }
     match socket.bind(&target.into()) {
         Ok(()) => BindProbe::Free,
-        Err(error) => match error.kind() {
-            io::ErrorKind::AddrInUse => BindProbe::InUse,
-            io::ErrorKind::PermissionDenied => BindProbe::Denied,
-            _ => BindProbe::Failed(error.to_string()),
-        },
+        Err(error) => failure(&error),
+    }
+}
+
+#[cfg(target_os = "macos")]
+const FAMILY_NOT_SUPPORTED: i32 = libc::EAFNOSUPPORT;
+#[cfg(windows)]
+const FAMILY_NOT_SUPPORTED: i32 = 10047; // WSAEAFNOSUPPORT
+
+fn failure(error: &io::Error) -> BindProbe {
+    match error.kind() {
+        io::ErrorKind::AddrInUse => BindProbe::InUse,
+        io::ErrorKind::PermissionDenied => BindProbe::Denied,
+        io::ErrorKind::AddrNotAvailable => BindProbe::Unavailable,
+        _ if error.raw_os_error() == Some(FAMILY_NOT_SUPPORTED) => BindProbe::Unavailable,
+        _ => BindProbe::Failed(error.to_string()),
     }
 }

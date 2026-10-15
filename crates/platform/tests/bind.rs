@@ -26,3 +26,11 @@ fn reports_an_unused_port_as_free_and_releases_it() {
         "the probe must not keep the port"
     );
 }
+
+#[test]
+fn reports_an_address_this_machine_does_not_have_as_unavailable() {
+    // 192.0.2.0/24 is reserved for documentation and never assigned locally.
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+    assert_eq!(probe_bind(address, 3000), BindProbe::Unavailable);
+}
