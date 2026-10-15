@@ -177,6 +177,13 @@ impl Scanner {
             });
         let project = folder.and_then(|folder| self.project_for(&folder, input));
 
+        let is_database =
+            |entry: &&ProcessEntry| DATABASES.contains(&normalize(&entry.name).as_str());
+        let database = is_database(&owner) || members.iter().any(is_database);
+        let someone_elses = members
+            .iter()
+            .any(|entry| entry.owner != Owner::CurrentUser);
+
         let members: Vec<Member> = members
             .iter()
             .map(|entry| Member {
@@ -197,8 +204,6 @@ impl Scanner {
             .collect();
         ports.sort_by_key(|port| (port.port, port.address));
 
-        let names = [normalize(&owner.name), normalize(&root.name)];
-        let protected = names.iter().any(|name| DATABASES.contains(&name.as_str()));
         let classification = classify(
             owner,
             &owner_details,
@@ -206,8 +211,10 @@ impl Scanner {
             tree,
             args_of,
             project.is_some(),
-            protected,
+            database,
         );
+        // Stopping must never reach the system, another user, or a database.
+        let protected = classification == Classification::System || someone_elses || database;
 
         Some(Service {
             id: format!("{}-{}", root.key.pid.0, root.key.start.0),
@@ -487,6 +494,84 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].classification, Classification::Dev);
+        assert!(snapshot.services[0].protected);
+    }
+
+    #[test]
+    fn protects_every_system_service() {
+        let home = tempfile::tempdir().unwrap();
+        let mut daemon = proc(
+            900,
+            1,
+            "httpd",
+            "/usr/sbin/httpd",
+            &["/usr/sbin/httpd"],
+            Path::new("/"),
+        );
+        daemon.entry.owner = Owner::System;
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &[daemon],
+            &[(900, 80)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert!(snapshot.services[0].protected);
+    }
+
+    #[test]
+    fn protects_a_service_with_a_database_among_its_processes() {
+        let home = tempfile::tempdir().unwrap();
+        let procs = [
+            proc(10, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+            proc(
+                20,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &[
+                    "node",
+                    "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
+                    "run",
+                    "db",
+                ],
+                home.path(),
+            ),
+            proc(
+                30,
+                20,
+                "postgres",
+                "/opt/pg/bin/postgres",
+                &["postgres", "-D", "data"],
+                home.path(),
+            ),
+            proc(
+                40,
+                20,
+                "node",
+                "/usr/local/bin/node",
+                &["node", "/srv/api.js"],
+                home.path(),
+            ),
+        ];
+
+        // postgres only uses a unix socket here, so it is a member of the api's service.
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(40, 4000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert!(
+            snapshot.services[0]
+                .processes
+                .iter()
+                .any(|member| member.name == "postgres")
+        );
         assert!(snapshot.services[0].protected);
     }
 
