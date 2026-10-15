@@ -178,7 +178,13 @@ pub(crate) fn runs_a_script(args: Option<&[String]>) -> bool {
                 match arg.as_str() {
                     // `-` and `--` end the options; what follows is a script file.
                     "-" | "--" => return false,
-                    _ if arg.starts_with("--") => {}
+                    "--rcfile" | "--init-file" => {
+                        rest.next();
+                    }
+                    "--login" | "--noprofile" | "--norc" | "--posix" | "--noediting"
+                    | "--restricted" | "--verbose" => {}
+                    // An option we can't read might take a value: call it a session.
+                    _ if arg.starts_with("--") => return false,
                     _ => match arg.strip_prefix(['-', '+']) {
                         Some(flags) if arg.starts_with('-') && flags.contains('c') => return true,
                         Some(flags) => {
@@ -207,8 +213,7 @@ pub(crate) fn is_dev_supervisor(name: &str, args: Option<&[String]>) -> bool {
         return false;
     };
     let runtime = normalize(name);
-    // The runtime's own options come before the script; the rest is the script's.
-    let script_at = rest.iter().position(|arg| !arg.starts_with('-'));
+    let script_at = script_position(rest);
     let options = &rest[..script_at.unwrap_or(rest.len())];
     let (tool, args) = match (runtime.as_str(), script_at) {
         ("node", _)
@@ -239,6 +244,38 @@ pub(crate) fn is_dev_supervisor(name: &str, args: Option<&[String]>) -> bool {
         Some("manage.py") => subcommand == Some("runserver") && !has("--noreload"),
         _ => false,
     }
+}
+
+/// Runtime options that take the next argument as their value.
+const VALUE_OPTIONS: &[&str] = &[
+    "-r",
+    "--require",
+    "--import",
+    "--loader",
+    "--experimental-loader",
+    "-C",
+    "--conditions",
+    "--env-file",
+    "--watch-path",
+    "--title",
+    "--inspect-port",
+    "-X",
+    "-W",
+];
+
+/// Where the script starts in a runtime's arguments: after the runtime's own
+/// options, the values some of them take, and a `--` that ends them.
+fn script_position(rest: &[String]) -> Option<usize> {
+    let mut at = 0;
+    while let Some(arg) = rest.get(at) {
+        match arg.as_str() {
+            "--" => return (at + 1 < rest.len()).then_some(at + 1),
+            option if VALUE_OPTIONS.contains(&option) => at += 2,
+            option if option.starts_with('-') => at += 1,
+            _ => return Some(at),
+        }
+    }
+    None
 }
 
 /// Lowercase, without `.exe`, and with Python's version suffix folded away.
@@ -376,6 +413,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_values_of_bash_long_options() {
+        // `-c` names the rcfile here; the shell is interactive.
+        assert!(!runs_a_script(Some(&args(&[
+            "bash", "--rcfile", "-c", "-i"
+        ]))));
+        assert!(runs_a_script(Some(&args(&[
+            "bash",
+            "--init-file",
+            "x",
+            "-c",
+            "npm run dev"
+        ]))));
+        assert!(runs_a_script(Some(&args(&["bash", "--norc", "-c", "x"]))));
+        assert!(!runs_a_script(Some(&args(&[
+            "bash",
+            "--mystery",
+            "-c",
+            "x"
+        ]))));
+    }
+
+    #[test]
     fn a_powershell_told_to_stay_open_is_a_session() {
         assert!(!runs_a_script(Some(&args(&[
             "pwsh", "-NoExit", "-Command", "x"
@@ -437,6 +496,33 @@ mod tests {
             &["node", "--watch-path=src", "server.js"]
         ));
         assert!(!supervises("node", &["node", "server.js", "--watch"]));
+    }
+
+    #[test]
+    fn reads_node_options_the_way_node_does() {
+        assert!(!supervises("node", &["node", "--", "--watch"]));
+        assert!(supervises(
+            "node",
+            &["node", "-r", "ts-node/register", "--watch", "server.ts"]
+        ));
+        assert!(supervises(
+            "node",
+            &[
+                "node",
+                "--require",
+                "dotenv/config",
+                "/app/node_modules/.bin/next",
+                "dev"
+            ]
+        ));
+        assert!(!supervises(
+            "python3",
+            &["python3", "-X", "dev", "manage.py", "check"]
+        ));
+        assert!(supervises(
+            "python3",
+            &["python3", "-X", "dev", "manage.py", "runserver"]
+        ));
     }
 
     #[test]
