@@ -85,6 +85,8 @@ mod tests {
 
     use harbormaster_engine::{Classification, Holder, Member, Port, PortReport, Project, Service};
 
+    use harbormaster_platform::{Pid, ProcessKey, StartTime};
+
     use super::{lines, status};
 
     fn service(name: &str, command: &str, port: u16) -> Service {
@@ -102,6 +104,10 @@ mod tests {
             memory_bytes: None,
             cpu_percent: None,
             processes: vec![Member {
+                key: ProcessKey {
+                    pid: Pid(772),
+                    start: StartTime(1),
+                },
                 pid: 772,
                 name: name.into(),
                 command: Some(command.into()),
@@ -112,11 +118,16 @@ mod tests {
                 pid: 772,
                 name: name.into(),
             }],
+            ancestors: Vec::new(),
         }
     }
 
     fn member(pid: u32, command: &str) -> Member {
         Member {
+            key: ProcessKey {
+                pid: Pid(pid),
+                start: StartTime(1),
+            },
             pid,
             name: "node".into(),
             command: Some(command.into()),

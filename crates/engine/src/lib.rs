@@ -4,6 +4,7 @@ mod project;
 mod role;
 mod sampler;
 mod service;
+mod stop;
 mod tree;
 
 use std::cell::RefCell;
@@ -17,6 +18,7 @@ use serde::Serialize;
 
 pub use port::{PortReport, explain_port};
 pub use project::{Framework, Project};
+pub use stop::{Outcome, Refusal, Signals, Target, choose, order, recheck, stop};
 
 use role::{Role, normalize};
 use sampler::CpuSampler;
@@ -46,6 +48,9 @@ pub struct Service {
     pub processes: Vec<Member>,
     /// Every process holding one of its sockets, members or not.
     pub holders: Vec<Holder>,
+    /// What it was started from and keeps running after a stop: the shell,
+    /// terminal or agent above the root, nearest first.
+    pub ancestors: Vec<Holder>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -83,6 +88,9 @@ pub struct Holder {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
+    /// What a stop checks right before each signal.
+    #[serde(skip)]
+    pub key: ProcessKey,
     pub pid: u32,
     pub name: String,
     pub command: Option<String>,
@@ -210,6 +218,7 @@ impl Scanner {
         let members: Vec<Member> = members
             .iter()
             .map(|entry| Member {
+                key: entry.key,
                 pid: entry.key.pid.0,
                 name: entry.name.clone(),
                 command: args_of(entry).map(|args| command::display(&args)),
@@ -275,6 +284,7 @@ impl Scanner {
             cpu_percent: sum(members.iter().map(|member| member.cpu_percent)),
             processes: members,
             holders,
+            ancestors: ancestors(root, tree),
         })
     }
 
@@ -287,6 +297,23 @@ impl Scanner {
             .insert(folder.to_path_buf(), (project.clone(), input.now));
         project
     }
+}
+
+/// Up to the first system process, which is where a session ends.
+fn ancestors(root: &ProcessEntry, tree: &ProcessTree<'_>) -> Vec<Holder> {
+    let mut found = Vec::new();
+    let mut current = root;
+    while let Some(parent) = tree.parent(current.key.pid) {
+        if service::is_system(parent) {
+            break;
+        }
+        found.push(Holder {
+            pid: parent.key.pid.0,
+            name: parent.name.clone(),
+        });
+        current = parent;
+    }
+    found
 }
 
 fn classify(

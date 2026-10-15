@@ -101,6 +101,7 @@ mod tests {
                 cpu_percent: None,
                 processes: Vec::new(),
                 holders: Vec::new(),
+                ancestors: Vec::new(),
             }],
         }
     }
