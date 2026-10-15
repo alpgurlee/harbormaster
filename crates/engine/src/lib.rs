@@ -1,4 +1,5 @@
 mod command;
+mod port;
 mod project;
 mod role;
 mod sampler;
@@ -14,6 +15,7 @@ use std::time::{Duration, Instant};
 use harbormaster_platform::{Listener, Owner, ProcessDetails, ProcessEntry, ProcessKey};
 use serde::Serialize;
 
+pub use port::{PortReport, explain_port};
 pub use project::{Framework, Project};
 
 use role::{Role, normalize};
@@ -26,7 +28,7 @@ pub struct Snapshot {
     pub services: Vec<Service>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Service {
     /// Stable while the root process lives: `<pid>-<start>`.
@@ -57,7 +59,7 @@ pub struct Port {
     pub address: IpAddr,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
     pub pid: u32,

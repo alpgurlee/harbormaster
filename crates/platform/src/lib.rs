@@ -1,3 +1,4 @@
+mod bind;
 mod types;
 
 #[cfg(target_os = "macos")]
@@ -5,6 +6,7 @@ mod macos;
 #[cfg(target_os = "macos")]
 use macos as sys;
 
+pub use bind::{BindProbe, probe_bind};
 pub use types::{Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, StartTime};
 
 #[derive(Debug, thiserror::Error)]

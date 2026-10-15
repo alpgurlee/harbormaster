@@ -1,4 +1,5 @@
 mod format;
+mod why;
 
 use std::path::Path;
 use std::thread::sleep;
@@ -34,6 +35,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Explain who holds a port, or why it can't be used
+    Why {
+        /// The port to check
+        port: u16,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -42,6 +48,7 @@ fn main() -> anyhow::Result<()> {
         json: false,
     }) {
         Command::Ls { all, json } => list(all, json),
+        Command::Why { port } => explain(port),
     }
 }
 
@@ -101,6 +108,17 @@ fn list(all: bool, json: bool) -> anyhow::Result<()> {
         rows.push(row);
     }
     print!("{}", format::table(&rows));
+    Ok(())
+}
+
+fn explain(port: u16) -> anyhow::Result<()> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let snapshot = scan(&mut Scanner::default(), &home)?;
+    let report =
+        harbormaster_engine::explain_port(port, &snapshot, &harbormaster_platform::probe_bind);
+    for line in why::lines(port, &report) {
+        println!("{line}");
+    }
     Ok(())
 }
 

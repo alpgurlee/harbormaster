@@ -35,7 +35,7 @@ pub(crate) fn truncate(text: &str, width: usize) -> String {
 /// Command lines and project names come from other programs. Control
 /// characters could rewrite the terminal (titles, colours, even the clipboard
 /// through OSC 52) and bidi overrides could disguise text, so both are replaced.
-fn printable(text: &str) -> String {
+pub(crate) fn printable(text: &str) -> String {
     text.chars()
         .map(|c| {
             let bidi = matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
