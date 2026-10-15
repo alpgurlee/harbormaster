@@ -66,6 +66,11 @@ fn parse(buffer: &[u8]) -> Option<Vec<String>> {
     let exec_path_end = rest.iter().position(|&byte| byte == 0)?;
     rest = &rest[exec_path_end..];
     let first_arg = rest.iter().position(|&byte| byte != 0)?;
+    // The terminator plus at most seven bytes of pointer padding; anything
+    // longer means empty arguments, and the boundary can no longer be trusted.
+    if first_arg > size_of::<usize>() {
+        return None;
+    }
     rest = &rest[first_arg..];
 
     let mut arguments = Vec::with_capacity(argc);
@@ -102,6 +107,15 @@ mod tests {
         let raw = buffer(1, b"/bin/sh\0sh\0SECRET=hunter2\0");
 
         assert_eq!(parse(&raw), Some(vec!["sh".into()]));
+    }
+
+    #[test]
+    fn refuses_to_guess_when_an_empty_argv0_blurs_the_boundary() {
+        // Padding never exceeds seven bytes; more NULs mean empty arguments,
+        // and guessing could surface an environment entry as an argument.
+        let raw = buffer(1, b"/bin/x\0\0\0\0\0\0\0\0\0SECRET=value\0");
+
+        assert_eq!(parse(&raw), None);
     }
 
     #[test]

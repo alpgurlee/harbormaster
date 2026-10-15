@@ -15,9 +15,12 @@ pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
         .into_iter()
         .filter_map(|pid| {
             let info = bsd_info(pid).ok()?;
-            let usage = rusage(pid);
+            let key = key_of(pid, &info);
+            // Drop the figures if the pid changed hands while we read them.
+            let usage =
+                rusage(pid).filter(|_| bsd_info(pid).is_ok_and(|again| key_of(pid, &again) == key));
             Some(ProcessEntry {
-                key: key_of(pid, &info),
+                key,
                 parent: (info.pbi_ppid > 0).then_some(Pid(info.pbi_ppid)),
                 name: name_of(&info),
                 owner: match info.pbi_uid {
