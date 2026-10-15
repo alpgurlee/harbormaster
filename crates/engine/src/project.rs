@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -107,19 +108,49 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Manifests and git files are small; anything bigger is not one we trust.
+const SMALL_FILE_LIMIT: u64 = 1024 * 1024;
+
+/// Reads a file from a folder another process chose, so it may be a FIFO, a
+/// device or something huge. Opening never blocks and only regular files under
+/// the size limit are read.
+fn read_small_file(path: &Path) -> Option<String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > SMALL_FILE_LIMIT {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(SMALL_FILE_LIMIT).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
 fn read_manifest(folder: &Path) -> Option<Manifest> {
-    let text = |file: &str| std::fs::read_to_string(folder.join(file)).ok();
-    if let Some(json) = text("package.json") {
-        return Some(package_json(&json));
-    }
-    if let Some(toml) = text("Cargo.toml") {
-        return Some(cargo_toml(&toml));
-    }
-    if let Some(module) = text("go.mod") {
-        return Some(go_mod(&module));
-    }
-    if let Some(toml) = text("pyproject.toml") {
-        return Some(pyproject(&toml));
+    let text = |file: &str| read_small_file(&folder.join(file));
+    // A manifest that exists but can't be trusted still marks the folder as a project.
+    let parsed = |file: &str, parse: fn(&str) -> Manifest| {
+        folder.join(file).exists().then(|| {
+            text(file)
+                .map(|contents| parse(&contents))
+                .unwrap_or_default()
+        })
+    };
+    for (file, parse) in [
+        ("package.json", package_json as fn(&str) -> Manifest),
+        ("Cargo.toml", cargo_toml),
+        ("go.mod", go_mod),
+        ("pyproject.toml", pyproject),
+    ] {
+        if let Some(manifest) = parsed(file, parse) {
+            return Some(manifest);
+        }
     }
     if let Some(requirements) = text("requirements.txt") {
         return Some(Manifest {
@@ -380,7 +411,7 @@ fn dotnet_project(folder: &Path) -> Option<Manifest> {
             path.extension()
                 .is_some_and(|extension| extension == "csproj" || extension == "sln")
         })?;
-    let contents = std::fs::read_to_string(&project).unwrap_or_default();
+    let contents = read_small_file(&project).unwrap_or_default();
     let web = contents.contains("Microsoft.NET.Sdk.Web");
     Some(Manifest {
         name: project
@@ -414,7 +445,7 @@ fn read_git(folder: &Path) -> Option<GitInfo> {
         (dot_git, false)
     } else {
         // Worktrees and submodules point at their real git directory.
-        let pointer = std::fs::read_to_string(&dot_git).ok()?;
+        let pointer = read_small_file(&dot_git)?;
         let target = pointer
             .lines()
             .find_map(|line| line.strip_prefix("gitdir:"))?
@@ -426,7 +457,7 @@ fn read_git(folder: &Path) -> Option<GitInfo> {
             .contains("/worktrees/");
         (target, worktree)
     };
-    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok();
+    let head = read_small_file(&git_dir.join("HEAD"));
     Some(GitInfo {
         branch: head.as_deref().and_then(branch_from_head),
         worktree,
@@ -606,6 +637,43 @@ mod tests {
         let project = project.unwrap();
         assert_eq!(project.name, "scripts");
         assert_eq!(project.framework, None);
+    }
+
+    #[test]
+    fn does_not_hang_on_a_fifo_posing_as_a_manifest() {
+        let home = tempfile::tempdir().unwrap();
+        let app = home.path().join("trap");
+        fs::create_dir_all(&app).unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(app.join("package.json"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let (start, home_path) = (app.clone(), home.path().to_path_buf());
+        std::thread::spawn(move || done.send(resolve(&start, &home_path)).unwrap());
+
+        let project = finished.recv_timeout(std::time::Duration::from_secs(3));
+        assert!(
+            project.is_ok(),
+            "resolving a folder with a FIFO manifest blocked"
+        );
+    }
+
+    #[test]
+    fn ignores_manifests_too_large_to_be_real() {
+        let home = tempfile::tempdir().unwrap();
+        let app = home.path().join("bloated");
+        let padding = " ".repeat(2 * 1024 * 1024);
+        write(
+            &app.join("package.json"),
+            &format!(r#"{{"name":"bloated-name"{padding}}}"#),
+        );
+
+        let project = resolve(&app, home.path()).unwrap();
+
+        assert_eq!(project.name, "bloated");
     }
 
     #[test]
