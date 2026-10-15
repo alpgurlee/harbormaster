@@ -24,6 +24,15 @@ pub(crate) fn lines(port: u16, report: &PortReport<'_>) -> Vec<String> {
     }
 }
 
+/// 3 tells scripts the port is free; 1 that it could not be checked.
+pub(crate) fn status(report: &PortReport<'_>) -> u8 {
+    match report {
+        PortReport::Free | PortReport::FreeOnEveryInterface => 3,
+        PortReport::Unknown(_) => 1,
+        PortReport::InUse(_) | PortReport::InUseUnseen | PortReport::Denied => 0,
+    }
+}
+
 fn holder(port: u16, service: &Service) -> Vec<String> {
     let Some(root) = service.processes.first() else {
         return vec![format!(":{port} is in use.")];
@@ -76,7 +85,7 @@ mod tests {
 
     use harbormaster_engine::{Classification, Holder, Member, Port, PortReport, Project, Service};
 
-    use super::lines;
+    use super::{lines, status};
 
     fn service(name: &str, command: &str, port: u16) -> Service {
         Service {
@@ -155,6 +164,17 @@ mod tests {
                 "  started with: npm run dev (pid 94786)",
             ]
         );
+    }
+
+    #[test]
+    fn exits_with_three_for_a_free_port() {
+        let holder = service("node", "node server.js", 3000);
+
+        assert_eq!(status(&PortReport::Free), 3);
+        assert_eq!(status(&PortReport::FreeOnEveryInterface), 3);
+        assert_eq!(status(&PortReport::InUse(vec![&holder])), 0);
+        assert_eq!(status(&PortReport::InUseUnseen), 0);
+        assert_eq!(status(&PortReport::Unknown("boom".into())), 1);
     }
 
     #[test]

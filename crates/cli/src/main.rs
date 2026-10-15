@@ -2,11 +2,12 @@ mod format;
 mod why;
 
 use std::path::Path;
+use std::process::ExitCode;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use harbormaster_engine::{Classification, Input, Scanner, Service, Snapshot};
 
 /// How long to wait between the two samples a CPU reading needs.
@@ -17,42 +18,56 @@ const COMMAND_WIDTH: usize = 60;
 #[command(
     name = "harbormaster",
     version,
-    about = "See the dev servers running on this machine."
+    about = "See the dev servers running on this machine.",
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    /// Listing is the default, so its flags work on their own too.
+    #[command(flatten)]
+    list: ListArgs,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
     /// List dev servers (the default)
-    Ls {
-        /// Include listeners that are not dev servers
-        #[arg(long)]
-        all: bool,
-        /// Print machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
+    Ls(ListArgs),
     /// Explain who holds a port, or why it can't be used
     Why {
         /// The port to check
+        #[arg(value_parser = clap::value_parser!(u16).range(1..))]
         port: u16,
     },
 }
 
-fn main() -> anyhow::Result<()> {
-    match Cli::parse().command.unwrap_or(Command::Ls {
-        all: false,
-        json: false,
-    }) {
-        Command::Ls { all, json } => list(all, json),
-        Command::Why { port } => explain(port),
+#[derive(Debug, Clone, Copy, Args)]
+struct ListArgs {
+    /// Include listeners that are not dev servers
+    #[arg(long)]
+    all: bool,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let outcome = match cli.command {
+        None => list(cli.list),
+        Some(Command::Ls(args)) => list(args),
+        Some(Command::Why { port }) => explain(port),
+    };
+    match outcome {
+        Ok(status) => ExitCode::from(status),
+        Err(error) => {
+            eprintln!("harbormaster: {error:#}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-fn list(all: bool, json: bool) -> anyhow::Result<()> {
+fn list(ListArgs { all, json }: ListArgs) -> anyhow::Result<u8> {
     let snapshot = sample()?;
     let services: Vec<&Service> = snapshot
         .services
@@ -63,11 +78,11 @@ fn list(all: bool, json: bool) -> anyhow::Result<()> {
     if json {
         let document = serde_json::json!({ "schema": "harbormaster/v1", "services": services });
         println!("{}", serde_json::to_string_pretty(&document)?);
-        return Ok(());
+        return Ok(0);
     }
     if services.is_empty() {
         println!("No dev servers are listening.");
-        return Ok(());
+        return Ok(0);
     }
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
@@ -108,10 +123,10 @@ fn list(all: bool, json: bool) -> anyhow::Result<()> {
         rows.push(row);
     }
     print!("{}", format::table(&rows));
-    Ok(())
+    Ok(0)
 }
 
-fn explain(port: u16) -> anyhow::Result<()> {
+fn explain(port: u16) -> anyhow::Result<u8> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let snapshot = scan(&mut Scanner::default(), &home)?;
     let report =
@@ -119,7 +134,7 @@ fn explain(port: u16) -> anyhow::Result<()> {
     for line in why::lines(port, &report) {
         println!("{line}");
     }
-    Ok(())
+    Ok(why::status(&report))
 }
 
 fn ports(service: &Service) -> String {
@@ -152,4 +167,31 @@ fn scan(scanner: &mut Scanner, home: &Path) -> anyhow::Result<Snapshot> {
         home,
         now: Instant::now(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+
+    #[test]
+    fn takes_the_list_flags_without_naming_the_list_command() {
+        let cli = Cli::try_parse_from(["harbormaster", "--all", "--json"]).unwrap();
+
+        assert!(cli.command.is_none());
+        assert!(cli.list.all && cli.list.json);
+    }
+
+    #[test]
+    fn rejects_port_zero() {
+        assert!(Cli::try_parse_from(["harbormaster", "why", "0"]).is_err());
+    }
+
+    #[test]
+    fn still_takes_them_after_ls() {
+        let cli = Cli::try_parse_from(["harbormaster", "ls", "--all"]).unwrap();
+
+        assert!(matches!(cli.command, Some(Command::Ls(args)) if args.all && !args.json));
+    }
 }
