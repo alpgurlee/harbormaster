@@ -1,6 +1,6 @@
 use harbormaster_engine::{PortReport, Service};
 
-use crate::format::printable;
+use crate::format::{label, printable};
 
 /// The sentences `harbormaster why` prints for a port.
 pub(crate) fn lines(port: u16, report: &PortReport<'_>) -> Vec<String> {
@@ -37,10 +37,7 @@ fn holder(port: u16, service: &Service) -> Vec<String> {
     let Some(root) = service.processes.first() else {
         return vec![format!(":{port} is in use.")];
     };
-    let name = service
-        .project
-        .as_ref()
-        .map_or(&root.name, |project| &project.name);
+    let name = label(service);
     let root_holds_it = service.holders.iter().all(|holder| holder.pid == root.pid);
     let mut lines = Vec::new();
     if root_holds_it {

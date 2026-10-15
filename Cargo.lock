@@ -216,6 +216,7 @@ dependencies = [
  "clap",
  "harbormaster-engine",
  "harbormaster-platform",
+ "libc",
  "serde_json",
 ]
 

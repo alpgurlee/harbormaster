@@ -1,6 +1,10 @@
 mod format;
+mod stop;
 mod why;
 
+use std::collections::HashMap;
+use std::io::{BufRead, IsTerminal, Write};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::ExitCode;
 use std::thread::sleep;
@@ -8,10 +12,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use harbormaster_engine::{Classification, Input, Scanner, Service, Snapshot};
+use harbormaster_engine::{
+    Classification, Input, Outcome, Scanner, Service, Signals, Snapshot, Target,
+};
+use harbormaster_platform::{ProcessKey, Signal};
 
 /// How long to wait between the two samples a CPU reading needs.
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
+/// How long a forced process gets to disappear.
+const KILL_GRACE: Duration = Duration::from_secs(2);
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -40,6 +49,30 @@ enum Command {
         #[arg(value_parser = clap::value_parser!(u16).range(1..))]
         port: u16,
     },
+    /// Stop the server on a port, after showing what will stop
+    Stop {
+        /// The port the server listens on
+        #[arg(
+            value_parser = clap::value_parser!(u16).range(1..),
+            required_unless_present = "pid"
+        )]
+        port: Option<u16>,
+        /// Stop the server this process belongs to instead
+        #[arg(long, conflicts_with_all = ["port", "address"])]
+        pid: Option<u32>,
+        /// Pick the server on this address when several share the port
+        #[arg(long)]
+        address: Option<IpAddr>,
+        /// Stop without asking
+        #[arg(long, short)]
+        yes: bool,
+        /// End whatever is still running once the wait is over
+        #[arg(long)]
+        force: bool,
+        /// Seconds to wait for the server to exit after asking it to
+        #[arg(long, default_value_t = 5, value_name = "SECONDS")]
+        wait: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -58,6 +91,21 @@ fn main() -> ExitCode {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),
         Some(Command::Why { port }) => explain(port),
+        Some(Command::Stop {
+            port,
+            pid,
+            address,
+            yes,
+            force,
+            wait,
+        }) => {
+            let grace = Duration::from_secs(wait);
+            match (port, pid) {
+                (Some(port), _) => halt(Target::Port { port, address }, yes, force, grace),
+                (None, Some(pid)) => halt(Target::Pid(pid), yes, force, grace),
+                (None, None) => Ok(2),
+            }
+        }
     };
     match outcome {
         Ok(status) => ExitCode::from(status),
@@ -103,7 +151,7 @@ fn list(ListArgs { all, json }: ListArgs) -> anyhow::Result<u8> {
 fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
     let project = service.project.as_ref();
     let mut row = vec![
-        ports(service),
+        format::ports(service),
         format::truncate(project.map_or("-", |project| &project.name), NAME_WIDTH),
         format::truncate(
             project
@@ -139,14 +187,114 @@ fn explain(port: u16) -> anyhow::Result<u8> {
     Ok(why::status(&report))
 }
 
-fn ports(service: &Service) -> String {
-    let mut ports: Vec<u16> = service.ports.iter().map(|port| port.port).collect();
-    ports.dedup();
-    ports
+fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let snapshot = scan(&mut Scanner::default(), &home)?;
+    let service = match harbormaster_engine::choose(&snapshot, &target, &lineage()?) {
+        Ok(service) => service,
+        Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
+    };
+    for line in stop::preview(service) {
+        println!("{line}");
+    }
+    let count = service.processes.len();
+    let noun = if count == 1 { "process" } else { "processes" };
+    if !yes && !ask(&format!("Stop {count} {noun}? [y/N] "))? {
+        println!("Nothing was stopped.");
+        return Ok(stop::CANCELLED);
+    }
+
+    // What was approved is checked against a fresh look right before any signal.
+    let current = scan(&mut Scanner::default(), &home)?;
+    let targets = match harbormaster_engine::recheck(service, &current) {
+        Ok(targets) => targets,
+        Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
+    };
+    if targets.is_empty() {
+        println!("It had already stopped.");
+        return Ok(0);
+    }
+    let signals = Signals {
+        send: &harbormaster_platform::signal,
+        is_running: &harbormaster_platform::is_running,
+        sleep: &sleep,
+    };
+    let mut outcomes = harbormaster_engine::stop(&targets, Signal::Terminate, grace, &signals);
+    let left: Vec<ProcessKey> = outcomes
         .iter()
-        .map(|port| format!(":{port}"))
-        .collect::<Vec<_>>()
-        .join(", ")
+        .filter(|(_, outcome)| *outcome == Outcome::StillRunning)
+        .map(|(key, _)| *key)
+        .collect();
+    let forced = !left.is_empty()
+        && (force
+            || (!yes
+                && std::io::stdin().is_terminal()
+                && ask(&format!(
+                    "{} still running after {} s. End them now? [y/N] ",
+                    left.len(),
+                    grace.as_secs()
+                ))?));
+    if forced {
+        for (key, outcome) in harbormaster_engine::stop(&left, Signal::Kill, KILL_GRACE, &signals) {
+            if let Some(slot) = outcomes.iter_mut().find(|(target, _)| *target == key) {
+                slot.1 = outcome;
+            }
+        }
+    }
+
+    let (lines, status) = stop::report(service, &outcomes);
+    for line in lines {
+        println!("{line}");
+    }
+    if status == stop::PARTIAL && !forced && !left.is_empty() {
+        println!("Run it again with --force to end what is left.");
+    }
+    if status == 0 {
+        let listening = harbormaster_platform::listeners()?;
+        let free = service
+            .ports
+            .iter()
+            .all(|port| !listening.iter().any(|listener| listener.port == port.port));
+        if free {
+            println!("{} is free now.", format::ports(service));
+        }
+    }
+    Ok(status)
+}
+
+fn refuse((lines, status): (Vec<String>, u8)) -> u8 {
+    for line in lines {
+        eprintln!("{line}");
+    }
+    status
+}
+
+/// Asks on the terminal; anything but a clear yes, or no answer at all, is a no.
+fn ask(question: &str) -> anyhow::Result<bool> {
+    print!("{question}");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    if std::io::stdin().lock().read_line(&mut answer)? == 0 {
+        // No answer is coming; end the prompt's line.
+        println!();
+    }
+    Ok(stop::confirmed(&answer))
+}
+
+/// This process and everything above it, which a stop must never reach.
+fn lineage() -> anyhow::Result<Vec<u32>> {
+    let parents: HashMap<u32, u32> = harbormaster_platform::processes()?
+        .iter()
+        .filter_map(|entry| entry.parent.map(|parent| (entry.key.pid.0, parent.0)))
+        .collect();
+    let mut lineage = vec![std::process::id()];
+    while let Some(&parent) = lineage.last().and_then(|pid| parents.get(pid)) {
+        if lineage.contains(&parent) {
+            break;
+        }
+        lineage.push(parent);
+    }
+    Ok(lineage)
 }
 
 /// Two scans a moment apart, so CPU use can be measured.

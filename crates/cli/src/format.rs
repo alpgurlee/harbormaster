@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use harbormaster_engine::Service;
+
 const MIB: f64 = 1024.0 * 1024.0;
 const GIB: f64 = MIB * 1024.0;
 
@@ -42,6 +44,26 @@ pub(crate) fn printable(text: &str) -> String {
             if c.is_control() || bidi { '?' } else { c }
         })
         .collect()
+}
+
+/// The project's name, or the root process's when there is no project.
+pub(crate) fn label(service: &Service) -> &str {
+    match (&service.project, service.processes.first()) {
+        (Some(project), _) => &project.name,
+        (None, Some(root)) => &root.name,
+        (None, None) => "the server",
+    }
+}
+
+/// `:3000, :3001`
+pub(crate) fn ports(service: &Service) -> String {
+    let mut ports: Vec<u16> = service.ports.iter().map(|port| port.port).collect();
+    ports.dedup();
+    ports
+        .iter()
+        .map(|port| format!(":{port}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Pads every column to its widest cell, two spaces apart.
