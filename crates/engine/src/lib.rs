@@ -395,7 +395,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use harbormaster_platform::{
-        Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, StartTime,
+        Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, SocketId, StartTime,
     };
 
     use super::{Classification, Input, Protection, Scanner, Snapshot};
@@ -458,7 +458,10 @@ mod tests {
                     .key,
                 address: IpAddr::from([127, 0, 0, 1]),
                 port,
-                socket,
+                socket: socket.map(|kernel| SocketId {
+                    kernel,
+                    generation: 0,
+                }),
             })
             .collect();
         let details = |key: ProcessKey| {

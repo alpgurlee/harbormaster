@@ -9,7 +9,7 @@ use macos as sys;
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
     Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, Signal, SignalOutcome,
-    StartTime,
+    SocketId, StartTime,
 };
 
 #[derive(Debug, thiserror::Error)]

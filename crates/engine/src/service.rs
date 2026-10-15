@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 
-use harbormaster_platform::{Listener, Owner, Pid, ProcessEntry, ProcessKey};
+use harbormaster_platform::{Listener, Owner, Pid, ProcessEntry, ProcessKey, SocketId};
 
 use crate::role::{Role, is_dev_supervisor, is_runner_by_title, normalize, role, runs_a_script};
 use crate::tree::ProcessTree;
@@ -56,7 +56,7 @@ pub(crate) fn group(
     // Only processes holding the very same socket serve together, e.g. a
     // reloader and its worker. Unrelated processes that bound one port with
     // SO_REUSEPORT stay apart.
-    let mut holder_of_socket: HashMap<u64, Pid> = HashMap::new();
+    let mut holder_of_socket: HashMap<SocketId, Pid> = HashMap::new();
     for listener in &listeners {
         sets.add(listener.owner.pid);
         if let Some(socket) = listener.socket
@@ -283,7 +283,7 @@ mod tests {
     use std::collections::HashMap;
     use std::net::IpAddr;
 
-    use harbormaster_platform::{Listener, Pid, ProcessEntry};
+    use harbormaster_platform::{Listener, Pid, ProcessEntry, SocketId};
 
     use super::{Grouped, group};
     use crate::tree::ProcessTree;
@@ -320,7 +320,18 @@ mod tests {
         }
 
         /// A socket that several processes hold, e.g. inherited across fork.
-        fn sharing(mut self, pid: u32, port: u16, socket: u64) -> Self {
+        fn sharing(self, pid: u32, port: u16, socket: u64) -> Self {
+            self.socket(
+                pid,
+                port,
+                SocketId {
+                    kernel: socket,
+                    generation: 0,
+                },
+            )
+        }
+
+        fn socket(mut self, pid: u32, port: u16, socket: SocketId) -> Self {
             let owner = self
                 .processes
                 .iter()
@@ -454,6 +465,32 @@ mod tests {
             .process(30, 1, "node", &["node", "/srv/b.js"])
             .listening(20, 8000)
             .listening(30, 8000);
+
+        assert_eq!(machine.services().len(), 2);
+    }
+
+    #[test]
+    fn keeps_apart_sockets_that_reused_a_kernel_address() {
+        let machine = Machine::new()
+            .process(1, 0, "zsh", &["-zsh"])
+            .process(20, 1, "node", &["node", "/srv/a.js"])
+            .process(30, 1, "node", &["node", "/srv/b.js"])
+            .socket(
+                20,
+                8000,
+                SocketId {
+                    kernel: 77,
+                    generation: 1,
+                },
+            )
+            .socket(
+                30,
+                8000,
+                SocketId {
+                    kernel: 77,
+                    generation: 2,
+                },
+            );
 
         assert_eq!(machine.services().len(), 2);
     }

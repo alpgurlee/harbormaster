@@ -70,10 +70,18 @@ pub struct Listener {
     pub owner: ProcessKey,
     pub address: IpAddr,
     pub port: u16,
-    /// Identifies the socket itself within one scan, so processes that share
-    /// it (a reloader and its worker) can be told from unrelated processes that
-    /// bound the same port with SO_REUSEPORT. `None` where the OS doesn't say.
-    pub socket: Option<u64>,
+    /// Tells processes that share one socket (a reloader and its worker)
+    /// from unrelated ones that bound the same port with SO_REUSEPORT.
+    /// `None` where the OS doesn't say.
+    pub socket: Option<SocketId>,
+}
+
+/// One socket: where the kernel keeps it, and which allocation of that place
+/// it is, so a socket freed and replaced mid-scan reads as a different one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SocketId {
+    pub kernel: u64,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

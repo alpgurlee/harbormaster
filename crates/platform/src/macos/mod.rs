@@ -11,7 +11,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use libproc::file_info::pidfdinfo;
 use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 
-use crate::Listener;
+use crate::{Listener, SocketId};
 
 pub(crate) use process::{details, processes};
 pub(crate) use signal::{is_running, signal};
@@ -30,7 +30,7 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
         let Some(descriptors) = file_descriptors(pid) else {
             continue;
         };
-        let sockets: Vec<(IpAddr, u16, u64)> = descriptors
+        let sockets: Vec<(IpAddr, u16, SocketId)> = descriptors
             .iter()
             .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_SOCKET as u32)
             .filter_map(|descriptor| tcp_listen_address(pid, descriptor.proc_fd))
@@ -109,7 +109,7 @@ fn file_descriptors(pid: libc::pid_t) -> Option<Vec<libc::proc_fdinfo>> {
     Some(descriptors)
 }
 
-fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16, u64)> {
+fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16, SocketId)> {
     let info: SocketFDInfo = pidfdinfo(pid, fd).ok()?;
     if !matches!(SocketInfoKind::from(info.psi.soi_kind), SocketInfoKind::Tcp) {
         return None;
@@ -131,11 +131,15 @@ fn tcp_listen_address(pid: libc::pid_t, fd: i32) -> Option<(IpAddr, u16, u64)> {
         return None;
     };
     // The kernel keeps the port in network byte order in the low 16 bits.
-    // `soi_so` is the kernel's socket address: the same for every process
-    // holding this socket, different for each socket.
+    // `soi_so` is the kernel's socket address, the same for every process
+    // holding this socket; the generation count tells apart sockets that
+    // reused that address.
     Some((
         address,
         u16::from_be(inet.insi_lport as u16),
-        info.psi.soi_so,
+        SocketId {
+            kernel: info.psi.soi_so,
+            generation: inet.insi_gencnt,
+        },
     ))
 }
