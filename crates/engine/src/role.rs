@@ -146,34 +146,41 @@ pub(crate) fn runs_a_script(args: Option<&[String]>) -> bool {
     let Some((program, rest)) = args.and_then(|args| args.split_first()) else {
         return false;
     };
-    let lowered = |arg: &String| arg.to_lowercase();
+    let mut lowered = rest.iter().map(|arg| arg.to_lowercase());
     match normalize(program.trim_start_matches('-')).as_str() {
-        "cmd" => {
-            for arg in rest.iter().map(lowered) {
-                match arg.as_str() {
-                    "/k" => return false,
-                    "/c" => return true,
-                    _ => {}
-                }
-            }
-            false
-        }
-        "powershell" | "pwsh" => rest.iter().map(lowered).any(|arg| {
-            matches!(
-                arg.as_str(),
-                "-command" | "-c" | "-file" | "-encodedcommand"
-            )
-        }),
+        "cmd" => lowered
+            .find_map(|arg| match arg.as_str() {
+                "/c" | "/r" => Some(true),
+                "/k" => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false),
+        // Everything after -Command is the command, -NoExit included.
+        "powershell" | "pwsh" => lowered
+            .find_map(|arg| match arg.strip_prefix(['-', '/'])? {
+                "command" | "c" | "encodedcommand" | "e" | "ec" => Some(true),
+                "noexit" | "noe" | "file" | "f" => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false),
         _ => {
-            for arg in rest {
-                if arg.starts_with("--") {
-                    continue;
-                }
-                match arg.strip_prefix('-') {
-                    Some(flags) if flags.contains('c') => return true,
-                    Some(_) => continue,
-                    // A positional before -c is a script file.
-                    None => return false,
+            let mut rest = rest.iter();
+            while let Some(arg) = rest.next() {
+                match arg.as_str() {
+                    // `-` and `--` end the options; what follows is a script file.
+                    "-" | "--" => return false,
+                    _ if arg.starts_with("--") => {}
+                    _ => match arg.strip_prefix(['-', '+']) {
+                        Some(flags) if arg.starts_with('-') && flags.contains('c') => return true,
+                        Some(flags) => {
+                            // -o and -O take an option name: `bash -O extglob -c …`.
+                            if flags.contains(['o', 'O']) {
+                                rest.next();
+                            }
+                        }
+                        // A positional before -c is a script file.
+                        None => return false,
+                    },
                 }
             }
             false
@@ -321,6 +328,44 @@ mod tests {
             "-Command",
             "npm run dev"
         ]))));
+    }
+
+    #[test]
+    fn stops_reading_shell_options_where_the_shell_does() {
+        assert!(!runs_a_script(Some(&args(&["bash", "--", "-c", "x"]))));
+        assert!(!runs_a_script(Some(&args(&["bash", "-", "-c", "x"]))));
+        assert!(runs_a_script(Some(&args(&[
+            "bash",
+            "-O",
+            "extglob",
+            "-c",
+            "npm run dev"
+        ]))));
+        assert!(runs_a_script(Some(&args(&[
+            "zsh", "+o", "nomatch", "-c", "x"
+        ]))));
+        assert!(runs_a_script(Some(&args(&[
+            "bash", "-eo", "pipefail", "-c", "x"
+        ]))));
+        // -C is noclobber, not -c.
+        assert!(!runs_a_script(Some(&args(&["bash", "-C", "start.sh"]))));
+    }
+
+    #[test]
+    fn a_powershell_told_to_stay_open_is_a_session() {
+        assert!(!runs_a_script(Some(&args(&[
+            "pwsh", "-NoExit", "-Command", "x"
+        ]))));
+        assert!(!runs_a_script(Some(&args(&["pwsh", "-noe", "-c", "x"]))));
+        assert!(runs_a_script(Some(&args(&[
+            "pwsh", "-Command", "x", "-NoExit"
+        ]))));
+        assert!(!runs_a_script(Some(&args(&["pwsh", "-File", "start.ps1"]))));
+    }
+
+    #[test]
+    fn cmd_treats_r_like_c() {
+        assert!(runs_a_script(Some(&args(&["cmd", "/R", "next dev"]))));
     }
 
     #[test]
