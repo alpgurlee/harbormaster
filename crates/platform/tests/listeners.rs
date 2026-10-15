@@ -94,6 +94,10 @@ fn keeps_two_sockets_one_process_holds_on_the_same_endpoint() {
         .map(|listener| listener.socket)
         .collect();
 
-    assert_eq!(sockets.len(), 2, "both sockets should be reported: {sockets:?}");
+    assert_eq!(
+        sockets.len(),
+        2,
+        "both sockets should be reported: {sockets:?}"
+    );
     assert_ne!(sockets[0], sockets[1]);
 }

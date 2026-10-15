@@ -190,31 +190,46 @@ pub(crate) fn runs_a_script(args: Option<&[String]>) -> bool {
 
 /// Dev servers that run their real server in a child process and restart it,
 /// so stopping only the child would bring it straight back.
-const DEV_SUPERVISORS: &[&str] = &[
-    "next",
-    "nuxt",
-    "astro",
-    "nodemon",
-    "ts-node-dev",
-    "react-scripts",
-    "storybook",
-    "@storybook/cli",
-];
-
 pub(crate) fn is_dev_supervisor(name: &str, args: Option<&[String]>) -> bool {
     if role(name, args) != Role::Runtime {
         return false;
     }
-    let Some(args) = args else {
+    let Some((_, rest)) = args.and_then(|args| args.split_first()) else {
         return false;
     };
-    let watches = args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--watch" | "--reload" | "watch" | "runserver"));
-    let tool = args
-        .get(1)
-        .and_then(|script| crate::command::package_name(script));
-    watches || tool.is_some_and(|tool| DEV_SUPERVISORS.contains(&tool.as_str()))
+    let runtime = normalize(name);
+    // The runtime's own options come before the script; the rest is the script's.
+    let script_at = rest.iter().position(|arg| !arg.starts_with('-'));
+    let options = &rest[..script_at.unwrap_or(rest.len())];
+    let (tool, args) = match (runtime.as_str(), script_at) {
+        ("node", _)
+            if options
+                .iter()
+                .any(|option| option == "--watch" || option.starts_with("--watch-path")) =>
+        {
+            return true;
+        }
+        ("node" | "bun" | "deno", Some(at)) => {
+            (crate::command::package_name(&rest[at]), &rest[at + 1..])
+        }
+        ("python", Some(at)) => (Some(normalize(&rest[at])), &rest[at + 1..]),
+        _ => (Some(runtime), rest),
+    };
+    let subcommand = args.first().map(String::as_str);
+    let has = |flag: &str| args.iter().any(|arg| arg == flag);
+    match tool.as_deref() {
+        Some(
+            "next" | "nuxt" | "nuxi" | "astro" | "nodemon" | "ts-node-dev" | "react-scripts"
+            | "storybook" | "@storybook/cli",
+        ) => true,
+        Some("tsx") => subcommand == Some("watch"),
+        Some("nest" | "@nestjs/cli") => {
+            subcommand == Some("start") && (has("--watch") || has("-w"))
+        }
+        Some("uvicorn" | "hypercorn") => has("--reload"),
+        Some("manage.py") => subcommand == Some("runserver") && !has("--noreload"),
+        _ => false,
+    }
 }
 
 /// Lowercase, without `.exe`, and with Python's version suffix folded away.
@@ -233,7 +248,7 @@ pub(crate) fn normalize(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Role, normalize, role, runs_a_script};
+    use super::{Role, is_dev_supervisor, normalize, role, runs_a_script};
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
@@ -366,6 +381,81 @@ mod tests {
     #[test]
     fn cmd_treats_r_like_c() {
         assert!(runs_a_script(Some(&args(&["cmd", "/R", "next dev"]))));
+    }
+
+    fn supervises(name: &str, list: &[&str]) -> bool {
+        is_dev_supervisor(name, Some(&args(list)))
+    }
+
+    #[test]
+    fn knows_dev_servers_that_restart_a_child() {
+        assert!(supervises(
+            "node",
+            &["node", "/app/node_modules/next/dist/bin/next", "dev"]
+        ));
+        assert!(supervises(
+            "node",
+            &["node", "/app/node_modules/.bin/nodemon", "server.js"]
+        ));
+        assert!(supervises(
+            "node",
+            &[
+                "node",
+                "/app/node_modules/.bin/tsx",
+                "watch",
+                "src/index.ts"
+            ]
+        ));
+        assert!(supervises(
+            "node",
+            &["node", "/app/node_modules/.bin/nest", "start", "--watch"]
+        ));
+        assert!(supervises(
+            "python3.12",
+            &["python3", "-m", "uvicorn", "app:app", "--reload"]
+        ));
+        assert!(supervises(
+            "Python",
+            &["/usr/bin/python3", "manage.py", "runserver", "8000"]
+        ));
+    }
+
+    #[test]
+    fn reads_node_watch_mode_only_as_a_node_option() {
+        assert!(supervises("node", &["node", "--watch", "server.js"]));
+        assert!(supervises(
+            "node",
+            &["node", "--watch-path=src", "server.js"]
+        ));
+        assert!(!supervises("node", &["node", "server.js", "--watch"]));
+    }
+
+    #[test]
+    fn a_stray_word_in_the_arguments_does_not_make_a_supervisor() {
+        assert!(!supervises(
+            "node",
+            &["node", "/srv/supervisor.js", "--label", "watch"]
+        ));
+        assert!(!supervises(
+            "node",
+            &["node", "/app/node_modules/.bin/tsx", "src/watch.ts"]
+        ));
+        assert!(!supervises(
+            "node",
+            &["node", "/app/node_modules/.bin/nest", "start"]
+        ));
+        assert!(!supervises(
+            "python3",
+            &["python3", "-m", "uvicorn", "app:app"]
+        ));
+        assert!(!supervises(
+            "python3",
+            &["python3", "manage.py", "runserver", "--noreload"]
+        ));
+        assert!(!supervises(
+            "python3",
+            &["python3", "tools.py", "runserver"]
+        ));
     }
 
     #[test]
