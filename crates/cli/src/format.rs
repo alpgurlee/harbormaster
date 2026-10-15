@@ -32,8 +32,24 @@ pub(crate) fn truncate(text: &str, width: usize) -> String {
     format!("{}…", kept.trim_end())
 }
 
+/// Command lines and project names come from other programs. Control
+/// characters could rewrite the terminal (titles, colours, even the clipboard
+/// through OSC 52) and bidi overrides could disguise text, so both are replaced.
+fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            let bidi = matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+            if c.is_control() || bidi { '?' } else { c }
+        })
+        .collect()
+}
+
 /// Pads every column to its widest cell, two spaces apart.
 pub(crate) fn table(rows: &[Vec<String>]) -> String {
+    let rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| row.iter().map(|cell| printable(cell)).collect())
+        .collect();
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     let widths: Vec<usize> = (0..columns)
         .map(|column| {
@@ -76,6 +92,16 @@ mod tests {
         assert_eq!(uptime(Duration::from_secs(41 * 60)), "41m");
         assert_eq!(uptime(Duration::from_secs(3 * 3600 + 12 * 60)), "3h 12m");
         assert_eq!(uptime(Duration::from_secs(2 * 86_400 + 5 * 3600)), "2d 5h");
+    }
+
+    #[test]
+    fn neutralises_terminal_control_sequences_from_other_processes() {
+        let rows = vec![vec![
+            "evil\u{1b}]52;c;aGk=\u{7}name".to_string(),
+            "safe\u{202e}txt.exe".to_string(),
+        ]];
+
+        assert_eq!(table(&rows), "evil?]52;c;aGk=?name  safe?txt.exe\n");
     }
 
     #[test]
