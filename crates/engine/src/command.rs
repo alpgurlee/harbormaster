@@ -152,22 +152,31 @@ fn secret(token: &str) -> Option<Secret> {
         .chars()
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
         .collect();
-    // A URL's query is mask_url's business.
-    let head = match (token.find("://"), token.find('?')) {
-        (Some(scheme), Some(query)) if scheme < query => &token[..query],
-        _ => &token[..],
-    };
-    // Any `=` can end a name: `true;API_TOKEN=x`, `--env=API_TOKEN=x`, `$env:API_TOKEN=x`.
-    for (at, _) in head.match_indices('=') {
-        let name = &head[..at];
-        if is_secret_flag(name) || mentions_a_credential(identifier_at_end(name)) {
-            return Some(Secret::Assigned(name.to_string()));
+    // A shell starts a new word after an operator even without a space:
+    // `x;--password`, `build&&--token`.
+    let mut offset = 0;
+    for piece in token.split(SHELL_OPERATORS) {
+        // A URL's query is mask_url's business.
+        let head = match (piece.find("://"), piece.find('?')) {
+            (Some(scheme), Some(query)) if scheme < query => &piece[..query],
+            _ => piece,
+        };
+        // Any `=` can end a name: `--env=API_TOKEN=x`, `$env:API_TOKEN=x`.
+        for (at, _) in head.match_indices('=') {
+            let name = &head[..at];
+            if is_secret_flag(name) || mentions_a_credential(identifier_at_end(name)) {
+                return Some(Secret::Assigned(token[..offset + at].to_string()));
+            }
         }
+        offset += piece.len() + 1;
     }
+    let last = token.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
     let follows =
-        !head.contains('=') && (is_secret_flag(&token) || token.eq_ignore_ascii_case("bearer"));
+        !last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer"));
     follows.then_some(Secret::Follows(token))
 }
+
+const SHELL_OPERATORS: &[char] = &[';', '|', '&', '(', ')', '<', '>'];
 
 /// `API_TOKEN` in `true;API_TOKEN`.
 fn identifier_at_end(text: &str) -> &str {
@@ -442,6 +451,22 @@ mod tests {
         assert_eq!(
             show(&["env", "PORT=3000", "node", "a.js"]),
             "env PORT=3000 node a.js"
+        );
+    }
+
+    #[test]
+    fn splits_words_where_a_shell_operator_does() {
+        assert_eq!(
+            show(&["sh", "-c", "x;--password hunter2"]),
+            "sh -c x;--password ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "build&&--token abc"]),
+            "sh -c build&&--token ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/a?x=1;API_TOKEN=secret run"]),
+            "sh -c curl https://h/a?x=1;API_TOKEN=***"
         );
     }
 
