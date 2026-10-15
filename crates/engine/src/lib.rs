@@ -392,6 +392,7 @@ mod tests {
                 key: ProcessKey {
                     pid: Pid(pid),
                     start: StartTime(u64::from(pid) * 1_000_000_000),
+                    exec: 0,
                 },
                 parent: Some(Pid(parent)),
                 name: name.to_string(),

@@ -91,3 +91,21 @@ fn reads_empty_arguments_without_reaching_the_environment() {
         Field::Known(vec![String::new(), String::new(), "x".to_string()])
     );
 }
+
+#[test]
+fn gives_a_process_that_execs_a_new_identity() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "/bin/sleep 0.3; exec /bin/sleep 30"])
+        .spawn()
+        .unwrap();
+    let before = find(child.id()).key;
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let after = find(child.id()).key;
+    let stale = details(before);
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert_eq!((before.pid, before.start), (after.pid, after.start));
+    assert_ne!(before, after, "exec must change the identity");
+    assert_eq!(stale.args, Field::Gone);
+}

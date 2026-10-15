@@ -180,6 +180,7 @@ mod tests {
         ProcessKey {
             pid: Pid(pid),
             start: StartTime(u64::from(pid)),
+            exec: 0,
         }
     }
 

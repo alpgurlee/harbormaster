@@ -107,6 +107,7 @@ mod tests {
                 key: ProcessKey {
                     pid: Pid(772),
                     start: StartTime(1),
+                    exec: 0,
                 },
                 pid: 772,
                 name: name.into(),
@@ -127,6 +128,7 @@ mod tests {
             key: ProcessKey {
                 pid: Pid(pid),
                 start: StartTime(1),
+                exec: 0,
             },
             pid,
             name: "node".into(),

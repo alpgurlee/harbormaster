@@ -88,6 +88,7 @@ pub(crate) mod tests {
             key: ProcessKey {
                 pid: Pid(pid),
                 start: StartTime(start),
+                exec: 0,
             },
             parent: parent.map(Pid),
             name: name.to_string(),

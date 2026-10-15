@@ -14,6 +14,9 @@ pub struct StartTime(pub u64);
 pub struct ProcessKey {
     pub pid: Pid,
     pub start: StartTime,
+    /// Changes when the process execs another program, which keeps both the
+    /// pid and the start time. 0 where the OS doesn't track it.
+    pub exec: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -41,6 +41,7 @@ mod tests {
     const KEY: ProcessKey = ProcessKey {
         pid: Pid(42),
         start: StartTime(7),
+        exec: 0,
     };
 
     #[test]
@@ -76,6 +77,7 @@ mod tests {
         let reused = ProcessKey {
             pid: Pid(42),
             start: StartTime(8),
+            exec: 0,
         };
 
         assert_eq!(

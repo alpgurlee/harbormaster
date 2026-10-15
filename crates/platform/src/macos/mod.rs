@@ -24,7 +24,7 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
     let mut seen = HashSet::new();
     let mut listeners = Vec::new();
     for pid in all_pids()? {
-        let Ok(before) = process::bsd_info(pid) else {
+        let Ok((_, owner)) = process::identify(pid) else {
             continue;
         };
         let Some(descriptors) = file_descriptors(pid) else {
@@ -39,8 +39,7 @@ pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
             continue;
         }
         // Skip this round if the pid changed hands while we read its sockets.
-        let owner = process::key_of(pid, &before);
-        if !process::bsd_info(pid).is_ok_and(|after| process::key_of(pid, &after) == owner) {
+        if !process::identify(pid).is_ok_and(|(_, after)| after == owner) {
             continue;
         }
         // A process can hold one socket under several descriptors.

@@ -1,6 +1,6 @@
 use std::io;
 
-use super::process::{bsd_info, key_of};
+use super::process::identify;
 use crate::{ProcessKey, Signal, SignalOutcome};
 
 pub(crate) fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
@@ -34,7 +34,7 @@ pub(crate) fn is_running(key: ProcessKey) -> bool {
     let Ok(pid) = libc::pid_t::try_from(key.pid.0) else {
         return false;
     };
-    bsd_info(pid).is_ok_and(|info| key_of(pid, &info) == key)
+    identify(pid).is_ok_and(|(_, found)| found == key)
 }
 
 /// kill(0) would reach our whole process group and kill(1) launchd, so

@@ -14,11 +14,9 @@ pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
     let entries = all_pids()?
         .into_iter()
         .filter_map(|pid| {
-            let info = bsd_info(pid).ok()?;
-            let key = key_of(pid, &info);
+            let (info, key) = identify(pid).ok()?;
             // Drop the figures if the pid changed hands while we read them.
-            let usage =
-                rusage(pid).filter(|_| bsd_info(pid).is_ok_and(|again| key_of(pid, &again) == key));
+            let usage = rusage(pid).filter(|_| identify(pid).is_ok_and(|(_, again)| again == key));
             Some(ProcessEntry {
                 key,
                 parent: (info.pbi_ppid > 0).then_some(Pid(info.pbi_ppid)),
@@ -82,15 +80,63 @@ impl Missing {
 }
 
 fn identity_problem(pid: libc::pid_t, key: ProcessKey) -> Option<Missing> {
-    match bsd_info(pid) {
-        Ok(info) if key_of(pid, &info) == key => None,
+    match identify(pid) {
+        Ok((_, found)) if found == key => None,
         Ok(_) => Some(Missing::Gone),
         Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Some(Missing::Gone),
         Err(_) => Some(Missing::Denied),
     }
 }
 
-pub(super) fn bsd_info(pid: libc::pid_t) -> io::Result<libc::proc_bsdinfo> {
+/// A process's details and the identity they belong to.
+pub(super) fn identify(pid: libc::pid_t) -> io::Result<(libc::proc_bsdinfo, ProcessKey)> {
+    let info = bsd_info(pid)?;
+    let nanos = info.pbi_start_tvsec * 1_000_000_000 + info.pbi_start_tvusec * 1_000;
+    let key = ProcessKey {
+        pid: Pid(pid.unsigned_abs()),
+        start: StartTime(nanos),
+        exec: exec_version(pid),
+    };
+    Ok((info, key))
+}
+
+/// `struct proc_uniqidentifierinfo` from xnu's private proc_info.h.
+#[repr(C)]
+struct UniqueIdentifierInfo {
+    uuid: [u8; 16],
+    unique_id: u64,
+    parent_unique_id: u64,
+    id_version: i32,
+    original_parent_id_version: i32,
+    reserved: [u64; 2],
+}
+
+const PROC_PIDUNIQIDENTIFIERINFO: c_int = 17;
+
+/// xnu bumps `p_idversion` on exec. 0 if this macOS won't say, which leaves
+/// the pid and start time to tell processes apart.
+fn exec_version(pid: libc::pid_t) -> u32 {
+    // SAFETY: UniqueIdentifierInfo is plain old data; all-zero is a valid value.
+    let mut info: UniqueIdentifierInfo = unsafe { zeroed() };
+    let size = size_of::<UniqueIdentifierInfo>() as c_int;
+    // SAFETY: `info` is a writable buffer of exactly `size` bytes.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            PROC_PIDUNIQIDENTIFIERINFO,
+            0,
+            (&raw mut info).cast(),
+            size,
+        )
+    };
+    if written == size {
+        info.id_version as u32
+    } else {
+        0
+    }
+}
+
+fn bsd_info(pid: libc::pid_t) -> io::Result<libc::proc_bsdinfo> {
     // SAFETY: proc_bsdinfo is plain old data; all-zero is a valid value.
     let mut info: libc::proc_bsdinfo = unsafe { zeroed() };
     let size = size_of::<libc::proc_bsdinfo>() as c_int;
@@ -101,14 +147,6 @@ pub(super) fn bsd_info(pid: libc::pid_t) -> io::Result<libc::proc_bsdinfo> {
         Ok(info)
     } else {
         Err(io::Error::last_os_error())
-    }
-}
-
-pub(super) fn key_of(pid: libc::pid_t, info: &libc::proc_bsdinfo) -> ProcessKey {
-    let nanos = info.pbi_start_tvsec * 1_000_000_000 + info.pbi_start_tvusec * 1_000;
-    ProcessKey {
-        pid: Pid(pid.unsigned_abs()),
-        start: StartTime(nanos),
     }
 }
 
