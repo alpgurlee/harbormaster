@@ -1,5 +1,16 @@
 use crate::role::normalize;
 
+const SECRET_NAME_PARTS: &[&str] = &[
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "API_KEY",
+    "APIKEY",
+    "ACCESS_KEY",
+    "PRIVATE_KEY",
+    "CREDENTIAL",
+];
 const SECRET_FLAGS: &[&str] = &[
     "token",
     "auth-token",
@@ -35,17 +46,20 @@ pub(crate) fn display(args: &[String]) -> String {
             words.extend(rest.iter().cloned());
         }
     }
-    let words: Vec<String> = words
-        .into_iter()
-        .map(|word| {
-            if is_path(&word) {
-                file_name(&word)
+    // Split words a process title padded or a shell received as one string,
+    // so secrets inside `sh -c "server --token=…"` are masked too.
+    let tokens: Vec<String> = words
+        .iter()
+        .flat_map(|word| word.split_whitespace())
+        .map(|token| {
+            if is_path(token) {
+                file_name(token)
             } else {
-                word
+                token.to_string()
             }
         })
         .collect();
-    mask(words).join(" ")
+    mask(tokens).join(" ")
 }
 
 /// `…/node_modules/.bin/vite` → `vite`, `…/node_modules/@storybook/cli/…` → `@storybook/cli`.
@@ -84,6 +98,10 @@ fn mask(words: Vec<String>) -> Vec<String> {
             && is_secret_flag(flag)
         {
             masked.push(format!("{flag}=***"));
+        } else if let Some((name, _)) = word.split_once('=')
+            && is_secret_name(name)
+        {
+            masked.push(format!("{name}=***"));
         } else if is_secret_flag(&word) {
             masked.push(word);
             hide_next = true;
@@ -97,6 +115,14 @@ fn mask(words: Vec<String>) -> Vec<String> {
 fn is_secret_flag(word: &str) -> bool {
     word.starts_with('-')
         && SECRET_FLAGS.contains(&word.trim_start_matches('-').to_lowercase().as_str())
+}
+
+/// `GITHUB_TOKEN`, `X_API_KEY`, `DB_PASSWORD`…
+fn is_secret_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && SECRET_NAME_PARTS.iter().any(|part| upper.contains(part))
 }
 
 /// `scheme://user:password@host` → `scheme://user:***@host`
@@ -190,6 +216,35 @@ mod tests {
             show(&["C:\\dev\\api\\target\\debug\\api.exe", "--port", "8080"]),
             "api.exe --port 8080"
         );
+    }
+
+    #[test]
+    fn masks_secrets_inside_a_shell_command_string() {
+        assert_eq!(
+            show(&["sh", "-c", "server --token=abc"]),
+            "sh -c server --token=***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "server --password hunter2"]),
+            "sh -c server --password ***"
+        );
+    }
+
+    #[test]
+    fn masks_secret_looking_assignments() {
+        assert_eq!(
+            show(&["env", "X_API_KEY=abc", "node", "a.js"]),
+            "env X_API_KEY=*** node a.js"
+        );
+        assert_eq!(
+            show(&["env", "GITHUB_TOKEN=ghp_1", "PORT=3000"]),
+            "env GITHUB_TOKEN=*** PORT=3000"
+        );
+    }
+
+    #[test]
+    fn drops_the_padding_a_process_title_leaves_behind() {
+        assert_eq!(show(&["npm run dev   ", "", "  "]), "npm run dev");
     }
 
     #[test]
