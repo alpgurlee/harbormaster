@@ -88,18 +88,30 @@ const PACKAGE_MANAGERS: &[&str] = &["npm", "npx", "pnpm", "yarn"];
 pub(crate) fn role(name: &str, args: Option<&[String]>) -> Role {
     let name = normalize(name);
     let name = name.as_str();
+    // Some tools install their binary under a version number and are started
+    // by a symlink, so argv[0] is the only place their name shows. Trusting it
+    // for these roles only ever makes us stop less.
+    let launched_as = args
+        .and_then(|args| args.first())
+        .map(|first| normalize(first));
+    let is = |list: &[&str]| {
+        list.contains(&name)
+            || launched_as
+                .as_deref()
+                .is_some_and(|launched| list.contains(&launched))
+    };
     let launches_an_agent = args.is_some_and(|args| {
         args.iter()
             .take(3)
             .any(|arg| AGENT_PACKAGES.iter().any(|package| arg.contains(package)))
     });
-    if AGENTS.contains(&name) || launches_an_agent {
+    if is(AGENTS) || launches_an_agent {
         return Role::Agent;
     }
-    if TERMINALS.contains(&name) {
+    if is(TERMINALS) {
         return Role::Terminal;
     }
-    if SHELLS.contains(&name) {
+    if is(SHELLS) {
         return Role::Shell;
     }
     if RUNNERS.contains(&name) {
@@ -362,6 +374,14 @@ mod tests {
             role("bun", Some(&args(&["bun", "--hot", "server.ts"]))),
             Role::Runtime
         );
+    }
+
+    #[test]
+    fn recognises_an_agent_whose_binary_is_named_after_its_version() {
+        // ~/.local/share/claude/versions/2.1.300, started as `claude`.
+        let claude = args(&["claude", "--resume"]);
+
+        assert_eq!(role("2.1.300", Some(&claude)), Role::Agent);
     }
 
     #[test]

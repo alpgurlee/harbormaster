@@ -294,7 +294,7 @@ impl Scanner {
             cpu_percent: sum(members.iter().map(|member| member.cpu_percent)),
             processes: members,
             holders,
-            ancestors: ancestors(root, tree),
+            ancestors: ancestors(root, tree, args_of),
         })
     }
 
@@ -310,16 +310,28 @@ impl Scanner {
 }
 
 /// Up to the first system process, which is where a session ends.
-fn ancestors(root: &ProcessEntry, tree: &ProcessTree<'_>) -> Vec<Holder> {
+fn ancestors(
+    root: &ProcessEntry,
+    tree: &ProcessTree<'_>,
+    args_of: service::ArgsOf<'_>,
+) -> Vec<Holder> {
     let mut found = Vec::new();
     let mut current = root;
     while let Some(parent) = tree.parent(current.key.pid) {
         if service::is_system(parent) {
             break;
         }
+        let args = args_of(parent);
+        // An agent installed as `versions/2.1.300` is known by how it was started.
+        let name = match args.as_deref().and_then(<[String]>::first) {
+            Some(first) if role::role(&parent.name, args.as_deref()) == Role::Agent => {
+                normalize(first)
+            }
+            _ => parent.name.clone(),
+        };
         found.push(Holder {
             pid: parent.key.pid.0,
-            name: parent.name.clone(),
+            name,
         });
         current = parent;
     }
@@ -689,6 +701,53 @@ mod tests {
                 .any(|member| member.name == "postgres")
         );
         assert_eq!(snapshot.services[0].protected, Some(Protection::Database));
+    }
+
+    #[test]
+    fn names_what_stays_open_the_way_it_was_started() {
+        let home = tempfile::tempdir().unwrap();
+        let claude = "/Users/a/.local/share/claude/versions/2.1.300";
+        let procs = [
+            proc(
+                5,
+                1,
+                "2.1.300",
+                claude,
+                &["claude", "--resume"],
+                home.path(),
+            ),
+            proc(
+                10,
+                5,
+                "zsh",
+                "/bin/zsh",
+                &["/bin/zsh", "-c", "npm run dev"],
+                home.path(),
+            ),
+            proc(
+                20,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &["node", "/srv/server.js"],
+                home.path(),
+            ),
+        ];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(20, 4000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        let names: Vec<&str> = snapshot.services[0]
+            .ancestors
+            .iter()
+            .map(|ancestor| ancestor.name.as_str())
+            .collect();
+        assert_eq!(names, ["zsh", "claude"]);
     }
 
     #[test]
