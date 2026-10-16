@@ -161,16 +161,12 @@ fn mask_token(token: &str) -> (String, After) {
     let mut offset = 0;
     // `&` stays inside URLs, where it separates query pairs.
     for segment in normal.split([';', '|', '(', ')', '<', '>']) {
-        if segment.contains("://") {
-            hide_url_secrets(segment, offset, &mut hidden);
-        } else {
-            let mut start = offset;
-            for part in segment.split('&') {
-                if hide_assignment_secrets(part, start, normal.len(), &mut hidden) {
-                    after = After::RestHidden;
-                }
-                start += part.len() + 1;
-            }
+        let rest_hidden = match url_start(segment) {
+            Some(url_at) => hide_around_url(segment, url_at, offset, normal.len(), &mut hidden),
+            None => hide_parts(segment, offset, normal.len(), &mut hidden),
+        };
+        if rest_hidden {
+            after = After::RestHidden;
         }
         offset += segment.len() + 1;
     }
@@ -186,6 +182,58 @@ fn mask_token(token: &str) -> (String, After) {
         return (token.to_string(), after);
     }
     (with_hidden(&normal, hidden), after)
+}
+
+/// Each `&`-separated part of a word without a URL.
+fn hide_parts(segment: &str, offset: usize, end: usize, hidden: &mut Vec<Range<usize>>) -> bool {
+    let mut start = offset;
+    let mut rest_hidden = false;
+    for part in segment.split('&') {
+        rest_hidden |= hide_assignment_secrets(part, start, end, hidden);
+        start += part.len() + 1;
+    }
+    rest_hidden
+}
+
+/// Where a URL starts in a word: the scheme in front of its `://`.
+fn url_start(segment: &str) -> Option<usize> {
+    let scheme_end = segment.find("://")?;
+    let start = segment[..scheme_end]
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+        .map_or(0, |at| at + 1);
+    Some(start)
+}
+
+/// A URL and what surrounds it in one word.
+fn hide_around_url(
+    segment: &str,
+    url_at: usize,
+    offset: usize,
+    end: usize,
+    hidden: &mut Vec<Range<usize>>,
+) -> bool {
+    let prefix = &segment[..url_at];
+    // `--api-key=https://…`, `API_TOKEN=https://…`: the URL is a secret's value.
+    if hide_assignment_secrets(prefix, offset, end, hidden) {
+        return true;
+    }
+    let url = &segment[url_at..];
+    // Without a query or fragment, `&` ends the URL and starts another command.
+    let url_length = if url.contains(['?', '#']) {
+        url.len()
+    } else {
+        url.find('&').unwrap_or(url.len())
+    };
+    if prefix.ends_with('=') && !prefix.starts_with('-') {
+        // `NAME=https://…`: the whole URL is that name's value.
+        hidden.push(offset + url_at..offset + url_at + url_length);
+    } else {
+        hide_url_secrets(&url[..url_length], offset + url_at, hidden);
+    }
+    match segment.get(url_at + url_length + 1..) {
+        Some(rest) => hide_parts(rest, offset + url_at + url_length + 1, end, hidden),
+        None => false,
+    }
 }
 
 /// `--secret-flag=value`, `API_TOKEN=value`, `X-Api-Key:value` in one word.
@@ -235,15 +283,13 @@ fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>
         hidden.push(offset + start..offset + start + at);
     }
     let after_user = user_end.map_or(start, |at| start + at + 1);
-    let Some(query) = segment[after_user..].find('?') else {
+    // The query and the fragment, where OAuth hands out tokens, both hold
+    // `key=value` pairs.
+    let Some(pairs_at) = segment[after_user..].find(['?', '#']) else {
         return;
     };
-    let query_start = after_user + query + 1;
-    let query_end = segment[query_start..]
-        .find('#')
-        .map_or(segment.len(), |end| query_start + end);
-    let mut pair_start = query_start;
-    for pair in segment[query_start..query_end].split('&') {
+    let mut pair_start = after_user + pairs_at + 1;
+    for pair in segment[pair_start..].split(['&', '#', '?']) {
         if let Some((key, _)) = pair.split_once('=')
             && is_credential_key(key)
         {
@@ -253,21 +299,24 @@ fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>
     }
 }
 
-/// Replaces the marked ranges, merged, with the mask.
+/// Replaces the marked ranges with the mask, touching ranges as one.
 fn with_hidden(text: &str, mut hidden: Vec<Range<usize>>) -> String {
     hidden.sort_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(hidden.len());
+    for range in hidden {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
     let mut shown = String::with_capacity(text.len());
     let mut cursor = 0;
-    for range in hidden {
-        if range.start < cursor {
-            cursor = cursor.max(range.end);
-            continue;
-        }
+    for range in merged {
         shown.push_str(&text[cursor..range.start]);
         shown.push_str(HIDDEN);
         cursor = range.end;
     }
-    shown.push_str(&text[cursor.min(text.len())..]);
+    shown.push_str(&text[cursor..]);
     shown
 }
 
@@ -657,6 +706,34 @@ mod tests {
         assert_eq!(
             show(&["open", "https://h/?%74oken=sentinel&q=1"]),
             "open https://h/?%74oken=***&q=1"
+        );
+    }
+
+    #[test]
+    fn hides_a_url_that_is_the_value_of_a_secret() {
+        assert_eq!(
+            show(&["app", "--api-key=https://x.example/k1"]),
+            "app --api-key=***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "cd x && FOO=https://u@h/x run"]),
+            "sh -c cd x && FOO=*** run"
+        );
+    }
+
+    #[test]
+    fn reads_an_ampersand_after_a_url_without_a_query_as_the_shell_does() {
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/x&API_TOKEN=y run"]),
+            "sh -c curl https://h/x&API_TOKEN=***"
+        );
+    }
+
+    #[test]
+    fn masks_credentials_in_a_url_fragment() {
+        assert_eq!(
+            show(&["open", "https://h/cb#access_token=abc&state=s"]),
+            "open https://h/cb#access_token=***&state=s"
         );
     }
 
