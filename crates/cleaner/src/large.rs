@@ -24,10 +24,13 @@ const PACKAGES: &[&str] = &[
     "fcpbundle",
     "framework",
     "imovielibrary",
+    "key",
     "kext",
     "logicx",
     "lrlibrary",
     "musiclibrary",
+    "numbers",
+    "pages",
     "photoslibrary",
     "playground",
     "plugin",
@@ -206,10 +209,11 @@ fn entered(name: &OsStr) -> bool {
 }
 
 /// The file `relative` from the home folder, stored as `stat`, if it is a
-/// regular file large enough to list.
+/// regular file large enough to list. A file with other links is left out:
+/// trashing one of its names would free nothing.
 fn finding(hunt: &Hunt, relative: &Path, stat: &libc::stat) -> Option<Finding> {
     let bytes = measure::blocks(stat);
-    if !walk::is_file(stat) || bytes < hunt.smallest {
+    if !walk::is_file(stat) || stat.st_nlink > 1 || bytes < hunt.smallest {
         return None;
     }
     let name = relative.file_name()?;

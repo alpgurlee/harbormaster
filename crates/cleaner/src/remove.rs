@@ -78,12 +78,14 @@ fn one(
         return Outcome::Stopped;
     }
     let done = match (&opened, finding.kind) {
-        (Opened::Folder(dir), Kind::Personal) => trashed(&|| dir.path(), home, trash),
+        (Opened::Folder(dir), Kind::Personal) => {
+            trashed(&|| dir.path(), &finding.path, home, trash)
+        }
         (Opened::Folder(dir), Kind::Rebuildable | Kind::Discarded) => {
             deleted(&parent, dir, name, finding.emptied, stop)
         }
         // A file only ever goes to the Trash.
-        (Opened::File(file), _) => trashed(&|| file.path(), home, trash),
+        (Opened::File(file), _) => trashed(&|| file.path(), &finding.path, home, trash),
     };
     match done {
         Ok(outcome) => outcome,
@@ -200,15 +202,21 @@ fn empty(dir: &Dir, device: libc::dev_t, depth: usize, stop: &AtomicBool) -> io:
 
 /// Moves a folder or file to the Trash whole. The Trash takes a path, so it
 /// gets the one `now` reads from the kernel for this very folder or file,
-/// which must be inside `home`; afterwards it must be what the Trash took.
+/// which must be inside `home` and be `chosen`, the path the user chose: a
+/// file with other links may be named by any of them. Afterwards it must be
+/// what the Trash took.
 fn trashed(
     now: &dyn Fn() -> io::Result<PathBuf>,
+    chosen: &Path,
     home: &Path,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
 ) -> io::Result<Outcome> {
     let before = now()?;
     if !before.starts_with(home) {
         return Ok(refused(Why::OutsideHome));
+    }
+    if before != chosen {
+        return Ok(refused(Why::Changed));
     }
     let landed = trash(&before)?;
     if now()? != landed {
@@ -252,6 +260,25 @@ mod tests {
         // So a stop during removal may have deleted nothing yet.
         assert_eq!(done.unwrap_err().kind(), std::io::ErrorKind::Interrupted);
         assert!(home.join("cache/inner/a").exists());
+    }
+
+    #[test]
+    fn moves_nothing_the_kernel_names_by_another_path() {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        let chosen = home.join("Downloads/clip.mov");
+        let other = home.join("Big.app/Contents/Resources/clip.mov");
+
+        let outcome = super::trashed(&|| Ok(other.clone()), &chosen, &home, &|_| {
+            panic!("nothing may go to the Trash")
+        });
+
+        assert_eq!(
+            outcome.unwrap(),
+            Outcome::Refused {
+                why: crate::Why::Changed
+            }
+        );
     }
 
     #[test]

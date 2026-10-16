@@ -110,6 +110,38 @@ fn never_looks_in_the_library_hidden_folders_packages_or_caches() {
 }
 
 #[test]
+fn never_enters_document_packages_but_lists_documents_saved_as_one_file() {
+    let machine = machine();
+    let home = &machine.home;
+    for extension in ["key", "numbers", "pages"] {
+        for above in ["", "Documents/"] {
+            write(
+                &home.join(format!("{above}Talk.{extension}/Data/movie.mov")),
+                &vec![1; 2 * MIB],
+            );
+        }
+    }
+    assert_eq!(names(&hunted(home, &[])), []);
+
+    write(&home.join("Documents/plain.pages"), &vec![1; 2 * MIB]);
+    assert_eq!(
+        names(&hunted(home, &[])),
+        [("plain.pages", Group::Documents)]
+    );
+}
+
+#[test]
+fn leaves_out_a_file_with_other_links_since_trashing_one_frees_nothing() {
+    let machine = machine();
+    let film = machine.home.join("Movies/trip.mov");
+    write(&film, &vec![1; 2 * MIB]);
+    fs::create_dir_all(machine.home.join("Desktop")).expect("a folder");
+    fs::hard_link(&film, machine.home.join("Desktop/trip.mov")).expect("a hard link");
+
+    assert_eq!(names(&hunted(&machine.home, &[])), []);
+}
+
+#[test]
 fn never_follows_a_link() {
     let mine = machine();
     let elsewhere = machine();
