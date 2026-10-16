@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "panel",
+  "description": "What the tray panel may ask of the app: its own commands, nothing else.",
+  "windows": ["panel"],
+  "permissions": [
+    "allow-subscribe",
+    "allow-open-in-browser",
+    "allow-reveal-folder",
+    "allow-stop-preview",
+    "allow-stop",
+    "allow-force-stop",
+    "allow-resize-panel",
+    "allow-hide-panel",
+    "allow-quit"
+  ]
+}
