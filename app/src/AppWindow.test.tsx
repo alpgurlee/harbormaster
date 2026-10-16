@@ -11,7 +11,11 @@ vi.mock("./api", async (importOriginal) => ({
   hidePanel: vi.fn(async () => {}),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 beforeEach(() => {
   vi.mocked(resizePanel).mockClear();
   // jsdom lays nothing out, so nothing would ever be resized.
@@ -22,15 +26,23 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ height: 245.2 } as DOMRect);
 });
 
-it("fits the window to the panel again each time it is focused", () => {
-  render(<App />);
-  expect(resizePanel).not.toHaveBeenCalled();
-
+const focus = () =>
   act(() => {
     window.dispatchEvent(new Event("focus"));
   });
 
-  expect(resizePanel).toHaveBeenCalledTimes(1);
+it("fits the window to the panel again each time it is focused, until the panel goes", () => {
+  const { unmount } = render(<App />);
+  expect(resizePanel).not.toHaveBeenCalled();
+
+  focus();
+  focus();
+  expect(vi.mocked(resizePanel).mock.calls).toEqual([[246], [246]]);
+
+  unmount();
+  focus();
+  expect(resizePanel).toHaveBeenCalledTimes(2);
 });
