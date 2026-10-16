@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 const OPEN_FOLDER: libc::c_int =
@@ -125,8 +125,32 @@ impl Dir {
     /// each; a link is reported as a link.
     pub(crate) fn entries_while(
         &self,
-        mut keep_going: impl FnMut() -> bool,
+        keep_going: impl FnMut() -> bool,
     ) -> io::Result<Vec<(OsString, libc::stat)>> {
+        let mut found = Vec::new();
+        self.listed(keep_going, true, &mut |name, stat| {
+            found.push((name.to_os_string(), *stat));
+        })?;
+        Ok(found)
+    }
+
+    /// Hands `seen` each name inside that could be looked at, as it is
+    /// read, asking `keep_going` before each, and says whether any other
+    /// couldn't be: one that fails is left out rather than failing the rest.
+    pub(crate) fn each_seen(
+        &self,
+        keep_going: impl FnMut() -> bool,
+        seen: &mut dyn FnMut(&OsStr, &libc::stat),
+    ) -> io::Result<bool> {
+        self.listed(keep_going, false, seen)
+    }
+
+    fn listed(
+        &self,
+        mut keep_going: impl FnMut() -> bool,
+        whole: bool,
+        seen: &mut dyn FnMut(&OsStr, &libc::stat),
+    ) -> io::Result<bool> {
         // Reading moves a handle's position, so the listing gets a handle of its own.
         let raw = self.child(OsStr::new("."))?.0.into_raw_fd();
         // SAFETY: `raw` is an open folder; on success the stream owns it.
@@ -137,20 +161,24 @@ impl Dir {
             unsafe { libc::close(raw) };
             return Err(error);
         }
-        let listed = self.read_all(stream, &mut keep_going);
+        let listed = self.read_all(stream, &mut keep_going, whole, seen);
         // SAFETY: closes the stream and the handle it owns, once.
         unsafe { libc::closedir(stream) };
         listed
     }
 
     /// The entries `stream` lists. An entry that vanished meanwhile is left
-    /// out; any other failure fails the listing, so it is never taken as whole.
+    /// out. When the listing must be `whole`, any other failure fails it, so
+    /// it is never taken as whole; otherwise what failed is left out too, and
+    /// said to be.
     fn read_all(
         &self,
         stream: *mut libc::DIR,
         keep_going: &mut impl FnMut() -> bool,
-    ) -> io::Result<Vec<(OsString, libc::stat)>> {
-        let mut found = Vec::new();
+        whole: bool,
+        seen: &mut dyn FnMut(&OsStr, &libc::stat),
+    ) -> io::Result<bool> {
+        let mut missed = false;
         while keep_going() {
             // readdir reports a failure only through errno, so clear it first.
             // SAFETY: errno() points at this thread's errno.
@@ -161,7 +189,10 @@ impl Dir {
                 // SAFETY: as above, read right after readdir.
                 let code = unsafe { *errno() };
                 if code != 0 {
-                    return Err(io::Error::from_raw_os_error(code));
+                    if whole {
+                        return Err(io::Error::from_raw_os_error(code));
+                    }
+                    missed = true;
                 }
                 break;
             }
@@ -171,12 +202,13 @@ impl Dir {
                 continue;
             }
             match self.stat(name) {
-                Ok(stat) => found.push((OsString::from_vec(name.to_bytes().to_vec()), stat)),
+                Ok(stat) => seen(OsStr::from_bytes(name.to_bytes()), &stat),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
+                Err(error) if whole => return Err(error),
+                Err(_) => missed = true,
             }
         }
-        Ok(found)
+        Ok(missed)
     }
 
     /// The folder `name` inside this one, if it is still the folder `seen`

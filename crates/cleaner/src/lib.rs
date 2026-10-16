@@ -4,6 +4,7 @@
 
 mod catalog;
 mod large;
+mod map;
 mod measure;
 mod projects;
 mod remove;
@@ -295,6 +296,67 @@ pub struct Hunt<'a> {
     pub busy: &'a [(PathBuf, String)],
 }
 
+/// What a map of the home folder looks through.
+#[derive(Debug, Clone, Copy)]
+pub struct Chart<'a> {
+    /// The account's home folder as the disk spells it, which `account_home` gives.
+    pub home: &'a Path,
+    /// Whether to look in other apps' data too, which macOS may ask about.
+    pub others: bool,
+}
+
+/// A folder or file in a map of the home folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Area {
+    /// Its place in the map, counted from the home folder's 0, which the
+    /// window names it by.
+    pub id: u32,
+    pub name: String,
+    /// The room it takes on disk, with everything it holds.
+    pub bytes: u64,
+    pub folder: bool,
+    /// Why it may hold more than `bytes` says, when it may.
+    pub short: Option<Short>,
+    /// What it holds that is large enough to show, largest first.
+    pub inside: Vec<Area>,
+    /// What else it holds, each too small to show on its own.
+    pub rest: u64,
+    /// Where it is, and which folder or file it was, to show it in Finder.
+    #[serde(skip)]
+    pub path: PathBuf,
+    #[serde(skip)]
+    pub identity: Identity,
+}
+
+/// Why an area may hold more than it says, the weightiest last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Short {
+    /// It goes deeper than is looked into.
+    Deep,
+    /// Something in it changed while it was being looked at.
+    Changed,
+    /// Something in it couldn't be read, for its permissions or for macOS's.
+    Denied,
+    /// Other apps' data, left out unless asked for.
+    Skipped,
+    /// The map was stopped before it came to everything.
+    Stopped,
+}
+
+/// How far a map has come, told now and then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Charting {
+    /// Room counted so far.
+    pub bytes: u64,
+    /// Folders and files counted so far.
+    pub items: u64,
+    /// The folder being looked through, from the home folder, for showing.
+    pub folder: String,
+}
+
 /// A finding before it is measured.
 #[derive(Debug)]
 pub(crate) struct Candidate {
@@ -365,6 +427,16 @@ pub fn remove(
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
     remove::all(home, findings, usage, trash, stop, told)
+}
+
+/// A map of `chart.home`: what each folder holds, as the disk counts it,
+/// largest first. Everything is counted, a file with more names once, but
+/// never through a link or onto another disk, and other apps' data only
+/// when asked. Small places are counted together, and the map keeps a
+/// bounded number of places whatever the disk holds. `told` hears how far
+/// it has come now and then; `stop` cuts it short, keeping what was counted.
+pub fn map(chart: &Chart, stop: &AtomicBool, told: &mut dyn FnMut(Charting)) -> io::Result<Area> {
+    map::chart(chart, stop, told)
 }
 
 /// The large files in the home folder, by kind and largest first, never
