@@ -168,7 +168,7 @@ impl Walk<'_> {
 }
 
 /// Whether `dir` carries a valid `CACHEDIR.TAG`.
-fn tagged(dir: &Dir) -> bool {
+pub(crate) fn tagged(dir: &Dir) -> bool {
     dir.read_start(OsStr::new("CACHEDIR.TAG"), TAG.len() as u64)
         .is_ok_and(|start| start == TAG)
 }

@@ -16,10 +16,30 @@ const OPEN_FOLDER: libc::c_int =
 /// without waiting, so it can be refused.
 const OPEN_FILE: libc::c_int =
     libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+/// Opens a file only to look at it: nothing is read, so a file kept in the
+/// cloud isn't fetched for it.
+const LOOK_AT_FILE: libc::c_int =
+    libc::O_EVTONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
 
 /// An open folder.
 #[derive(Debug)]
 pub(crate) struct Dir(OwnedFd);
+
+/// A file opened only to look at it.
+#[derive(Debug)]
+pub(crate) struct Item(OwnedFd);
+
+impl Item {
+    /// How this file is stored; it may be something else than a file by now.
+    pub(crate) fn metadata(&self) -> io::Result<libc::stat> {
+        stat_of(self.0.as_fd())
+    }
+
+    /// Where this file is now, as the disk spells it.
+    pub(crate) fn path(&self) -> io::Result<PathBuf> {
+        path_of(self.0.as_fd())
+    }
+}
 
 impl Dir {
     /// The folder at `path`: absolute, and a real folder at every step.
@@ -44,6 +64,12 @@ impl Dir {
         self.open_at(name, OPEN_FOLDER).map(Self)
     }
 
+    /// What is called `name` inside this folder, opened only to look at it;
+    /// a link is refused.
+    pub(crate) fn item(&self, name: &OsStr) -> io::Result<Item> {
+        self.open_at(name, LOOK_AT_FILE).map(Item)
+    }
+
     /// Up to `most` bytes from the start of the regular file `name` inside
     /// this folder; a link, a folder or a pipe in its place is refused.
     pub(crate) fn read_start(&self, name: &OsStr, most: u64) -> io::Result<Vec<u8>> {
@@ -62,13 +88,7 @@ impl Dir {
     /// Where this folder is now, as the disk spells it, wherever it has
     /// moved since it was opened.
     pub(crate) fn path(&self) -> io::Result<PathBuf> {
-        let mut buffer = vec![0u8; libc::PATH_MAX as usize];
-        // SAFETY: `self.0` is open and `buffer` has the PATH_MAX bytes F_GETPATH writes at most.
-        if unsafe { libc::fcntl(self.0.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) } == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        let path = CStr::from_bytes_until_nul(&buffer).map_err(io::Error::other)?;
-        Ok(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+        path_of(self.0.as_fd())
     }
 
     /// Removes `name` inside this folder: a file, a link itself, or an
@@ -206,6 +226,17 @@ fn own(fd: libc::c_int) -> io::Result<OwnedFd> {
 }
 
 /// How the open file or folder `fd` is stored.
+/// Where what `fd` names is now, as the disk spells it.
+fn path_of(fd: BorrowedFd<'_>) -> io::Result<PathBuf> {
+    let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+    // SAFETY: `fd` is open and `buffer` has the PATH_MAX bytes F_GETPATH writes at most.
+    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let path = CStr::from_bytes_until_nul(&buffer).map_err(io::Error::other)?;
+    Ok(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+}
+
 fn stat_of(fd: BorrowedFd<'_>) -> io::Result<libc::stat> {
     let mut stat = MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `fd` is open and `stat` has room for one stat.

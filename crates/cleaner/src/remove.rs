@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::walk::{self, Dir};
+use crate::walk::{self, Dir, Item};
 use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Usage, Why, in_use, space};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
@@ -62,7 +62,7 @@ fn one(
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
-    let (parent, dir, name) = match reached(root, home, finding) {
+    let (parent, opened, name) = match reached(root, home, finding) {
         Ok(reached) => reached,
         Err(why) => return refused(why),
     };
@@ -77,9 +77,13 @@ fn one(
     if stop.load(Ordering::Relaxed) {
         return Outcome::Stopped;
     }
-    let done = match finding.kind {
-        Kind::Personal => trashed(&dir, home, trash),
-        Kind::Rebuildable | Kind::Discarded => deleted(&parent, &dir, name, finding.emptied, stop),
+    let done = match (&opened, finding.kind) {
+        (Opened::Folder(dir), Kind::Personal) => trashed(&|| dir.path(), home, trash),
+        (Opened::Folder(dir), Kind::Rebuildable | Kind::Discarded) => {
+            deleted(&parent, dir, name, finding.emptied, stop)
+        }
+        // A file only ever goes to the Trash.
+        (Opened::File(file), _) => trashed(&|| file.path(), home, trash),
     };
     match done {
         Ok(outcome) => outcome,
@@ -90,20 +94,25 @@ fn one(
     }
 }
 
-/// Whether `finding` is still the folder the scan measured, reached through
-/// real folders inside `home`.
+/// Whether `finding` is still the folder or file the scan measured, reached
+/// through real folders inside `home`.
 pub(crate) fn still_there(root: &Dir, home: &Path, finding: &Finding) -> bool {
     reached(root, home, finding).is_ok()
 }
 
-/// The folder `finding` names, opened through real folders from `root`,
-/// with the folder above it and its name there, if it is still the folder
-/// the scan measured.
+/// What a finding names, opened.
+enum Opened {
+    Folder(Dir),
+    File(Item),
+}
+
+/// What `finding` names, opened through real folders from `root`, with the
+/// folder above it and its name there, if it is still what the scan measured.
 fn reached<'a>(
     root: &Dir,
     home: &Path,
     finding: &'a Finding,
-) -> Result<(Dir, Dir, &'a OsStr), Why> {
+) -> Result<(Dir, Opened, &'a OsStr), Why> {
     let relative = finding
         .path
         .strip_prefix(home)
@@ -113,17 +122,24 @@ fn reached<'a>(
         .zip(relative.file_name())
         .ok_or(Why::OutsideHome)?;
     let opened = root.descend(above).and_then(|parent| {
-        let dir = parent.child(name)?;
-        let seen = Identity::of(&dir.metadata()?);
-        Ok((parent, dir, seen))
+        let (opened, stat) = if finding.identity.folder {
+            let dir = parent.child(name)?;
+            let stat = dir.metadata()?;
+            (Opened::Folder(dir), stat)
+        } else {
+            let file = parent.item(name)?;
+            let stat = file.metadata()?;
+            (Opened::File(file), stat)
+        };
+        Ok((parent, opened, Identity::of(&stat)))
     });
-    let (parent, dir, seen) = opened.map_err(|error| Why::NotReached {
+    let (parent, opened, seen) = opened.map_err(|error| Why::NotReached {
         error: error.to_string(),
     })?;
     if seen != finding.identity {
         return Err(Why::Changed);
     }
-    Ok((parent, dir, name))
+    Ok((parent, opened, name))
 }
 
 fn refused(why: Why) -> Outcome {
@@ -182,20 +198,20 @@ fn empty(dir: &Dir, device: libc::dev_t, depth: usize, stop: &AtomicBool) -> io:
     Ok(())
 }
 
-/// Moves the folder `dir` to the Trash whole. The Trash takes a path, so it
-/// gets the one the kernel gives for this very folder right now, which must
-/// be inside `home`; afterwards this folder must be what the Trash took.
+/// Moves a folder or file to the Trash whole. The Trash takes a path, so it
+/// gets the one `now` reads from the kernel for this very folder or file,
+/// which must be inside `home`; afterwards it must be what the Trash took.
 fn trashed(
-    dir: &Dir,
+    now: &dyn Fn() -> io::Result<PathBuf>,
     home: &Path,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
 ) -> io::Result<Outcome> {
-    let now = dir.path()?;
-    if !now.starts_with(home) {
+    let before = now()?;
+    if !before.starts_with(home) {
         return Ok(refused(Why::OutsideHome));
     }
-    let landed = trash(&now)?;
-    if dir.path()? != landed {
+    let landed = trash(&before)?;
+    if now()? != landed {
         return Ok(Outcome::Failed {
             why: format!(
                 "the Trash took {} instead, which the scan never saw",

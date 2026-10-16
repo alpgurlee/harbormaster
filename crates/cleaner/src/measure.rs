@@ -83,7 +83,7 @@ pub(crate) fn all(
 }
 
 /// As many workers as the open-file limit leaves room for.
-fn workers() -> usize {
+pub(crate) fn workers() -> usize {
     let mut limit = MaybeUninit::<libc::rlimit>::uninit();
     // SAFETY: `limit` has room for one rlimit, which getrlimit fills on success.
     let soft = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) } == 0 {
@@ -146,7 +146,7 @@ fn below(
     Ok(total)
 }
 
-fn blocks(stat: &libc::stat) -> u64 {
+pub(crate) fn blocks(stat: &libc::stat) -> u64 {
     u64::try_from(stat.st_blocks).unwrap_or(0) * 512
 }
 

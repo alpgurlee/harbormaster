@@ -3,6 +3,7 @@
 //! looks; removal takes what the user confirmed, checking each item again.
 
 mod catalog;
+mod large;
 mod measure;
 mod projects;
 mod remove;
@@ -49,6 +50,17 @@ pub enum Group {
     Apps,
     Logs,
     Trash,
+    /// The user's large files, by kind: films and screen recordings.
+    Videos,
+    /// Compressed archives and disk images.
+    Archives,
+    /// Installers and app packages for this or another system.
+    Installers,
+    Audio,
+    Images,
+    Documents,
+    /// Large files of any other kind.
+    OtherFiles,
 }
 
 /// How a finding would go, which decides whether it is picked unasked.
@@ -87,17 +99,19 @@ pub struct Finding {
     /// the app that owns it expects it to be there. Never so for personal
     /// things, which go to the Trash whole.
     pub emptied: bool,
-    /// Which folder the scan measured, so that removal takes only that one.
+    /// Which folder or file the scan measured, so that removal takes only that one.
     #[serde(skip)]
     pub identity: Identity,
 }
 
-/// A folder as the disk knows it, whatever it is called: its disk and its
-/// inode. The default is no folder at all, which nothing on disk matches.
+/// A folder or file as the disk knows it, whatever it is called: its disk,
+/// its inode, and which of the two it is. The default is nothing at all,
+/// which nothing on disk matches.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Identity {
     device: libc::dev_t,
     inode: libc::ino_t,
+    pub(crate) folder: bool,
 }
 
 impl Identity {
@@ -105,6 +119,7 @@ impl Identity {
         Self {
             device: stat.st_dev,
             inode: stat.st_ino,
+            folder: walk::is_folder(stat),
         }
     }
 }
@@ -236,6 +251,18 @@ pub struct Survey<'a> {
     pub now: SystemTime,
 }
 
+/// What a hunt for large files looks through.
+#[derive(Debug, Clone, Copy)]
+pub struct Hunt<'a> {
+    /// The account's home folder as the disk spells it, which `account_home`
+    /// gives: an absolute path with a real folder at every step.
+    pub home: &'a Path,
+    /// Files taking less room than this are left out.
+    pub smallest: u64,
+    /// Paths processes hold, each with its process's name.
+    pub busy: &'a [(PathBuf, String)],
+}
+
 /// A finding before it is measured.
 #[derive(Debug)]
 pub(crate) struct Candidate {
@@ -306,6 +333,19 @@ pub fn remove(
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
     remove::all(home, findings, usage, trash, stop, told)
+}
+
+/// The large files in the home folder, by kind and largest first, never
+/// picked: each is the user's own, and goes only to the Trash. The Library,
+/// hidden folders, apps and other packages, and caches are never looked in.
+/// `measured` hears after each folder of the home folder is looked through;
+/// `stop` cuts the hunt short, keeping what was found.
+pub fn large(
+    hunt: &Hunt,
+    stop: &AtomicBool,
+    measured: &(dyn Fn(Measured) + Sync),
+) -> io::Result<Vec<Finding>> {
+    large::hunt(hunt, stop, measured)
 }
 
 /// `findings`, from a scan of `home`, as they stand now: what was removed or

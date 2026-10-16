@@ -164,6 +164,13 @@ fn title(group: Group) -> &'static str {
         Group::Apps => "App caches",
         Group::Logs => "Logs",
         Group::Trash => "Trash",
+        Group::Videos => "Videos",
+        Group::Archives => "Archives and disk images",
+        Group::Installers => "Installers",
+        Group::Audio => "Audio",
+        Group::Images => "Images",
+        Group::Documents => "Documents",
+        Group::OtherFiles => "Other large files",
     }
 }
 
