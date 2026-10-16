@@ -6,7 +6,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use common::{MIB, TAG, machine, write};
+use common::{MIB, TAG, machine, reach, write};
 use harbormaster_cleaner::{
     Finding, Group, Hunt, Kind, Outcome, Usage, Why, large, recheck, remove,
 };
@@ -42,7 +42,7 @@ fn into(bin: &Path) -> impl Fn(&Path) -> io::Result<PathBuf> + '_ {
 
 fn removed(home: &Path, finding: &Finding, bin: &Path) -> Outcome {
     let cleaned = remove(
-        home,
+        &reach(home),
         std::slice::from_ref(finding),
         &nothing_used,
         &into(bin),
@@ -223,7 +223,8 @@ fn looks_again_at_a_file_as_at_a_folder() {
     let found = hunted(&machine.home, &[]);
     fs::remove_file(&gone).expect("removed by hand");
 
-    let now = recheck(&machine.home, &found, &Usage::default()).expect("the recheck should run");
+    let now =
+        recheck(&reach(&machine.home), &found, &Usage::default()).expect("the recheck should run");
 
     assert_eq!(names(&now), [("kept.mov", Group::Videos)]);
 }

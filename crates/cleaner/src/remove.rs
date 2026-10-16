@@ -7,21 +7,61 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir, Item};
-use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Usage, Why, in_use, space};
+use crate::{
+    Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, in_use, space,
+};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
 
+/// The folders removing starts from, each opened once with where it is: the
+/// home folder, and the shared app folder when the Mac has one.
+pub(crate) struct Roots<'a> {
+    home: (Dir, &'a Path),
+    shared: Option<(Dir, &'a Path)>,
+}
+
+impl<'a> Roots<'a> {
+    pub(crate) fn open(reach: &Reach<'a>) -> io::Result<Self> {
+        Ok(Self {
+            home: (Dir::open(reach.home)?, reach.home),
+            shared: Dir::open(reach.shared).ok().map(|dir| (dir, reach.shared)),
+        })
+    }
+
+    /// The folder `finding` is reached from, and where it is: the home
+    /// folder, or for an app of the user's the shared app folder, from which
+    /// nothing else is ever taken.
+    fn of(&self, finding: &Finding) -> Option<(&Dir, &Path)> {
+        let (home, at) = &self.home;
+        if finding.path.starts_with(at) {
+            return Some((home, at));
+        }
+        let app = finding.group == Group::Applications && finding.kind == Kind::Personal;
+        self.shared
+            .as_ref()
+            .filter(|(_, at)| app && finding.path.starts_with(at))
+            .map(|(shared, at)| (shared, *at))
+    }
+
+    /// Whether `finding` is still the folder or file that was measured,
+    /// reached through real folders from its root.
+    pub(crate) fn still_there(&self, finding: &Finding) -> bool {
+        self.of(finding)
+            .is_some_and(|(root, at)| still_there(root, at, &finding.path, finding.identity))
+    }
+}
+
 pub(crate) fn all(
-    home: &Path,
+    reach: &Reach,
     findings: &[Finding],
     usage: &dyn Fn() -> io::Result<Usage>,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
-    let root = Dir::open(home)?;
-    let before = space::disk(home)?.free;
+    let roots = Roots::open(reach)?;
+    let before = space::disk(reach.home)?.free;
     // Emptying the Trash comes first, so what goes into it now stays there.
     let mut order: Vec<&Finding> = findings.iter().collect();
     order.sort_by_key(|finding| finding.kind != Kind::Discarded);
@@ -33,7 +73,7 @@ pub(crate) fn all(
             // Removing the one before may have taken a while, so what uses
             // what is read again for each.
             match usage() {
-                Ok(usage) => one(&root, home, finding, &usage, trash, stop),
+                Ok(usage) => one(&roots, finding, &usage, trash, stop),
                 Err(error) => refused(Why::Unchecked {
                     error: error.to_string(),
                 }),
@@ -46,7 +86,7 @@ pub(crate) fn all(
         told(&removal);
         removals.push(removal);
     }
-    let after = space::disk(home)?.free;
+    let after = space::disk(reach.home)?.free;
     Ok(Cleaned {
         removals,
         freed_bytes: after.saturating_sub(before),
@@ -55,14 +95,16 @@ pub(crate) fn all(
 
 /// One finding: looked at again, then deleted or moved to the Trash.
 fn one(
-    root: &Dir,
-    home: &Path,
+    roots: &Roots,
     finding: &Finding,
     usage: &Usage,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
-    let (parent, opened, name) = match reached(root, home, &finding.path, finding.identity) {
+    let Some((root, at)) = roots.of(finding) else {
+        return refused(Why::OutsideHome);
+    };
+    let (parent, opened, name) = match reached(root, at, &finding.path, finding.identity) {
         Ok(reached) => reached,
         Err(why) => return refused(why),
     };
@@ -78,14 +120,12 @@ fn one(
         return Outcome::Stopped;
     }
     let done = match (&opened, finding.kind) {
-        (Opened::Folder(dir), Kind::Personal) => {
-            trashed(&|| dir.path(), &finding.path, home, trash)
-        }
+        (Opened::Folder(dir), Kind::Personal) => trashed(&|| dir.path(), &finding.path, at, trash),
         (Opened::Folder(dir), Kind::Rebuildable | Kind::Discarded) => {
             deleted(&parent, dir, name, finding.emptied, stop)
         }
         // A file only ever goes to the Trash.
-        (Opened::File(file), _) => trashed(&|| file.path(), &finding.path, home, trash),
+        (Opened::File(file), _) => trashed(&|| file.path(), &finding.path, at, trash),
     };
     match done {
         Ok(outcome) => outcome,
@@ -97,9 +137,9 @@ fn one(
 }
 
 /// Whether `path` is still the folder or file with `identity`, reached
-/// through real folders inside `home`.
-pub(crate) fn still_there(root: &Dir, home: &Path, path: &Path, identity: Identity) -> bool {
-    reached(root, home, path, identity).is_ok()
+/// through real folders from `root`, which is at `at`.
+pub(crate) fn still_there(root: &Dir, at: &Path, path: &Path, identity: Identity) -> bool {
+    reached(root, at, path, identity).is_ok()
 }
 
 /// What a finding names, opened.
@@ -108,15 +148,16 @@ enum Opened {
     File(Item),
 }
 
-/// What `path` names, opened through real folders from `root`, with the
-/// folder above it and its name there, if it is still the one with `identity`.
+/// What `path` names, opened through real folders from `root`, which is at
+/// `at`, with the folder above it and its name there, if it is still the
+/// one with `identity`.
 fn reached<'a>(
     root: &Dir,
-    home: &Path,
+    at: &Path,
     path: &'a Path,
     identity: Identity,
 ) -> Result<(Dir, Opened, &'a OsStr), Why> {
-    let relative = path.strip_prefix(home).map_err(|_| Why::OutsideHome)?;
+    let relative = path.strip_prefix(at).map_err(|_| Why::OutsideHome)?;
     let (above, name) = relative
         .parent()
         .zip(relative.file_name())
@@ -200,17 +241,17 @@ fn empty(dir: &Dir, device: libc::dev_t, depth: usize, stop: &AtomicBool) -> io:
 
 /// Moves a folder or file to the Trash whole. The Trash takes a path, so it
 /// gets the one `now` reads from the kernel for this very folder or file,
-/// which must be inside `home` and be `chosen`, the path the user chose: a
-/// file with other links may be named by any of them. Afterwards it must be
-/// what the Trash took.
+/// which must be inside `at`, the folder it was reached from, and be
+/// `chosen`, the path the user chose: a file with other links may be named
+/// by any of them. Afterwards it must be what the Trash took.
 fn trashed(
     now: &dyn Fn() -> io::Result<PathBuf>,
     chosen: &Path,
-    home: &Path,
+    at: &Path,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
 ) -> io::Result<Outcome> {
     let before = now()?;
-    if !before.starts_with(home) {
+    if !before.starts_with(at) {
         return Ok(refused(Why::OutsideHome));
     }
     if before != chosen {
@@ -234,9 +275,9 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::{Duration, SystemTime};
 
-    use super::one;
+    use super::{Roots, one};
     use crate::walk::Dir;
-    use crate::{Outcome, Survey, Usage, scan};
+    use crate::{Outcome, Reach, Survey, Usage, scan};
 
     #[test]
     fn stops_before_deleting_anything_when_told_while_listing() {
@@ -296,9 +337,12 @@ mod tests {
         };
         let findings = scan(&survey, &AtomicBool::new(false)).unwrap();
 
+        let reach = Reach {
+            home: &home,
+            shared: &home.join("no shared apps"),
+        };
         let outcome = one(
-            &Dir::open(&home).unwrap(),
-            &home,
+            &Roots::open(&reach).unwrap(),
             &findings[0],
             &Usage::default(),
             &|_| panic!("nothing may go to the Trash"),

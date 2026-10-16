@@ -222,8 +222,12 @@ fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
         return Ok(0);
     }
     clean::remove_picked(&findings, json, &mut out, |picked, stop, told| {
+        let reach = harbormaster_cleaner::Reach {
+            home: &home,
+            shared: Path::new(harbormaster_cleaner::SHARED_APPS),
+        };
         harbormaster_cleaner::remove(
-            &home,
+            &reach,
             picked,
             &|| in_use_now(&home).map_err(io::Error::other),
             &|path| harbormaster_platform::trash(path).map_err(io::Error::other),

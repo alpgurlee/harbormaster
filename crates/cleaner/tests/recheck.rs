@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, machine, node_project, write};
+use common::{DAY, machine, node_project, reach, write};
 use harbormaster_cleaner::{Finding, Survey, Usage, recheck, scan};
 
 fn scanned(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> Vec<Finding> {
@@ -36,7 +36,8 @@ fn leaves_out_what_went_or_was_made_again_since_the_scan() {
     fs::remove_dir_all(again.join("node_modules")).expect("removed by hand");
     write(&again.join("node_modules/left-pad/index.js"), b"x");
 
-    let now = recheck(&machine.home, &findings, &Usage::default()).expect("the recheck should run");
+    let now = recheck(&reach(&machine.home), &findings, &Usage::default())
+        .expect("the recheck should run");
 
     assert!(named(&now, "gone · node_modules").is_none());
     assert!(named(&now, "again · node_modules").is_none());
@@ -64,7 +65,7 @@ fn reads_again_what_is_using_each() {
         running: Vec::new(),
     };
 
-    let now = recheck(&machine.home, &findings, &usage).expect("the recheck should run");
+    let now = recheck(&reach(&machine.home), &findings, &usage).expect("the recheck should run");
 
     let in_use = |name| named(&now, name).expect(name).in_use.as_deref();
     assert_eq!(in_use("freed · node_modules"), None);

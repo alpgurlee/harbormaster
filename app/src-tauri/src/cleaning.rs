@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use harbormaster_cleaner::{
-    Area, Chart, Charting, Cleaned, Finding, Hunt, Measured, Outcome, Removal, Survey, Usage, Why,
+    Area, Chart, Charting, Cleaned, Finding, Hunt, Measured, Outcome, Reach, Removal, Survey,
+    Usage, Why,
 };
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
@@ -305,7 +306,8 @@ impl Cleaning {
         let findings = self.shown(token)?;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let usage = usage_now().map_err(failed)?;
-        let now = harbormaster_cleaner::recheck(&home, &findings, &usage).map_err(failed)?;
+        let now =
+            harbormaster_cleaner::recheck(&reach(&home), &findings, &usage).map_err(failed)?;
         self.looked_again(token, now.clone())?;
         Ok(now)
     }
@@ -464,7 +466,7 @@ impl Working {
         let mut removals = Vec::new();
         let cleaned = harbormaster_cleaner::account_home().and_then(|home| {
             harbormaster_cleaner::remove(
-                &home,
+                &reach(&home),
                 &chosen,
                 &usage_now,
                 &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
@@ -517,6 +519,15 @@ fn place(area: &Area, id: u32) -> Option<&Area> {
         return Some(area);
     }
     area.inside.iter().find_map(|each| place(each, id))
+}
+
+/// Where removing may go for this user: their home folder, and the Mac's
+/// shared app folder for their own apps.
+fn reach(home: &Path) -> Reach<'_> {
+    Reach {
+        home,
+        shared: Path::new(harbormaster_cleaner::SHARED_APPS),
+    }
 }
 
 /// Whether the window can be told of `finding`: its paths must be text.

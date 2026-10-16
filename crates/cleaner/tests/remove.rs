@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, MIB, Machine, age, machine, node_project, write};
+use common::{DAY, MIB, Machine, age, machine, node_project, reach, write};
 use harbormaster_cleaner::{
     Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, Usage, Why, remove, scan,
 };
@@ -46,7 +46,7 @@ fn removed(
     let survey = survey(&machine.home, &roots, &[]);
     let chosen = chosen(&survey, names);
     remove(
-        &machine.home,
+        &reach(&machine.home),
         &chosen,
         &nothing_used,
         trash,
@@ -153,7 +153,7 @@ fn refuses_what_a_process_is_using_by_then() {
     let busy = [(project.join("src/index.ts"), "code".to_string())];
 
     let cleaned = remove(
-        &machine.home,
+        &reach(&machine.home),
         &chosen,
         &|| {
             Ok(Usage {
@@ -191,7 +191,7 @@ fn refuses_a_folder_swapped_for_a_link_since_the_scan() {
     symlink(elsewhere.home.join("kept"), project.join("node_modules")).expect("the link");
 
     let cleaned = remove(
-        survey.home,
+        &reach(survey.home),
         &chosen,
         &nothing_used,
         &never,
@@ -227,7 +227,7 @@ fn refuses_a_folder_replaced_by_another_since_the_scan() {
     );
 
     let cleaned = remove(
-        survey.home,
+        &reach(survey.home),
         &chosen,
         &nothing_used,
         &never,
@@ -267,7 +267,7 @@ fn refuses_anything_outside_the_home_folder() {
     };
 
     let cleaned = remove(
-        &mine.home,
+        &reach(&mine.home),
         &[finding],
         &nothing_used,
         &never,
@@ -395,7 +395,7 @@ fn goes_on_with_the_rest_when_one_fails_and_tells_of_each() {
 
     let mut told = Vec::new();
     let cleaned = remove(
-        survey.home,
+        &reach(survey.home),
         &chosen,
         &nothing_used,
         &never,
@@ -427,7 +427,7 @@ fn removes_nothing_once_told_to_stop() {
     let chosen = chosen(&survey, &["stopped · node_modules", "stopped · .next"]);
 
     let cleaned = remove(
-        survey.home,
+        &reach(survey.home),
         &chosen,
         &nothing_used,
         &never,
@@ -490,7 +490,7 @@ fn reads_what_is_in_use_again_before_each() {
     };
 
     let cleaned = remove(
-        &machine.home,
+        &reach(&machine.home),
         &chosen,
         &usage,
         &never,
@@ -523,7 +523,7 @@ fn leaves_alone_what_it_cant_tell_is_free() {
     let chosen = chosen(&survey, &["unknown · node_modules"]);
 
     let cleaned = remove(
-        &machine.home,
+        &reach(&machine.home),
         &chosen,
         &|| Err(io::Error::other("the process list couldn't be read")),
         &never,

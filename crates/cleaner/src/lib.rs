@@ -2,6 +2,7 @@
 //! build outputs of projects left alone, logs, and the Trash. A scan only
 //! looks; removal takes what the user confirmed, checking each item again.
 
+mod apps;
 mod catalog;
 mod large;
 mod map;
@@ -62,6 +63,8 @@ pub enum Group {
     Documents,
     /// Large files of any other kind.
     OtherFiles,
+    /// The user's own apps.
+    Applications,
 }
 
 impl Group {
@@ -296,6 +299,19 @@ pub struct Hunt<'a> {
     pub busy: &'a [(PathBuf, String)],
 }
 
+/// The folder apps are shared from on a Mac.
+pub const SHARED_APPS: &str = "/Applications";
+
+/// Where removing may go: anywhere in the home folder, and in the shared
+/// app folder for apps alone, which only ever go to the Trash.
+#[derive(Debug, Clone, Copy)]
+pub struct Reach<'a> {
+    /// The account's home folder as the disk spells it, which `account_home` gives.
+    pub home: &'a Path,
+    /// The shared app folder: `SHARED_APPS` on a Mac.
+    pub shared: &'a Path,
+}
+
 /// What a map of the home folder looks through.
 #[derive(Debug, Clone, Copy)]
 pub struct Chart<'a> {
@@ -413,23 +429,24 @@ pub fn scan_with(
     Ok(findings)
 }
 
-/// Removes `findings`, which must come from a scan of `home`, one by one,
-/// looking at each again right before: it must still be reached through
-/// real folders inside `home`, still be the folder the scan measured, and
-/// nothing may be using it by what `usage` reads then. Rebuildable and
+/// Removes `findings`, which must come from a scan, hunt or app listing of
+/// `reach`, one by one, looking at each again right before: it must still be
+/// reached through real folders inside the home folder, or for an app inside
+/// the shared app folder, still be what was measured, and nothing may be
+/// using it by what `usage` reads then. Rebuildable and
 /// discarded things are deleted, the Trash first so nothing moved into it
 /// goes too; personal things go to the Trash through `trash`, which moves
 /// the item at a path there and says where it went. `told` hears of each as
 /// it is done. One failing stops nothing else.
 pub fn remove(
-    home: &Path,
+    reach: &Reach,
     findings: &[Finding],
     usage: &dyn Fn() -> io::Result<Usage>,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
-    remove::all(home, findings, usage, trash, stop, told)
+    remove::all(reach, findings, usage, trash, stop, told)
 }
 
 /// A map of `chart.home`: what each folder holds, as the disk counts it,
@@ -440,6 +457,21 @@ pub fn remove(
 /// it has come now and then; `stop` cuts it short, keeping what was counted.
 pub fn map(chart: &Chart, stop: &AtomicBool, told: &mut dyn FnMut(Charting)) -> io::Result<Area> {
     map::chart(chart, stop, told)
+}
+
+/// The user's own apps in `reach`'s shared app folder and in their home
+/// folder's, and one folder down in each, largest first and never picked:
+/// each goes only to the Trash. An app belongs to someone else, as the App
+/// Store's do, or is locked, is left out, as is anything reached through a
+/// link or without its Info.plist. One a process of `busy` runs from is in
+/// use. `measured` hears after each app is measured; `stop` cuts it short.
+pub fn apps(
+    reach: &Reach,
+    busy: &[(PathBuf, String)],
+    stop: &AtomicBool,
+    measured: &(dyn Fn(Measured) + Sync),
+) -> io::Result<Vec<Finding>> {
+    apps::listed(reach, busy, stop, measured)
 }
 
 /// Whether the folder or file at `path` in `home` is still the one with
@@ -461,14 +493,14 @@ pub fn large(
     large::hunt(hunt, stop, measured)
 }
 
-/// `findings`, from a scan of `home`, as they stand now: what was removed or
-/// made again since is left out, and who is using each is read again from
-/// `usage`. Sizes stay as the scan measured them.
-pub fn recheck(home: &Path, findings: &[Finding], usage: &Usage) -> io::Result<Vec<Finding>> {
-    let root = walk::Dir::open(home)?;
+/// `findings`, from a scan, hunt or app listing of `reach`, as they stand
+/// now: what was removed or made again since is left out, and who is using
+/// each is read again from `usage`. Sizes stay as they were measured.
+pub fn recheck(reach: &Reach, findings: &[Finding], usage: &Usage) -> io::Result<Vec<Finding>> {
+    let roots = remove::Roots::open(reach)?;
     Ok(findings
         .iter()
-        .filter(|finding| remove::still_there(&root, home, &finding.path, finding.identity))
+        .filter(|finding| roots.still_there(finding))
         .map(|finding| Finding {
             in_use: in_use(
                 &finding.path,

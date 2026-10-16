@@ -171,6 +171,7 @@ fn title(group: Group) -> &'static str {
         Group::Images => "Images",
         Group::Documents => "Documents",
         Group::OtherFiles => "Other large files",
+        Group::Applications => "Apps",
     }
 }
 

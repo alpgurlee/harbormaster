@@ -27,6 +27,14 @@ pub fn machine() -> Machine {
     }
 }
 
+/// What removing may reach from `home`, on a Mac with no shared app folder.
+pub fn reach(home: &Path) -> harbormaster_cleaner::Reach<'_> {
+    harbormaster_cleaner::Reach {
+        home,
+        shared: Path::new("/nonexistent"),
+    }
+}
+
 pub fn write(path: &Path, bytes: &[u8]) {
     fs::create_dir_all(path.parent().expect("a file inside a folder")).expect("the folder");
     fs::write(path, bytes).expect("the file");
