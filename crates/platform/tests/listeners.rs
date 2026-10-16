@@ -101,3 +101,44 @@ fn keeps_two_sockets_one_process_holds_on_the_same_endpoint() {
     );
     assert_ne!(sockets[0], sockets[1]);
 }
+
+#[test]
+fn tells_apart_sockets_two_processes_hold_on_one_port() {
+    use std::process::{Command, Stdio};
+
+    // macOS nc listens with SO_REUSEPORT, so two can share a port.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|socket| socket.local_addr())
+        .expect("a free port")
+        .port();
+    let spawn = || {
+        Command::new("/usr/bin/nc")
+            .args(["-l", "127.0.0.1", &port.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("nc should start")
+    };
+    let mut first = spawn();
+    let mut second = spawn();
+    let pids = [first.id(), second.id()];
+    let mut found = Vec::new();
+    for _ in 0..100 {
+        found = listeners()
+            .expect("listing sockets should succeed")
+            .into_iter()
+            .filter(|listener| listener.port == port && pids.contains(&listener.owner.pid.0))
+            .collect();
+        if found.len() == 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let _ = first.kill();
+    let _ = second.kill();
+    let _ = first.wait();
+    let _ = second.wait();
+
+    assert_eq!(found.len(), 2, "both nc processes should listen: {found:?}");
+    assert_ne!(found[0].socket, found[1].socket, "{found:?}");
+}
