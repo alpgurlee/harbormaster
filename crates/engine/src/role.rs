@@ -282,6 +282,8 @@ fn script_position(rest: &[String]) -> Option<usize> {
     while let Some(arg) = rest.get(at) {
         match arg.as_str() {
             "--" => return (at + 1 < rest.len()).then_some(at + 1),
+            // Code on the command line rather than a script file.
+            "-e" | "--eval" | "-p" | "--print" | "-c" => return None,
             option if VALUE_OPTIONS.contains(&option) => at += 2,
             option if option.starts_with('-') => at += 1,
             _ => return Some(at),
@@ -542,6 +544,26 @@ mod tests {
         assert!(supervises(
             "python3",
             &["python3", "-X", "dev", "manage.py", "runserver"]
+        ));
+    }
+
+    #[test]
+    fn code_given_on_the_command_line_is_not_a_script() {
+        assert!(!supervises(
+            "node",
+            &[
+                "node",
+                "-e",
+                "setInterval(() => {}, 1000) // /app/node_modules/next/x"
+            ]
+        ));
+        assert!(!supervises(
+            "node",
+            &["node", "--print", "'/app/node_modules/next/x'"]
+        ));
+        assert!(!supervises(
+            "python3",
+            &["python3", "-c", "import manage", "runserver"]
         ));
     }
 

@@ -217,6 +217,16 @@ impl Scanner {
             .iter()
             .any(|entry| entry.owner != Owner::CurrentUser);
 
+        // A part of the OS anywhere in the service keeps all of it out of reach.
+        let os_component = std::iter::once(owner)
+            .chain(members.iter().copied())
+            .any(|entry| {
+                details_of(entry.key)
+                    .exe
+                    .known()
+                    .is_some_and(|exe| is_os_component(exe))
+            });
+
         let members: Vec<Member> = members
             .iter()
             .map(|entry| Member {
@@ -249,10 +259,6 @@ impl Scanner {
         );
         // Stopping must never reach the system, another user or a database,
         // nor promise a free port while someone outside keeps the socket.
-        let os_component = owner_details
-            .exe
-            .known()
-            .is_some_and(|exe| is_os_component(exe));
         let protected = if service::is_system(owner) {
             Some(Protection::System)
         } else if owner.owner != Owner::CurrentUser || someone_elses {
@@ -801,6 +807,53 @@ mod tests {
         assert_eq!(protection(5000), Some(Protection::System));
         assert_eq!(protection(50594), Some(Protection::System));
         assert_eq!(protection(8000), None);
+    }
+
+    #[test]
+    fn protects_a_service_with_a_part_of_the_os_among_its_processes() {
+        let home = tempfile::tempdir().unwrap();
+        let procs = [
+            proc(10, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+            proc(
+                20,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &[
+                    "node",
+                    "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
+                    "run",
+                    "dev",
+                ],
+                home.path(),
+            ),
+            proc(
+                30,
+                20,
+                "helper",
+                "/usr/libexec/helper",
+                &["/usr/libexec/helper"],
+                home.path(),
+            ),
+            proc(
+                40,
+                20,
+                "node",
+                "/usr/local/bin/node",
+                &["node", "/srv/api.js"],
+                home.path(),
+            ),
+        ];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(40, 4000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert_eq!(snapshot.services[0].protected, Some(Protection::System));
     }
 
     #[test]

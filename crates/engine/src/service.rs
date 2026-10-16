@@ -152,6 +152,10 @@ fn climb<'a>(
     args_of: ArgsOf<'_>,
     is_foreign: &dyn Fn(Pid) -> bool,
 ) -> &'a ProcessEntry {
+    // A title is easy to fake: a holder known only by its title stands alone.
+    if is_runner_by_title(&from.name, args_of(from).as_deref()) {
+        return from;
+    }
     let mut current = from;
     while let Some(parent) = tree.parent(current.key.pid) {
         if !is_climbable(parent, tree, args_of)
@@ -605,6 +609,21 @@ mod tests {
 
         assert_eq!(services[0].root.pid, Pid(30));
         assert_eq!(pids(&services[0].members), [30, 40]);
+    }
+
+    #[test]
+    fn does_not_climb_from_a_socket_holder_known_only_by_its_title() {
+        let machine = Machine::new()
+            .process(10, 1, "zsh", &["-zsh"])
+            .process(20, 10, "node", &["node", NPM, "run", "dev"])
+            .process(30, 20, "node", &["npm run dev"])
+            .process(31, 20, "node", &["node", "/srv/worker.js"])
+            .listening(30, 4000);
+
+        let services = machine.services();
+
+        assert_eq!(services[0].root.pid, Pid(30));
+        assert_eq!(pids(&services[0].members), [30]);
     }
 
     #[test]
