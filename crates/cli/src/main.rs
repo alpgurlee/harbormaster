@@ -5,6 +5,7 @@ mod why;
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use std::thread::sleep;
@@ -12,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
+use harbormaster_cleaner::Survey;
 use harbormaster_engine::{
     Classification, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target, live,
 };
@@ -21,6 +23,8 @@ use harbormaster_platform::{ProcessKey, Signal};
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
 /// How long a forced process gets to disappear.
 const KILL_GRACE: Duration = Duration::from_secs(2);
+/// How long a project sits untouched before its build outputs are picked.
+const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -185,16 +189,59 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
 
 fn survey(json: bool) -> anyhow::Result<u8> {
     let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
-    let findings = harbormaster_cleaner::scan(&home, &AtomicBool::new(false))
+    let roots = harbormaster_cleaner::usual_roots(&home);
+    let busy = busy_paths().context("could not tell which folders are in use")?;
+    let running = running_projects(&home)?;
+    let now = SystemTime::now();
+    let survey = Survey {
+        home: &home,
+        roots: &roots,
+        busy: &busy,
+        running: &running,
+        idle_after: IDLE_AFTER,
+        now,
+    };
+    let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
         .with_context(|| format!("could not look through {}", home.display()))?;
     if json {
         println!("{}", clean::document(&findings)?);
         return Ok(0);
     }
-    for line in clean::lines(&findings, &home) {
+    let now = now.duration_since(UNIX_EPOCH)?.as_secs();
+    for line in clean::lines(&findings, &home, now) {
         println!("{line}");
     }
     Ok(0)
+}
+
+/// Every path this user's other processes hold, each with its process's name.
+fn busy_paths() -> anyhow::Result<Vec<(PathBuf, String)>> {
+    let own = std::process::id();
+    Ok(harbormaster_platform::whereabouts()?
+        .into_iter()
+        .filter(|process| process.pid.0 != own)
+        .flat_map(|process| {
+            let name = process.name;
+            process
+                .paths
+                .into_iter()
+                .map(move |path| (path, name.clone()))
+        })
+        .collect())
+}
+
+/// The projects with a dev server running, each with what to call the server.
+fn running_projects(home: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
+    let snapshot = live::scan(&mut Scanner::default(), home)?;
+    Ok(snapshot
+        .services
+        .iter()
+        .filter(|service| service.classification == Classification::Dev)
+        .filter_map(|service| {
+            let root = service.project.as_ref()?.root.clone();
+            Some((root, format!("the server on {}", format::ports(service))))
+        })
+        .collect())
 }
 
 fn explain(port: u16) -> anyhow::Result<u8> {

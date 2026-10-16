@@ -3,14 +3,19 @@
 //! folder swapped for a link in the meantime is refused, not followed.
 
 use std::ffi::{CStr, CString, OsStr, OsString};
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Component, Path};
 
 const OPEN_FOLDER: libc::c_int =
     libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+/// A pipe in a file's place would hold up an ordinary open; this opens it
+/// without waiting, so it can be refused.
+const OPEN_FILE: libc::c_int =
+    libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
 
 /// An open folder.
 #[derive(Debug)]
@@ -24,7 +29,7 @@ impl Dir {
             return Err(plain_path());
         }
         // SAFETY: a valid C string and flags; the result is checked by `own`.
-        let mut dir = Self::own(unsafe { libc::open(c"/".as_ptr(), OPEN_FOLDER) })?;
+        let mut dir = Self(own(unsafe { libc::open(c"/".as_ptr(), OPEN_FOLDER) })?);
         for component in components {
             let Component::Normal(name) = component else {
                 return Err(plain_path());
@@ -36,9 +41,28 @@ impl Dir {
 
     /// The folder `name` inside this one, refused when it is a link or not a folder.
     pub(crate) fn child(&self, name: &OsStr) -> io::Result<Self> {
+        self.open_at(name, OPEN_FOLDER).map(Self)
+    }
+
+    /// Up to `most` bytes from the start of the regular file `name` inside
+    /// this folder; a link, a folder or a pipe in its place is refused.
+    pub(crate) fn read_start(&self, name: &OsStr, most: u64) -> io::Result<Vec<u8>> {
+        let file = self.open_at(name, OPEN_FILE)?;
+        if !is_file(&stat_of(file.as_fd())?) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        let mut start = Vec::new();
+        File::from(file).take(most).read_to_end(&mut start)?;
+        Ok(start)
+    }
+
+    fn open_at(&self, name: &OsStr, flags: libc::c_int) -> io::Result<OwnedFd> {
         let name = CString::new(name.as_bytes())?;
         // SAFETY: `self.0` is an open folder and `name` a valid C string.
-        Self::own(unsafe { libc::openat(self.0.as_raw_fd(), name.as_ptr(), OPEN_FOLDER) })
+        own(unsafe { libc::openat(self.0.as_raw_fd(), name.as_ptr(), flags) })
     }
 
     /// Down `relative`, a real folder at every step.
@@ -125,13 +149,7 @@ impl Dir {
 
     /// How this folder itself is stored.
     pub(crate) fn metadata(&self) -> io::Result<libc::stat> {
-        let mut stat = MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: `self.0` is open and `stat` has room for one stat.
-        if unsafe { libc::fstat(self.0.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: fstat succeeded, so it filled `stat`.
-        Ok(unsafe { stat.assume_init() })
+        stat_of(self.0.as_fd())
     }
 
     /// How `name` inside this folder is stored, without following a link.
@@ -152,19 +170,36 @@ impl Dir {
         // SAFETY: fstatat succeeded, so it filled `stat`.
         Ok(unsafe { stat.assume_init() })
     }
+}
 
-    fn own(fd: libc::c_int) -> io::Result<Self> {
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: a descriptor the kernel just handed out, owned by nothing else.
-        Ok(Self(unsafe { OwnedFd::from_raw_fd(fd) }))
+/// What `open` or `openat` returned, owned, or the error they left.
+fn own(fd: libc::c_int) -> io::Result<OwnedFd> {
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
     }
+    // SAFETY: a descriptor the kernel just handed out, owned by nothing else.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// How the open file or folder `fd` is stored.
+fn stat_of(fd: BorrowedFd<'_>) -> io::Result<libc::stat> {
+    let mut stat = MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: `fd` is open and `stat` has room for one stat.
+    if unsafe { libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: fstat succeeded, so it filled `stat`.
+    Ok(unsafe { stat.assume_init() })
 }
 
 /// Whether `stat` describes a folder.
 pub(crate) fn is_folder(stat: &libc::stat) -> bool {
     stat.st_mode & libc::S_IFMT == libc::S_IFDIR
+}
+
+/// Whether `stat` describes a regular file.
+pub(crate) fn is_file(stat: &libc::stat) -> bool {
+    stat.st_mode & libc::S_IFMT == libc::S_IFREG
 }
 
 /// Whether `stat` describes a link.
@@ -266,5 +301,30 @@ mod tests {
         };
         assert_eq!(kind("folder"), Some((true, false)));
         assert_eq!(kind("link"), Some((false, true)));
+    }
+
+    #[test]
+    fn reads_the_start_of_a_regular_file_only() {
+        let place = tempfile::tempdir().unwrap();
+        let real = place.path().canonicalize().unwrap();
+        fs::write(
+            real.join("tag"),
+            b"Signature: 8a477f597d28d172789f06886806bc55\n# cache",
+        )
+        .unwrap();
+        symlink(real.join("tag"), real.join("link")).unwrap();
+        fs::create_dir(real.join("folder")).unwrap();
+        let pipe = std::ffi::CString::new(real.join("pipe").into_os_string().into_encoded_bytes())
+            .unwrap();
+        // SAFETY: `pipe` is a valid C string naming a path in a folder we own.
+        assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+        let dir = Dir::open(&real).unwrap();
+        let start = |name: &str| dir.read_start(OsStr::new(name), 10);
+
+        assert_eq!(start("tag").unwrap(), b"Signature:");
+        assert!(start("link").is_err());
+        assert!(start("folder").is_err());
+        assert!(start("pipe").is_err());
+        assert!(start("missing").is_err());
     }
 }

@@ -1,11 +1,11 @@
 //! The places a developer's Mac fills with things its tools rebuild, written
 //! from each tool's own documentation.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Group, Kind};
+use crate::{Candidate, Group, Kind};
 
 /// A place the cleaner knows, from the home folder.
 struct Place {
@@ -113,18 +113,6 @@ const PLACES: &[Place] = &[];
 #[cfg(target_os = "macos")]
 const APP_CACHES: &str = "Library/Caches";
 
-/// A finding before it is measured.
-#[derive(Debug)]
-pub(crate) struct Candidate {
-    pub(crate) group: Group,
-    pub(crate) kind: Kind,
-    pub(crate) name: String,
-    /// Where it is from the home folder, which it is reopened through.
-    pub(crate) relative: PathBuf,
-    pub(crate) path: PathBuf,
-    pub(crate) picked: bool,
-}
-
 /// Everything the catalog points at under `home`, reached through real
 /// folders only. `path` is where `home` is, for showing.
 pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Candidate> {
@@ -136,6 +124,9 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
         relative: relative.to_path_buf(),
         path: path.join(relative),
         picked,
+        in_use: None,
+        project: None,
+        touched: None,
     };
     for place in PLACES {
         if stop.load(Ordering::Relaxed) {

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
-use harbormaster_cleaner::{Finding, Group, Kind, scan};
+use harbormaster_cleaner::{Finding, Group, Kind, Survey, scan};
 
 const MIB: usize = 1024 * 1024;
 
@@ -18,7 +18,19 @@ fn write(path: &Path, bytes: usize) {
 /// starts from a real path.
 fn scanned(home: &Path) -> Vec<Finding> {
     let real = home.canonicalize().expect("the temp folder should exist");
-    scan(&real, &AtomicBool::new(false)).expect("the scan should start")
+    scan(&survey(&real), &AtomicBool::new(false)).expect("the scan should start")
+}
+
+/// A survey of `home` alone: no project roots, nothing in use.
+fn survey(home: &Path) -> Survey<'_> {
+    Survey {
+        home,
+        roots: &[],
+        busy: &[],
+        running: &[],
+        idle_after: Duration::ZERO,
+        now: SystemTime::now(),
+    }
 }
 
 fn named<'a>(findings: &'a [Finding], name: &str) -> Option<&'a Finding> {
@@ -182,8 +194,8 @@ fn starts_only_from_a_real_home_folder() {
     write(&real.join("home/.npm/_cacache/a"), 2 * MIB);
     symlink(real.join("home"), real.join("link")).unwrap();
 
-    assert!(scan(&real.join("link"), &AtomicBool::new(false)).is_err());
-    assert!(scan(Path::new("relative/home"), &AtomicBool::new(false)).is_err());
+    assert!(scan(&survey(&real.join("link")), &AtomicBool::new(false)).is_err());
+    assert!(scan(&survey(Path::new("relative/home")), &AtomicBool::new(false)).is_err());
 }
 
 #[test]
@@ -234,7 +246,7 @@ fn measures_nothing_once_told_to_stop() {
     write(&home.path().join(".npm/_cacache/a"), 2 * MIB);
     let real = home.path().canonicalize().unwrap();
 
-    let findings = scan(&real, &AtomicBool::new(true)).unwrap();
+    let findings = scan(&survey(&real), &AtomicBool::new(true)).unwrap();
 
     assert!(findings.is_empty(), "{findings:?}");
 }

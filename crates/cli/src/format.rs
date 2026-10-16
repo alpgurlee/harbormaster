@@ -25,6 +25,16 @@ pub(crate) fn uptime(elapsed: Duration) -> String {
     }
 }
 
+/// How long ago, in days or months: `today`, `3 days ago`, `2 months ago`.
+pub(crate) fn ago(elapsed: Duration) -> String {
+    match elapsed.as_secs() / 86_400 {
+        0 => "today".into(),
+        1 => "yesterday".into(),
+        days @ 2..60 => format!("{days} days ago"),
+        days => format!("{} months ago", days / 30),
+    }
+}
+
 /// Cuts `text` to `width` characters, marking the cut with an ellipsis.
 pub(crate) fn truncate(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
@@ -99,7 +109,15 @@ pub(crate) fn table(rows: &[Vec<String>]) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{bytes, table, truncate, uptime};
+    use super::{ago, bytes, table, truncate, uptime};
+
+    #[test]
+    fn says_how_long_ago_in_days_then_months() {
+        assert_eq!(ago(Duration::from_secs(3600)), "today");
+        assert_eq!(ago(Duration::from_secs(86_400)), "yesterday");
+        assert_eq!(ago(Duration::from_secs(12 * 86_400)), "12 days ago");
+        assert_eq!(ago(Duration::from_secs(61 * 86_400)), "2 months ago");
+    }
 
     #[test]
     fn shows_memory_in_megabytes_then_gigabytes() {

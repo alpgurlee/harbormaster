@@ -5,9 +5,8 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::Finding;
-use crate::catalog::Candidate;
 use crate::walk::{self, Dir};
+use crate::{Candidate, Finding};
 
 /// The most places measured at once.
 const WORKERS: usize = 4;
@@ -61,6 +60,8 @@ pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> 
             path: candidate.path,
             bytes,
             picked: candidate.picked,
+            in_use: candidate.in_use,
+            touched: candidate.touched,
         })
         .collect()
 }

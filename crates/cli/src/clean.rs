@@ -1,6 +1,7 @@
 //! The cleaner's dry run: what could go, and how much room it would make.
 
 use std::path::Path;
+use std::time::Duration;
 
 use harbormaster_cleaner::{Finding, Group, Kind};
 
@@ -17,8 +18,9 @@ pub(crate) fn document(findings: &[Finding]) -> serde_json::Result<String> {
     }))
 }
 
-/// The table of findings by group, then what picking would free.
-pub(crate) fn lines(findings: &[Finding], home: &Path) -> Vec<String> {
+/// The table of findings by group, then what picking would free. `now` is
+/// in seconds since the Unix epoch, for saying how long a project has sat.
+pub(crate) fn lines(findings: &[Finding], home: &Path, now: u64) -> Vec<String> {
     if findings.is_empty() {
         return vec!["Nothing to clean up.".into()];
     }
@@ -33,7 +35,7 @@ pub(crate) fn lines(findings: &[Finding], home: &Path) -> Vec<String> {
             format!("  {}", format::truncate(&finding.name, NAME_WIDTH)),
             format::bytes(finding.bytes),
             shown(&finding.path, home),
-            note(finding).into(),
+            note(finding, now),
         ]);
     }
     let picked: u64 = findings
@@ -54,6 +56,7 @@ pub(crate) fn lines(findings: &[Finding], home: &Path) -> Vec<String> {
 
 fn title(group: Group) -> &'static str {
     match group {
+        Group::Projects => "Projects",
         Group::Packages => "Packages",
         Group::Xcode => "Xcode",
         Group::Apps => "App caches",
@@ -62,13 +65,20 @@ fn title(group: Group) -> &'static str {
     }
 }
 
-/// Why a finding isn't picked, if it isn't.
-fn note(finding: &Finding) -> &'static str {
-    match (finding.kind, finding.picked) {
-        (Kind::Rebuildable, true) => "",
-        (Kind::Rebuildable, false) => "used last",
-        (Kind::Personal, _) => "your own work",
-        (Kind::Discarded, _) => "empties for good",
+/// Why a finding isn't picked, or how long its project has sat.
+fn note(finding: &Finding, now: u64) -> String {
+    if let Some(who) = &finding.in_use {
+        return format!("in use by {who}");
+    }
+    match (finding.kind, finding.touched) {
+        (Kind::Rebuildable, Some(touched)) => {
+            let idle = Duration::from_secs(now.saturating_sub(touched));
+            format!("last touched {}", format::ago(idle))
+        }
+        (Kind::Rebuildable, None) if finding.picked => String::new(),
+        (Kind::Rebuildable, None) => "used last".into(),
+        (Kind::Personal, _) => "your own work".into(),
+        (Kind::Discarded, _) => "empties for good".into(),
     }
 }
 
@@ -89,6 +99,7 @@ mod tests {
     use super::lines;
 
     const GIB: u64 = 1024 * 1024 * 1024;
+    const DAY: u64 = 86_400;
 
     fn finding(
         group: Group,
@@ -105,12 +116,35 @@ mod tests {
             path: PathBuf::from(path),
             bytes,
             picked,
+            in_use: None,
+            touched: None,
         }
     }
 
     #[test]
     fn lists_each_group_and_what_picking_would_free() {
+        let now = 1000 * DAY;
+        let mut shop = finding(
+            Group::Projects,
+            Kind::Rebuildable,
+            "shop · node_modules",
+            "/Users/dev/code/shop/node_modules",
+            GIB,
+            true,
+        );
+        shop.touched = Some(now - 61 * DAY);
+        let mut tool = finding(
+            Group::Projects,
+            Kind::Rebuildable,
+            "tool · target",
+            "/Users/dev/code/tool/target",
+            GIB,
+            false,
+        );
+        tool.in_use = Some("cargo".into());
         let findings = [
+            shop,
+            tool,
             finding(
                 Group::Packages,
                 Kind::Rebuildable,
@@ -137,16 +171,21 @@ mod tests {
             ),
         ];
 
-        let text = lines(&findings, Path::new("/Users/dev")).join("\n");
+        let text = lines(&findings, Path::new("/Users/dev"), now).join("\n");
 
-        assert!(text.contains("Packages"), "{text}");
+        assert!(
+            text.contains("Projects") && text.contains("Packages"),
+            "{text}"
+        );
         assert!(
             text.contains("npm") && text.contains("2.0 GB") && text.contains("~/.npm/_cacache"),
             "{text}"
         );
+        assert!(text.contains("last touched 2 months ago"), "{text}");
+        assert!(text.contains("in use by cargo"), "{text}");
         assert!(text.contains("used last"), "{text}");
         assert!(text.contains("empties for good"), "{text}");
-        assert!(text.contains("Would free 2.0 GB of 4.0 GB"), "{text}");
+        assert!(text.contains("Would free 3.0 GB of 6.0 GB"), "{text}");
         assert!(text.contains("dry run"), "{text}");
     }
 
@@ -164,7 +203,7 @@ mod tests {
     #[test]
     fn says_so_when_there_is_nothing() {
         assert_eq!(
-            lines(&[], Path::new("/Users/dev")),
+            lines(&[], Path::new("/Users/dev"), 0),
             ["Nothing to clean up."]
         );
     }
