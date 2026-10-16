@@ -94,6 +94,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.warning {
+  margin: 10px 0 0;
+  padding: 2px 0 2px 9px;
+  border-left: 2px solid var(--brass);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
 .note {
   margin: 10px 0 0;
   color: var(--muted);

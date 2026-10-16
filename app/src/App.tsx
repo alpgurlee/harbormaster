@@ -4,9 +4,10 @@ import { hidePanel, inApp, openInBrowser, resizePanel, revealFolder } from "./ap
 import { Detail } from "./Detail";
 import { I18nProvider, localeOf } from "./i18n";
 import { Panel } from "./Panel";
+import { QuitSheet } from "./QuitSheet";
 import { StopSheet } from "./StopSheet";
 import { useUpdate } from "./store";
-import type { Service } from "./types";
+import type { AppUsage, Service } from "./types";
 import styles from "./App.module.css";
 
 /** Re-renders now and then, so ages and uptimes move without a new scan. */
@@ -63,6 +64,8 @@ export function App() {
   const [shown, setShown] = useState<string | null>(null);
   // The server as it was when asked about, so the question stays put while scans go on.
   const [stopping, setStopping] = useState<Service | null>(null);
+  const [quitting, setQuitting] = useState<AppUsage | null>(null);
+  const asking = stopping !== null || quitting !== null;
   const frame = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   // Where the focus goes back to when the sheet closes; the page may have changed under it.
@@ -71,12 +74,19 @@ export function App() {
   useEscapeHides();
   const service = shown === null ? null : (update?.services.find((each) => each.id === shown) ?? null);
 
-  const askStop = (chosen: Service) => {
+  const keepFocus = () => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+  const askStop = (chosen: Service) => {
+    keepFocus();
     setStopping(chosen);
   };
+  const askQuit = (chosen: AppUsage) => {
+    keepFocus();
+    setQuitting(chosen);
+  };
   useEffect(() => {
-    if (stopping !== null) return;
+    if (asking) return;
     const previous = returnFocus.current;
     returnFocus.current = null;
     if (previous === null) return;
@@ -88,12 +98,12 @@ export function App() {
         content.current?.querySelector<HTMLElement>('[role="combobox"]');
       fallback?.focus();
     }
-  }, [stopping]);
+  }, [asking]);
 
   return (
     <I18nProvider locale={localeOf(navigator.language)}>
       <div ref={frame} className={styles.frame}>
-        <div ref={content} className={styles.content} inert={stopping !== null}>
+        <div ref={content} className={styles.content} inert={asking}>
           <Panel
             hidden={shown !== null}
             update={update}
@@ -101,6 +111,7 @@ export function App() {
             onShow={(chosen) => setShown(chosen.id)}
             onOpen={open}
             onStop={askStop}
+            onQuit={askQuit}
           />
           {shown === null ? null : (
             <Detail
@@ -121,6 +132,17 @@ export function App() {
             onDone={() => {
               setStopping(null);
               setShown(null);
+            }}
+          />
+        )}
+        {quitting === null ? null : (
+          <QuitSheet
+            app={quitting}
+            onClose={() => setQuitting(null)}
+            onDone={() => {
+              // The app's row goes with the app, so the focus waits on the breakdown's toggle.
+              returnFocus.current = content.current?.querySelector<HTMLElement>('[aria-controls="memory-by-app"]') ?? null;
+              setQuitting(null);
             }}
           />
         )}

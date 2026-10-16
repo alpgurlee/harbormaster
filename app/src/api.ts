@@ -21,6 +21,12 @@ export type Preview =
 
 export type Outcome = "stopped" | "alreadyGone" | "replaced" | "accessDenied" | "stillRunning" | { failed: string };
 
+/** What quitting an app would do; it names the app as the breakdown does. */
+export type QuitPreview =
+  | { kind: "app"; token: number }
+  | { kind: "programs"; token: number; quits: { pid: number; name: string; command: string | null }[]; staysOpen: Holder[] }
+  | { kind: "refused"; reason: Reason };
+
 export interface Stopped {
   outcomes: { pid: number; name: string; outcome: Outcome }[];
   stillRunning: boolean;
@@ -40,5 +46,8 @@ export const stopPreview = (id: string) => invoke<Preview>("stop_preview", { id 
 /** Rejects with a `Reason` when the server changed since it was approved. */
 export const stopServer = (token: number) => invoke<Stopped>("stop", { token });
 export const forceStop = (token: number) => invoke<Stopped>("force_stop", { token });
+export const quitAppPreview = (name: string) => invoke<QuitPreview>("quit_app_preview", { name });
+/** Asks politely and never forces; rejects with a `Reason` when the app changed since it was approved. */
+export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");

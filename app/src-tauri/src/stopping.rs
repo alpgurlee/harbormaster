@@ -66,9 +66,9 @@ pub(crate) enum Preview {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Stopping {
-    pid: u32,
-    name: String,
-    command: Option<String>,
+    pub(crate) pid: u32,
+    pub(crate) name: String,
+    pub(crate) command: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +83,28 @@ pub(crate) struct Ended {
     pid: u32,
     name: String,
     outcome: Outcome,
+}
+
+impl Stopped {
+    /// Each process's outcome, under the name it was shown with.
+    pub(crate) fn new(
+        outcomes: Vec<(ProcessKey, Outcome)>,
+        name_of: impl Fn(ProcessKey) -> String,
+    ) -> Self {
+        Self {
+            still_running: outcomes
+                .iter()
+                .any(|(_, outcome)| *outcome == Outcome::StillRunning),
+            outcomes: outcomes
+                .into_iter()
+                .map(|(key, outcome)| Ended {
+                    pid: key.pid.0,
+                    name: name_of(key),
+                    outcome,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Services the user saw and agreed to stop, by the token the panel holds.
@@ -182,22 +204,14 @@ impl Approvals {
             .filter(|(_, outcome)| *outcome == Outcome::StillRunning)
             .map(|(key, _)| *key)
             .collect();
-        let stopped = Stopped {
-            still_running: !approval.left.is_empty(),
-            outcomes: outcomes
-                .into_iter()
-                .map(|(key, outcome)| Ended {
-                    pid: key.pid.0,
-                    name: approval
-                        .service
-                        .processes
-                        .iter()
-                        .find(|member| member.key == key)
-                        .map_or_else(String::new, |member| member.name.clone()),
-                    outcome,
-                })
-                .collect(),
-        };
+        let stopped = Stopped::new(outcomes, |key| {
+            approval
+                .service
+                .processes
+                .iter()
+                .find(|member| member.key == key)
+                .map_or_else(String::new, |member| member.name.clone())
+        });
         if round == Round::Terminate && stopped.still_running {
             self.lock().open.insert(token, approval);
         }
@@ -281,7 +295,7 @@ fn reason(refusal: &Refusal<'_>) -> Reason {
     }
 }
 
-fn failed(error: harbormaster_platform::Error) -> Reason {
+pub(crate) fn failed(error: harbormaster_platform::Error) -> Reason {
     Reason::Failed {
         message: error.to_string(),
     }

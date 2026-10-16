@@ -21,9 +21,10 @@ export interface PanelProps {
   onShow: (service: Service) => void;
   onOpen: (service: Service) => void;
   onStop: (service: Service) => void;
+  onQuit: (app: AppUsage) => void;
 }
 
-export function Panel({ hidden = false, update, now, onShow, onOpen, onStop }: PanelProps) {
+export function Panel({ hidden = false, update, now, onShow, onOpen, onStop, onQuit }: PanelProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -99,7 +100,7 @@ export function Panel({ hidden = false, update, now, onShow, onOpen, onStop }: P
   return (
     <div className={styles.panel} hidden={hidden}>
       <Header />
-      <Summary dev={dev} memory={update.memory} apps={update.apps} />
+      <Summary dev={dev} memory={update.memory} apps={update.apps} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
         <input
@@ -171,7 +172,14 @@ function Header() {
   );
 }
 
-function Summary({ dev, memory, apps }: { dev: Service[]; memory: Memory | null; apps: AppUsage[] | null }) {
+interface SummaryProps {
+  dev: Service[];
+  memory: Memory | null;
+  apps: AppUsage[] | null;
+  onQuit: (app: AppUsage) => void;
+}
+
+function Summary({ dev, memory, apps, onQuit }: SummaryProps) {
   const i18n = useI18n();
   const [open, setOpen] = useState(false);
   const sum = totals(dev);
@@ -216,7 +224,7 @@ function Summary({ dev, memory, apps }: { dev: Service[]; memory: Memory | null;
           </button>
         ) : null}
       </div>
-      {memory && open ? <Breakdown servers={servers} apps={apps} total={memory.total} /> : null}
+      {memory && open ? <Breakdown servers={servers} apps={apps} total={memory.total} onQuit={onQuit} /> : null}
     </>
   );
 }
@@ -226,7 +234,14 @@ function Summary({ dev, memory, apps }: { dev: Service[]; memory: Memory | null;
  * Nothing sums them up: each counts compressed memory at full size, as
  * Activity Monitor does, so together they can come to more than is in use.
  */
-function Breakdown({ servers, apps, total }: { servers: number; apps: AppUsage[] | null; total: number }) {
+interface BreakdownProps {
+  servers: number;
+  apps: AppUsage[] | null;
+  total: number;
+  onQuit: (app: AppUsage) => void;
+}
+
+function Breakdown({ servers, apps, total, onQuit }: BreakdownProps) {
   const i18n = useI18n();
   if (apps === null) {
     return (
@@ -236,18 +251,31 @@ function Breakdown({ servers, apps, total }: { servers: number; apps: AppUsage[]
     );
   }
   const parts = [
-    { key: "servers", name: i18n.t("devServers"), bytes: servers },
-    ...apps.map((app) => ({ key: `app:${app.name}`, name: displayName(app.name), bytes: app.memoryBytes })),
+    { key: "servers", name: i18n.t("devServers"), bytes: servers, app: null },
+    ...apps.map((app) => ({ key: `app:${app.name}`, name: displayName(app.name), bytes: app.memoryBytes, app })),
   ].filter((part) => part.bytes > 0);
   return (
     <div id="memory-by-app" className={styles.breakdown}>
       <ul aria-label={i18n.t("memoryByApp")} className={styles.parts}>
-        {parts.map((part) => (
-          <li key={part.key}>
-            <span className={styles.partName}>{part.name}</span>
-            <span className={styles.partAmount}>{i18n.bytes(part.bytes)}</span>
+        {parts.map(({ key, name, bytes, app }) => (
+          <li key={key}>
+            <span className={styles.partName}>{name}</span>
+            <span className={styles.partSide}>
+              <span className={styles.partAmount}>{i18n.bytes(bytes)}</span>
+              {/* The dev servers stop from their own rows; the system is never quit. */}
+              {app && !app.system ? (
+                <button
+                  type="button"
+                  className={styles.partQuit}
+                  aria-label={i18n.t("quitApp", { name })}
+                  onClick={() => onQuit(app)}
+                >
+                  {i18n.t("quit")}
+                </button>
+              ) : null}
+            </span>
             <span className={styles.bar} aria-hidden="true">
-              <span className={part.key === "servers" ? styles.servers : undefined} style={{ width: share(part.bytes, total) }} />
+              <span className={app === null ? styles.servers : undefined} style={{ width: share(bytes, total) }} />
             </span>
           </li>
         ))}

@@ -65,7 +65,8 @@ export interface Memory {
 export interface AppUsage {
   name: string;
   memoryBytes: number;
-  processes: number;
+  /** Part of the OS, which the panel never offers to quit. */
+  system: boolean;
 }
 
 export interface Update {

@@ -2,6 +2,7 @@
 
 mod commands;
 mod panel;
+mod quitting;
 mod scanning;
 mod stopping;
 mod tray;
@@ -22,6 +23,8 @@ fn main() {
             commands::stop_preview,
             commands::stop,
             commands::force_stop,
+            commands::quit_app_preview,
+            commands::quit_app,
             commands::resize_panel,
             commands::hide_panel,
             commands::quit,
@@ -32,6 +35,7 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             app.manage(panel::Anchor::default());
             app.manage(stopping::Approvals::default());
+            app.manage(quitting::Quits::default());
             panel::create(app.handle())?;
             tray::create(app.handle())?;
             app.manage(scanning::start(app.handle().clone()));

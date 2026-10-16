@@ -8,6 +8,8 @@ fn main() {
         "stop_preview",
         "stop",
         "force_stop",
+        "quit_app_preview",
+        "quit_app",
         "resize_panel",
         "hide_panel",
         "quit",

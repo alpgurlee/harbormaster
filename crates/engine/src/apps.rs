@@ -12,11 +12,17 @@ use serde::Serialize;
 pub struct AppUsage {
     pub name: String,
     pub memory_bytes: u64,
-    pub processes: usize,
+    /// Part of the OS all through, which the panel never offers to quit.
+    pub system: bool,
+    /// What quitting it would reach.
+    #[serde(skip)]
+    pub members: Vec<ProcessKey>,
 }
 
 /// The memory of `processes` by app, largest first, leaving out `skip`: the
-/// dev servers, which the panel counts on their own.
+/// dev servers, which the panel counts on their own. A process whose memory
+/// can't be read still belongs to its app, so quitting the app sees all it
+/// would reach; an app with nothing measured is left out.
 pub fn usage(
     processes: &[ProcessEntry],
     executable: &dyn Fn(ProcessKey) -> Option<PathBuf>,
@@ -24,25 +30,30 @@ pub fn usage(
 ) -> Vec<AppUsage> {
     let mut by_app: HashMap<String, AppUsage> = HashMap::new();
     for entry in processes {
-        let Some(memory) = entry.memory_bytes else {
-            continue;
-        };
         if skip.contains(&entry.key) {
             continue;
         }
-        let name = executable(entry.key)
+        let path = executable(entry.key);
+        let name = path
             .as_deref()
             .and_then(app_name)
             .unwrap_or_else(|| entry.name.clone());
+        let system =
+            crate::service::is_system(entry) || path.as_deref().is_some_and(crate::is_os_component);
         let app = by_app.entry(name.clone()).or_insert(AppUsage {
             name,
             memory_bytes: 0,
-            processes: 0,
+            system: true,
+            members: Vec::new(),
         });
-        app.memory_bytes += memory;
-        app.processes += 1;
+        app.memory_bytes += entry.memory_bytes.unwrap_or(0);
+        app.system &= system;
+        app.members.push(entry.key);
     }
-    let mut apps: Vec<AppUsage> = by_app.into_values().collect();
+    let mut apps: Vec<AppUsage> = by_app
+        .into_values()
+        .filter(|app| app.memory_bytes > 0)
+        .collect();
     apps.sort_by(|a, b| {
         b.memory_bytes
             .cmp(&a.memory_bytes)
@@ -130,12 +141,14 @@ mod tests {
                 AppUsage {
                     name: "Google Chrome".into(),
                     memory_bytes: 500 * MIB,
-                    processes: 2,
+                    system: false,
+                    members: vec![processes[0].key, processes[1].key],
                 },
                 AppUsage {
                     name: "node".into(),
                     memory_bytes: 50 * MIB,
-                    processes: 1,
+                    system: false,
+                    members: vec![processes[2].key],
                 },
             ]
         );
@@ -159,9 +172,59 @@ mod tests {
             [AppUsage {
                 name: "claude".into(),
                 memory_bytes: 1700 * MIB,
-                processes: 2,
+                system: false,
+                members: vec![processes[0].key, processes[1].key],
             }]
         );
+    }
+
+    #[test]
+    fn marks_what_belongs_to_the_system() {
+        let processes = [
+            using(60, "replayd", Some(300)),
+            using(61, "Google Chrome", Some(200)),
+        ];
+        let paths = HashMap::from([
+            (60, "/usr/libexec/replayd"),
+            (
+                61,
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ),
+        ]);
+        let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
+
+        let apps = usage(&processes, &executable, &HashSet::new());
+
+        let system: Vec<(&str, bool)> = apps
+            .iter()
+            .map(|app| (app.name.as_str(), app.system))
+            .collect();
+        assert_eq!(system, [("replayd", true), ("Google Chrome", false)]);
+    }
+
+    #[test]
+    fn keeps_a_process_it_cannot_measure_among_its_apps() {
+        let processes = [
+            using(70, "Google Chrome", Some(300)),
+            using(71, "Google Chrome Helper", None),
+        ];
+        let paths = HashMap::from([
+            (
+                70,
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ),
+            (
+                71,
+                "/Applications/Google Chrome.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper",
+            ),
+        ]);
+        let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
+
+        let apps = usage(&processes, &executable, &HashSet::new());
+
+        assert_eq!(apps.len(), 1, "{apps:?}");
+        assert_eq!(apps[0].memory_bytes, 300 * MIB);
+        assert_eq!(apps[0].members, [processes[0].key, processes[1].key]);
     }
 
     #[test]

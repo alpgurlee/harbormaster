@@ -7,7 +7,8 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::panel;
-use crate::scanning::{Scanning, Update};
+use crate::quitting::{QuitPreview, Quits};
+use crate::scanning::{self, Scanning, Update};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
 
 #[tauri::command]
@@ -87,6 +88,27 @@ pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> 
 #[tauri::command]
 pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || app.state::<Approvals>().force(token)).await
+}
+
+/// `name` is an app as the breakdown lists it.
+#[tauri::command]
+pub(crate) async fn quit_app_preview(name: String, app: AppHandle) -> Result<QuitPreview, Reason> {
+    blocking(move || {
+        Ok(match app.state::<Arc<Scanning>>().snapshot() {
+            Some(snapshot) => app
+                .state::<Quits>()
+                .preview(&scanning::servers(&snapshot.services), &name),
+            None => QuitPreview::Refused {
+                reason: Reason::NotFound,
+            },
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
+    blocking(move || app.state::<Quits>().quit(token)).await
 }
 
 /// Scans and waits for processes to exit run off the thread that draws.

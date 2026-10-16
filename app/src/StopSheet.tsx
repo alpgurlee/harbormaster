@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-import { forceStop, stopPreview, stopServer, type Outcome, type Preview, type Reason, type Stopped } from "./api";
+import { forceStop, stopPreview, stopServer, type Preview, type Reason, type Stopped } from "./api";
 import { useI18n, type Translator } from "./i18n";
-import { whyProtected } from "./protection";
 import { displayName } from "./session";
+import { asReason, describe, explain, keepFocusInside } from "./sheet";
 import type { Service } from "./types";
-import styles from "./StopSheet.module.css";
+import styles from "./Sheet.module.css";
 
 /** The backend's stop calls, which tests hand in themselves. */
 export interface Stopper {
@@ -221,68 +221,5 @@ function body(step: Step, i18n: Translator) {
       );
     case "refused":
       return <p className={styles.note}>{explain(step.reason, i18n)}</p>;
-  }
-}
-
-function describe(outcome: Outcome, i18n: Translator): string {
-  if (typeof outcome === "object") return i18n.t("outcomeFailed", { message: outcome.failed });
-  switch (outcome) {
-    case "stopped":
-      return i18n.t("outcomeStopped");
-    case "alreadyGone":
-      return i18n.t("outcomeAlreadyGone");
-    case "replaced":
-      return i18n.t("outcomeReplaced");
-    case "accessDenied":
-      return i18n.t("outcomeAccessDenied");
-    case "stillRunning":
-      return i18n.t("outcomeStillRunning");
-  }
-}
-
-function explain(reason: Reason, i18n: Translator): string {
-  switch (reason.code) {
-    case "notFound":
-      return i18n.t("gone");
-    case "protected":
-      return whyProtected(i18n, reason.protection);
-    case "runsHarbormaster":
-      return i18n.t("reasonRunsHarbormaster");
-    case "changed":
-      return i18n.t("reasonChanged");
-    case "expired":
-      return i18n.t("reasonExpired");
-    case "untrackedExec":
-      return i18n.t("reasonUntrackedExec");
-    case "unknownLineage":
-      return i18n.t("reasonUnknownLineage");
-    case "failed":
-      return i18n.t("reasonFailed", { message: reason.message });
-  }
-}
-
-/** A rejected stop carries the backend's reason; anything else is a failure. */
-function asReason(error: unknown): Reason {
-  if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") {
-    return error as Reason;
-  }
-  return { code: "failed", message: String(error) };
-}
-
-/** Tab goes round the sheet's buttons, never behind it. */
-function keepFocusInside(event: KeyboardEvent, dialog: HTMLElement | null) {
-  const buttons = [...(dialog?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-  if (buttons.length === 0) {
-    event.preventDefault();
-    return;
-  }
-  const first = buttons[0];
-  const last = buttons[buttons.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
   }
 }

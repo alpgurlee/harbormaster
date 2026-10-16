@@ -10,6 +10,8 @@
     "allow-stop-preview",
     "allow-stop",
     "allow-force-stop",
+    "allow-quit-app-preview",
+    "allow-quit-app",
     "allow-resize-panel",
     "allow-hide-panel",
     "allow-quit"

@@ -87,9 +87,45 @@
   white-space: nowrap;
 }
 
+.partSide {
+  display: grid;
+  justify-items: end;
+}
+
+.partSide > * {
+  grid-area: 1 / 1;
+}
+
 .partAmount {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.partQuit {
+  padding: 0 6px;
+  border: 1px solid var(--field-edge);
+  border-radius: 5px;
+  background: var(--field);
+  color: var(--red);
+  font: inherit;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0;
+}
+
+.partQuit:hover {
+  border-color: var(--red);
+}
+
+/* Shown on hover, and to the keyboard when it gets there. */
+.parts > li:hover .partQuit,
+.partQuit:focus-visible {
+  opacity: 1;
+}
+
+.parts > li:has(.partQuit):hover .partAmount,
+.parts > li:has(.partQuit:focus-visible) .partAmount {
+  visibility: hidden;
 }
 
 .bar {

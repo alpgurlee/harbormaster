@@ -1,9 +1,15 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { sample } from "./demo";
 import { publish } from "./store";
+
+vi.mock("./api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./api")>()),
+  quitAppPreview: vi.fn(async () => ({ kind: "app", token: 1 })),
+  quitApp: vi.fn(async () => ({ outcomes: [{ pid: 1, name: "Docker", outcome: "stopped" }], stillRunning: false })),
+}));
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -49,4 +55,34 @@ it("brings the focus back to the page when the server became protected behind th
   await act(async () => fireEvent.click(close));
 
   expect(document.activeElement).toBe(screen.getByRole("button", { name: /Back|Geri/ }));
+});
+
+async function askToQuitDocker() {
+  act(() => publish(sample(Date.now())));
+  render(<App />);
+  const toggle = screen.getByRole("button", { name: /14\.9 of 32 GB|14,9 \/ 32 GB/ });
+  fireEvent.click(toggle);
+  const quit = screen.getByRole("button", { name: /Quit Docker|Kapat: Docker/ });
+  quit.focus();
+  await act(async () => fireEvent.click(quit));
+  expect(screen.getByRole("dialog", { name: /Quit Docker\?|Docker kapatılsın mı\?/ })).toBeTruthy();
+  return { toggle, quit };
+}
+
+it("asks before quitting an app from the breakdown, and brings the focus back when that's called off", async () => {
+  const { quit } = await askToQuitDocker();
+
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: /Cancel|Vazgeç/ })));
+
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(quit);
+});
+
+it("keeps the focus on the breakdown once the app it quit is gone", async () => {
+  const { toggle } = await askToQuitDocker();
+
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: /^(Quit|Kapat)$/ })));
+
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(toggle);
 });

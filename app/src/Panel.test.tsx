@@ -17,6 +17,14 @@ beforeEach(() => {
 const byContent = (text: string) => (_: string, element: Element | null) =>
   element?.textContent === text && [...element.children].every((child) => child.textContent !== text);
 
+/** Each part of the memory breakdown as it reads, its name and figure, without its button. */
+const parts = (items: HTMLElement[]) =>
+  items.map((item) => {
+    const copy = item.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll("button").forEach((button) => button.remove());
+    return copy.textContent;
+  });
+
 const MIB = 1024 * 1024;
 const NOW = Date.UTC(2026, 9, 16, 12, 0, 0);
 
@@ -46,14 +54,14 @@ const update: Update = {
   ],
   memory: { used: 16 * 1024 * MIB, total: 32 * 1024 * MIB },
   apps: [
-    { name: "Google Chrome", memoryBytes: 3.2 * 1024 * MIB, processes: 31 },
-    { name: "Slack", memoryBytes: 640 * MIB, processes: 6 },
+    { name: "Google Chrome", memoryBytes: 3.2 * 1024 * MIB, system: false },
+    { name: "Slack", memoryBytes: 640 * MIB, system: false },
   ],
   scannedAt: NOW,
 };
 
 function show(props: Partial<Parameters<typeof Panel>[0]> = {}, locale: "en" | "tr" = "en") {
-  const handlers = { onShow: vi.fn(), onOpen: vi.fn(), onStop: vi.fn() };
+  const handlers = { onShow: vi.fn(), onOpen: vi.fn(), onStop: vi.fn(), onQuit: vi.fn() };
   render(
     <I18nProvider locale={locale}>
       <Panel update={update} now={NOW} {...handlers} {...props} />
@@ -99,7 +107,7 @@ describe("Panel", () => {
 
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     const items = within(screen.getByRole("list", { name: "Memory by app" })).getAllByRole("listitem");
-    expect(items.map((item) => item.textContent)).toEqual(["Dev servers998 MB", "Google Chrome3.2 GB", "Slack640 MB"]);
+    expect(parts(items)).toEqual(["Dev servers998 MB", "Google Chrome3.2 GB", "Slack640 MB"]);
     expect(screen.getByText("Figures as in Activity Monitor")).toBeTruthy();
     // Bars share the meter's scale, so the dev servers' bar lines up with their part of it.
     const [servers] = [...screen.getByRole("meter").children] as HTMLElement[];
@@ -118,6 +126,20 @@ describe("Panel", () => {
     expect(within(list).getByText("8.0 GB")).toBeTruthy();
   });
 
+  it("offers to quit each app, but neither the dev servers nor the system", () => {
+    const replayd = { name: "replayd", memoryBytes: 300 * MIB, system: true };
+    const { onQuit } = show({ update: { ...update, apps: [...(update.apps ?? []), replayd] } });
+    fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
+
+    const list = screen.getByRole("list", { name: "Memory by app" });
+    expect(within(list).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Quit Google Chrome",
+      "Quit Slack",
+    ]);
+    fireEvent.click(within(list).getByRole("button", { name: "Quit Slack" }));
+    expect(onQuit).toHaveBeenCalledWith(update.apps?.[1]);
+  });
+
   it("says so while it is still measuring the apps", () => {
     show({ update: { ...update, apps: null } });
 
@@ -133,11 +155,11 @@ describe("Panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
 
     const items = within(screen.getByRole("list", { name: "Memory by app" })).getAllByRole("listitem");
-    expect(items.map((item) => item.textContent)).toEqual(["Google Chrome3.2 GB", "Slack640 MB"]);
+    expect(parts(items)).toEqual(["Google Chrome3.2 GB", "Slack640 MB"]);
   });
 
   it("names a coding agent the way the rest of the panel does", () => {
-    show({ update: { ...update, apps: [{ name: "claude", memoryBytes: 1.7 * 1024 * MIB, processes: 2 }] } });
+    show({ update: { ...update, apps: [{ name: "claude", memoryBytes: 1.7 * 1024 * MIB, system: false }] } });
 
     fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
 
@@ -256,7 +278,7 @@ describe("Panel", () => {
     expect(screen.getByText(byContent("2 sunucu · 998 MB · CPU %5"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "16,0 / 32 GB" }));
     const items = within(screen.getByRole("list", { name: "Uygulamalara göre bellek" })).getAllByRole("listitem");
-    expect(items.map((item) => item.textContent)).toEqual(["Dev sunucuları998 MB", "Google Chrome3,2 GB", "Slack640 MB"]);
+    expect(parts(items)).toEqual(["Dev sunucuları998 MB", "Google Chrome3,2 GB", "Slack640 MB"]);
     expect(screen.getByText("Değerler Etkinlik Monitörü'ndeki gibi")).toBeTruthy();
   });
 });

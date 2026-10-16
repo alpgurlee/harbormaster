@@ -8,7 +8,7 @@ use std::time::Instant;
 use harbormaster_platform::{Error, ProcessKey};
 
 use crate::apps::AppUsage;
-use crate::{Input, Scanner, Snapshot, Standing, standings};
+use crate::{Input, Member, Scanner, Snapshot, Standing, command, standings};
 
 /// What listens on this machine right now.
 pub fn scan(scanner: &mut Scanner, home: &Path) -> Result<Snapshot, Error> {
@@ -45,6 +45,26 @@ pub fn apps(skip: &HashSet<ProcessKey>) -> Result<Vec<AppUsage>, Error> {
     let processes = harbormaster_platform::processes()?;
     let executable = |key| harbormaster_platform::executable(key).known().cloned();
     Ok(crate::apps::usage(&processes, &executable, skip))
+}
+
+/// `keys` as a stop shows them, leaving out what exited or changed since.
+pub fn members(keys: &[ProcessKey]) -> Result<Vec<Member>, Error> {
+    let processes = harbormaster_platform::processes()?;
+    Ok(keys
+        .iter()
+        .filter_map(|key| processes.iter().find(|entry| entry.key == *key))
+        .map(|entry| Member {
+            key: entry.key,
+            pid: entry.key.pid.0,
+            name: entry.name.clone(),
+            command: harbormaster_platform::details(entry.key)
+                .args
+                .known()
+                .map(|args| command::display(args)),
+            memory_bytes: entry.memory_bytes,
+            cpu_percent: None,
+        })
+        .collect())
 }
 
 /// This process and everything above it, which a stop must never reach.

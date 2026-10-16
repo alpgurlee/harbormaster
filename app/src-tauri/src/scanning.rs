@@ -161,15 +161,18 @@ impl Scanning {
     }
 }
 
-/// The apps using the most memory, the dev servers left out: the panel
-/// counts those on their own.
-fn apps(services: &[Service]) -> Option<Vec<AppUsage>> {
-    let servers: HashSet<ProcessKey> = services
+/// The dev servers' processes, which the breakdown counts on their own.
+pub(crate) fn servers(services: &[Service]) -> HashSet<ProcessKey> {
+    services
         .iter()
         .filter(|service| service.classification == Classification::Dev)
         .flat_map(|service| service.processes.iter().map(|member| member.key))
-        .collect();
-    match live::apps(&servers) {
+        .collect()
+}
+
+/// The apps using the most memory, the dev servers left out.
+fn apps(services: &[Service]) -> Option<Vec<AppUsage>> {
+    match live::apps(&servers(services)) {
         Ok(mut apps) => {
             apps.truncate(APPS_SHOWN);
             Some(apps)
@@ -195,7 +198,8 @@ mod tests {
             apps: Some(vec![AppUsage {
                 name: "Google Chrome".into(),
                 memory_bytes: 3,
-                processes: 2,
+                system: false,
+                members: Vec::new(),
             }]),
             scanned_at: 42,
         };
@@ -205,7 +209,7 @@ mod tests {
             serde_json::json!({
                 "services": [],
                 "memory": { "used": 1, "total": 2 },
-                "apps": [{ "name": "Google Chrome", "memoryBytes": 3, "processes": 2 }],
+                "apps": [{ "name": "Google Chrome", "memoryBytes": 3, "system": false }],
                 "scannedAt": 42
             })
         );

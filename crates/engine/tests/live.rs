@@ -56,3 +56,30 @@ fn tells_how_much_memory_each_app_uses() {
         "{apps:?}"
     );
 }
+
+#[test]
+fn shows_processes_as_a_stop_would_and_leaves_out_the_exited() {
+    let own = std::process::id();
+    let mut exited = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = exited.id();
+    let table = harbormaster_platform::processes().unwrap();
+    let key_of = |pid: u32| {
+        table
+            .iter()
+            .find(|entry| entry.key.pid.0 == pid)
+            .unwrap()
+            .key
+    };
+    let keys = [key_of(own), key_of(pid)];
+    exited.kill().unwrap();
+    exited.wait().unwrap();
+
+    let members = live::members(&keys).unwrap();
+
+    assert_eq!(members.len(), 1, "{members:?}");
+    assert_eq!(members[0].pid, own);
+    assert!(members[0].command.is_some());
+}

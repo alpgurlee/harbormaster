@@ -28,15 +28,15 @@ const SAMPLES: Sample[] = [
   { port: 22000, name: "syncthing", command: "syncthing serve --no-browser", minutes: 4000, memoryMib: 74, cpu: 0.2, kind: "other" },
 ];
 
-const APPS: [string, number, number][] = [
-  ["Google Chrome", 3480, 41],
-  ["Docker", 2150, 7],
-  ["Visual Studio Code", 1640, 22],
-  ["Slack", 720, 6],
-  ["Figma", 540, 5],
-  ["Notion", 380, 4],
-  ["Spotify", 260, 4],
-  ["iTerm2", 180, 3],
+const APPS: [string, number][] = [
+  ["Google Chrome", 3480],
+  ["Docker", 2150],
+  ["Visual Studio Code", 1640],
+  ["Slack", 720],
+  ["Figma", 540],
+  ["Notion", 380],
+  ["Spotify", 260],
+  ["iTerm2", 180],
 ];
 
 function service(sample: Sample, index: number, now: number): Service {
@@ -72,7 +72,7 @@ export function sample(now: number): Update {
   return {
     services: SAMPLES.map((entry, index) => service(entry, index, now)),
     memory: { used: 14.9 * GIB, total: 32 * GIB },
-    apps: APPS.map(([name, memoryMib, processes]) => ({ name, memoryBytes: memoryMib * MIB, processes })),
+    apps: APPS.map(([name, memoryMib]) => ({ name, memoryBytes: memoryMib * MIB, system: false })),
     scannedAt: now,
   };
 }

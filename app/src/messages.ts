@@ -81,6 +81,18 @@ export interface Messages {
   outcomeAccessDenied: string;
   outcomeStillRunning: string;
   outcomeFailed: string;
+  quit: string;
+  quitApp: string;
+  quitTitle: string;
+  quitHowApp: string;
+  quitWarning: string;
+  quitHowPrograms: string;
+  willQuit: string;
+  quitting: string;
+  stillOpen: string;
+  quitGone: string;
+  quitChanged: string;
+  wontQuit: string;
 }
 
 export const en: Messages = {
@@ -161,6 +173,19 @@ export const en: Messages = {
   outcomeAccessDenied: "not allowed to stop it",
   outcomeStillRunning: "still running",
   outcomeFailed: "failed: {message}",
+  quit: "Quit",
+  quitApp: "Quit {name}",
+  quitTitle: "Quit {name}?",
+  quitHowApp: "{name} is asked to quit, as ⌘Q would. If something isn't saved, it asks you first.",
+  quitWarning:
+    "These are command-line programs. One may be a coding agent's session, a language server or a job running in the background; closing it can lose work in progress.",
+  quitHowPrograms: "Each is asked to exit, as kill would. Nothing is forced.",
+  willQuit: "Will close",
+  quitting: "Quitting…",
+  stillOpen: "{name} is still open. It may be waiting for you to save something.",
+  quitGone: "{name} isn't running anymore.",
+  quitChanged: "It changed since you looked. Look again before quitting it.",
+  wontQuit: "Harbormaster won't quit this: {reason}.",
 };
 
 export const tr: Messages = {
@@ -241,4 +266,17 @@ export const tr: Messages = {
   outcomeAccessDenied: "durdurma izni yok",
   outcomeStillRunning: "hâlâ çalışıyor",
   outcomeFailed: "başarısız: {message}",
+  quit: "Kapat",
+  quitApp: "Kapat: {name}",
+  quitTitle: "{name} kapatılsın mı?",
+  quitHowApp: "{name}, ⌘Q'ya basılmış gibi kapanmaya çağrılır. Kaydedilmemiş bir şey varsa önce sana sorar.",
+  quitWarning:
+    "Bunlar komut satırı programları. Biri açık bir kod ajanı oturumu, dil sunucusu ya da arka planda süren bir iş olabilir; kapatınca yarım kalan iş kaybolabilir.",
+  quitHowPrograms: "Her birine, kill komutu gibi, kapanması söylenir. Hiçbiri zorlanmaz.",
+  willQuit: "Kapatılacak",
+  quitting: "Kapatılıyor…",
+  stillOpen: "{name} hâlâ açık. Bir şeyi kaydetmeni bekliyor olabilir.",
+  quitGone: "{name} artık çalışmıyor.",
+  quitChanged: "Sen baktıktan sonra değişti. Kapatmadan önce yeniden bak.",
+  wontQuit: "Harbormaster bunu kapatmaz: {reason}.",
 };
