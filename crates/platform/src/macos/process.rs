@@ -186,37 +186,44 @@ struct UniqueIdentifierInfo {
 
 const PROC_PIDUNIQIDENTIFIERINFO: c_int = 17;
 
-/// xnu bumps `p_idversion` on exec. Whether this macOS answers is judged once,
-/// on our own process: if it does, a process it won't answer for can't be
-/// identified this round; if it doesn't, every process gets 0 and the pid and
-/// start time alone tell processes apart.
+/// xnu bumps `p_idversion` on exec. If this macOS answers, a process it won't
+/// answer for can't be identified this round; if it doesn't, every process
+/// gets 0 and the pid and start time alone tell processes apart.
 fn exec_version(pid: libc::pid_t) -> io::Result<u32> {
+    if exec_versions()? {
+        id_version(pid)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Whether keys are known to change on exec. Not knowing yet counts as no.
+pub(crate) fn tracks_exec() -> bool {
+    exec_versions().unwrap_or(false)
+}
+
+/// Whether this macOS answers is judged once, on our own process.
+fn exec_versions() -> io::Result<bool> {
     static ANSWERS: OnceLock<bool> = OnceLock::new();
-    let answers = match ANSWERS.get() {
-        Some(&answers) => answers,
-        None => {
-            let own = libc::pid_t::try_from(std::process::id())
-                .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-            let probe = id_version(own);
-            let Some(answers) = verdict(&probe) else {
-                // Not settled yet, so nothing can be identified this round.
-                return probe;
-            };
-            *ANSWERS.get_or_init(|| answers)
-        }
-    };
-    if answers { id_version(pid) } else { Ok(0) }
+    if let Some(&answers) = ANSWERS.get() {
+        return Ok(answers);
+    }
+    let own = libc::pid_t::try_from(std::process::id())
+        .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    // Not settled yet, so nothing can be identified this round.
+    let answers = verdict(id_version(own))?;
+    Ok(*ANSWERS.get_or_init(|| answers))
 }
 
 /// Only a success, or a flavor this kernel doesn't know, settles whether exec
 /// versions are available; any other failure may pass.
-fn verdict(probe: &io::Result<u32>) -> Option<bool> {
+fn verdict(probe: io::Result<u32>) -> io::Result<bool> {
     match probe {
-        Ok(_) => Some(true),
+        Ok(_) => Ok(true),
         Err(error) if matches!(error.raw_os_error(), Some(libc::EINVAL | libc::ENOTSUP)) => {
-            Some(false)
+            Ok(false)
         }
-        Err(_) => None,
+        Err(error) => Err(error),
     }
 }
 
@@ -364,15 +371,14 @@ mod tests {
 
     #[test]
     fn decides_about_exec_versions_only_on_a_clear_answer() {
-        assert_eq!(verdict(&Ok(7)), Some(true));
-        assert_eq!(
-            verdict(&Err(io::Error::from_raw_os_error(libc::EINVAL))),
-            Some(false)
-        );
-        assert_eq!(
-            verdict(&Err(io::Error::from_raw_os_error(libc::EAGAIN))),
-            None
-        );
+        assert!(verdict(Ok(7)).unwrap());
+        for errno in [libc::EINVAL, libc::ENOTSUP] {
+            assert!(!verdict(Err(io::Error::from_raw_os_error(errno))).unwrap());
+        }
+        for errno in [libc::EAGAIN, libc::EPERM] {
+            let error = verdict(Err(io::Error::from_raw_os_error(errno))).unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(errno));
+        }
     }
 
     #[test]

@@ -44,6 +44,13 @@ pub fn presence(key: ProcessKey) -> Presence {
     sys::presence(key)
 }
 
+/// Whether a `ProcessKey` also changes when its process execs another
+/// program. Without that, the pid and start time are all that tell two
+/// processes apart.
+pub fn tracks_exec() -> bool {
+    sys::tracks_exec()
+}
+
 /// Used and total memory of the machine, if the OS says.
 pub fn memory() -> Option<Memory> {
     sys::memory()

@@ -1,6 +1,6 @@
 use std::process::{Command, Stdio};
 
-use harbormaster_platform::{Field, Owner, Pid, ProcessEntry, details, processes};
+use harbormaster_platform::{Field, Owner, Pid, ProcessEntry, details, processes, tracks_exec};
 
 fn find(pid: u32) -> ProcessEntry {
     processes()
@@ -108,6 +108,11 @@ fn gives_a_process_that_execs_a_new_identity() {
     assert_eq!((before.pid, before.start), (after.pid, after.start));
     assert_ne!(before, after, "exec must change the identity");
     assert_eq!(stale.args, Field::Gone);
+}
+
+#[test]
+fn keys_follow_an_exec_on_this_macos() {
+    assert!(tracks_exec());
 }
 
 #[test]

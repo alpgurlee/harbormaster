@@ -16,7 +16,7 @@ use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 use crate::{Listener, SocketId};
 
 pub(crate) use memory::memory;
-pub(crate) use process::{details, processes};
+pub(crate) use process::{details, processes, tracks_exec};
 pub(crate) use signal::{presence, signal};
 
 // From xnu bsd/sys/proc_info.h.

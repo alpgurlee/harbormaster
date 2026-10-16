@@ -114,6 +114,18 @@ pub(crate) fn refusal(refusal: &Refusal<'_>, target: &Target) -> (Vec<String>, u
     }
 }
 
+/// The system can't say when a process execs another program, so no check
+/// before a signal could prove it still runs what was approved.
+pub(crate) fn untracked_exec() -> (Vec<String>, u8) {
+    (
+        vec![
+            "Harbormaster won't stop anything on this system: it can't tell when a process starts running another program."
+                .to_string(),
+        ],
+        REFUSED,
+    )
+}
+
 fn reason(service: &Service, protection: Protection) -> String {
     match protection {
         Protection::System => "it is part of the operating system".into(),
@@ -213,7 +225,7 @@ mod tests {
     };
     use harbormaster_platform::{Pid, ProcessKey, StartTime};
 
-    use super::{confirmed, preview, refusal, report};
+    use super::{confirmed, preview, refusal, report, untracked_exec};
 
     fn member(pid: u32, command: &str) -> Member {
         Member {
@@ -301,6 +313,17 @@ mod tests {
         let (lines, status) = refusal(&Refusal::Protected(&database, Protection::Database), &PORT);
         assert!(
             lines[0].starts_with("Harbormaster won't stop node:"),
+            "{lines:?}"
+        );
+        assert_eq!(status, 4);
+    }
+
+    #[test]
+    fn refuses_to_stop_where_a_key_cant_follow_an_exec() {
+        let (lines, status) = untracked_exec();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].starts_with("Harbormaster won't stop anything"),
             "{lines:?}"
         );
         assert_eq!(status, 4);

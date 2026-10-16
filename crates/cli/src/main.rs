@@ -188,6 +188,24 @@ fn explain(port: u16) -> anyhow::Result<u8> {
 }
 
 fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
+    when_exec_tracked(harbormaster_platform::tracks_exec(), || {
+        halt_tracked(target, yes, force, grace)
+    })
+}
+
+/// Every check before a signal relies on keys that change on exec. Without
+/// them, nothing is scanned, asked or signalled.
+fn when_exec_tracked(
+    tracked: bool,
+    proceed: impl FnOnce() -> anyhow::Result<u8>,
+) -> anyhow::Result<u8> {
+    if !tracked {
+        return Ok(refuse(stop::untracked_exec()));
+    }
+    proceed()
+}
+
+fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let snapshot = scan(&mut Scanner::default(), &home)?;
     let service = match harbormaster_engine::choose(&snapshot, &target, &lineage()?) {
@@ -366,7 +384,14 @@ mod tests {
 
     use std::collections::HashMap;
 
-    use super::{Cli, Command, NAME_WIDTH, lineage_from, row};
+    use super::{Cli, Command, NAME_WIDTH, lineage_from, row, stop, when_exec_tracked};
+
+    #[test]
+    fn refuses_before_anything_is_scanned_when_keys_cant_follow_an_exec() {
+        let refused = when_exec_tracked(false, || panic!("nothing may be scanned or asked"));
+        assert_eq!(refused.unwrap(), stop::REFUSED);
+        assert_eq!(when_exec_tracked(true, || Ok(17)).unwrap(), 17);
+    }
 
     #[test]
     fn takes_the_list_flags_without_naming_the_list_command() {
