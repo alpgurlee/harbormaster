@@ -128,6 +128,7 @@ pub enum Outcome {
 #[serde(rename_all = "camelCase")]
 pub struct Removal {
     pub path: PathBuf,
+    #[serde(flatten)]
     pub outcome: Outcome,
 }
 

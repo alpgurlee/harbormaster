@@ -1,26 +1,37 @@
-//! The cleaner's dry run: what could go, and how much room it would make.
+//! The cleaner in the terminal: what could go, how much room it would make,
+//! and, with `--yes`, what removing what is picked did.
 
+use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use harbormaster_cleaner::{Finding, Group, Kind};
+use harbormaster_cleaner::{Cleaned, Finding, Group, Kind, Outcome, Removal};
 
-use crate::format;
+use crate::{format, stop};
 
 const NAME_WIDTH: usize = 32;
 
-/// The findings as the JSON a script reads; fails on a path JSON can't hold.
-pub(crate) fn document(findings: &[Finding]) -> serde_json::Result<String> {
-    let findings = serde_json::to_value(findings)?;
-    serde_json::to_string_pretty(&serde_json::json!({
+/// The findings, and what removing did when it ran, as the JSON a script
+/// reads; fails on a path JSON can't hold.
+pub(crate) fn document(
+    findings: &[Finding],
+    cleaned: Option<&Cleaned>,
+) -> serde_json::Result<String> {
+    let mut document = serde_json::json!({
         "schema": "harbormaster/v1",
-        "findings": findings,
-    }))
+        "findings": serde_json::to_value(findings)?,
+    });
+    if let Some(cleaned) = cleaned {
+        document["cleaned"] = serde_json::to_value(cleaned)?;
+    }
+    serde_json::to_string_pretty(&document)
 }
 
-/// The table of findings by group, then what picking would free. `now` is
-/// in seconds since the Unix epoch, for saying how long a project has sat.
-pub(crate) fn lines(findings: &[Finding], home: &Path, now: u64) -> Vec<String> {
+/// The table of findings by group, then what picking would free, or, when
+/// `removing`, that it is being freed. `now` is in seconds since the Unix
+/// epoch, for saying how long a project has sat.
+pub(crate) fn lines(findings: &[Finding], home: &Path, now: u64, removing: bool) -> Vec<String> {
     if findings.is_empty() {
         return vec!["Nothing to clean up.".into()];
     }
@@ -44,14 +55,101 @@ pub(crate) fn lines(findings: &[Finding], home: &Path, now: u64) -> Vec<String> 
         .map(|finding| finding.bytes)
         .sum();
     let all: u64 = findings.iter().map(|finding| finding.bytes).sum();
+    let (picked, all) = (format::bytes(picked), format::bytes(all));
     let mut lines: Vec<String> = format::table(&rows).lines().map(String::from).collect();
     lines.push(String::new());
-    lines.push(format!(
-        "Would free {} of {}. Nothing was removed: this is a dry run.",
-        format::bytes(picked),
-        format::bytes(all)
-    ));
+    if removing {
+        lines.push(format!("Removing what is picked: {picked} of {all}."));
+    } else {
+        lines.push(format!(
+            "Would free {picked} of {all}. Nothing was removed: this is a dry run."
+        ));
+        lines.push("Run it with --yes to remove what is picked.".into());
+    }
     lines
+}
+
+/// Removes what is picked among `findings` through `remove`, writing each
+/// removal to `out` as it happens and then the room freed or, with `json`,
+/// the whole document. Nothing is removed when the document couldn't be
+/// written, and once `out` can't be written to, the rest is stopped rather
+/// than removed unseen. Returns the exit status.
+pub(crate) fn remove_picked(
+    findings: &[Finding],
+    json: bool,
+    out: &mut dyn Write,
+    remove: impl FnOnce(&[Finding], &AtomicBool, &mut dyn FnMut(&Removal)) -> anyhow::Result<Cleaned>,
+) -> anyhow::Result<u8> {
+    if json {
+        document(findings, None)?;
+    }
+    let picked: Vec<Finding> = findings
+        .iter()
+        .filter(|finding| finding.picked)
+        .cloned()
+        .collect();
+    let stop = AtomicBool::new(false);
+    let mut unwritten = None;
+    let cleaned = remove(&picked, &stop, &mut |done| {
+        if json || unwritten.is_some() {
+            return;
+        }
+        if let Err(error) = writeln!(out, "{}", removal(done, &picked)) {
+            unwritten = Some(error);
+            stop.store(true, Ordering::Relaxed);
+        }
+    });
+    // Why removing stopped comes first, whatever went wrong after.
+    if let Some(error) = unwritten {
+        return Err(
+            anyhow::Error::new(error).context("stopped removing: its progress couldn't be written")
+        );
+    }
+    let cleaned = cleaned?;
+    if json {
+        writeln!(out, "{}", document(findings, Some(&cleaned))?)?;
+    } else {
+        writeln!(out, "{}", freed(&cleaned))?;
+    }
+    Ok(status(&cleaned))
+}
+
+/// What happened to one finding, named as the table names it.
+pub(crate) fn removal(removal: &Removal, findings: &[Finding]) -> String {
+    let name = findings
+        .iter()
+        .find(|finding| finding.path == removal.path)
+        .map_or_else(
+            || removal.path.display().to_string(),
+            |finding| finding.name.clone(),
+        );
+    let (done, why) = match &removal.outcome {
+        Outcome::Deleted => ("deleted", None),
+        Outcome::Trashed => ("trashed", None),
+        Outcome::Refused { why } => ("skipped", Some(why)),
+        Outcome::Failed { why } => ("failed", Some(why)),
+        Outcome::Stopped => ("stopped", None),
+    };
+    let why = why.map(|why| format!(": {why}")).unwrap_or_default();
+    format::printable(&format!("  {done:<8} {name}{why}"))
+}
+
+/// The room the disk got back.
+pub(crate) fn freed(cleaned: &Cleaned) -> String {
+    if cleaned.removals.is_empty() {
+        return "Nothing is picked, so nothing was removed.".into();
+    }
+    format!("Freed {}.", format::bytes(cleaned.freed_bytes))
+}
+
+/// The exit status: 1 when anything failed. A skip is the safety rules at
+/// work, not a failure.
+pub(crate) fn status(cleaned: &Cleaned) -> u8 {
+    let failed = cleaned
+        .removals
+        .iter()
+        .any(|removal| matches!(removal.outcome, Outcome::Failed { .. }));
+    if failed { stop::FAILED } else { 0 }
 }
 
 fn title(group: Group) -> &'static str {
@@ -94,7 +192,10 @@ fn shown(path: &Path, home: &Path) -> String {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use harbormaster_cleaner::{Finding, Group, Identity, Kind};
+    use std::io::{self, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use harbormaster_cleaner::{Cleaned, Finding, Group, Identity, Kind, Outcome, Removal};
 
     use super::lines;
 
@@ -174,7 +275,7 @@ mod tests {
             ),
         ];
 
-        let text = lines(&findings, Path::new("/Users/dev"), now).join("\n");
+        let text = lines(&findings, Path::new("/Users/dev"), now, false).join("\n");
 
         assert!(
             text.contains("Projects") && text.contains("Packages"),
@@ -189,7 +290,279 @@ mod tests {
         assert!(text.contains("used last"), "{text}");
         assert!(text.contains("empties for good"), "{text}");
         assert!(text.contains("Would free 3.0 GB of 6.0 GB"), "{text}");
-        assert!(text.contains("dry run"), "{text}");
+        assert!(text.contains("dry run") && text.contains("--yes"), "{text}");
+
+        let removing = lines(&findings, Path::new("/Users/dev"), now, true).join("\n");
+        assert!(
+            removing.contains("Removing what is picked: 3.0 GB of 6.0 GB."),
+            "{removing}"
+        );
+        assert!(!removing.contains("dry run"), "{removing}");
+    }
+
+    #[test]
+    fn says_what_removing_did_with_each_and_the_room_freed() {
+        let findings = [
+            finding(
+                Group::Projects,
+                Kind::Rebuildable,
+                "shop · node_modules",
+                "/Users/dev/code/shop/node_modules",
+                GIB,
+                true,
+            ),
+            finding(
+                Group::Packages,
+                Kind::Rebuildable,
+                "npm",
+                "/Users/dev/.npm/_cacache",
+                GIB,
+                true,
+            ),
+            finding(
+                Group::Xcode,
+                Kind::Personal,
+                "2026-09-20",
+                "/Users/dev/Library/Developer/Xcode/Archives/2026-09-20",
+                GIB,
+                true,
+            ),
+            finding(
+                Group::Apps,
+                Kind::Rebuildable,
+                "com.odd\u{1b}]52;c;eA==\u{7}.app",
+                "/Users/dev/Library/Caches/com.odd.app",
+                GIB,
+                true,
+            ),
+        ];
+        let removal = |at: usize, outcome| Removal {
+            path: findings[at].path.clone(),
+            outcome,
+        };
+        let cleaned = Cleaned {
+            removals: vec![
+                removal(0, Outcome::Deleted),
+                removal(
+                    1,
+                    Outcome::Failed {
+                        why: "Permission denied (os error 13)".into(),
+                    },
+                ),
+                removal(2, Outcome::Trashed),
+                removal(
+                    3,
+                    Outcome::Refused {
+                        why: "in use by \u{1b}[2Jx".into(),
+                    },
+                ),
+            ],
+            freed_bytes: GIB,
+        };
+
+        let said: Vec<String> = cleaned
+            .removals
+            .iter()
+            .map(|removal| super::removal(removal, &findings))
+            .collect();
+
+        assert_eq!(said[0], "  deleted  shop · node_modules");
+        assert_eq!(said[1], "  failed   npm: Permission denied (os error 13)");
+        assert_eq!(said[2], "  trashed  2026-09-20");
+        assert!(
+            said[3].starts_with("  skipped  com.odd") && !said[3].contains('\u{1b}'),
+            "{said:?}"
+        );
+        assert_eq!(super::freed(&cleaned), "Freed 1.0 GB.");
+        assert_eq!(super::status(&cleaned), crate::stop::FAILED);
+    }
+
+    #[test]
+    fn counts_a_skip_as_the_safety_rules_working_not_a_failure() {
+        let cleaned = Cleaned {
+            removals: vec![Removal {
+                path: PathBuf::from("/Users/dev/.npm/_cacache"),
+                outcome: Outcome::Refused {
+                    why: "in use by node".into(),
+                },
+            }],
+            freed_bytes: 0,
+        };
+
+        assert_eq!(super::status(&cleaned), 0);
+        assert_eq!(
+            super::freed(&Cleaned {
+                removals: Vec::new(),
+                freed_bytes: 0
+            }),
+            "Nothing is picked, so nothing was removed."
+        );
+    }
+
+    /// Removes as `remove` does: each picked finding while not stopped,
+    /// telling of each, and noting in `gone` what it took.
+    fn remove_like_the_cleaner(
+        gone: &mut Vec<PathBuf>,
+        picked: &[Finding],
+        stop: &AtomicBool,
+        told: &mut dyn FnMut(&Removal),
+    ) -> anyhow::Result<Cleaned> {
+        let mut removals = Vec::new();
+        for finding in picked {
+            let outcome = if stop.load(Ordering::Relaxed) {
+                Outcome::Stopped
+            } else {
+                gone.push(finding.path.clone());
+                Outcome::Deleted
+            };
+            let removal = Removal {
+                path: finding.path.clone(),
+                outcome,
+            };
+            told(&removal);
+            removals.push(removal);
+        }
+        Ok(Cleaned {
+            removals,
+            freed_bytes: GIB,
+        })
+    }
+
+    fn three() -> [Finding; 3] {
+        ["a", "b", "c"].map(|name| {
+            finding(
+                Group::Packages,
+                Kind::Rebuildable,
+                name,
+                &format!("/Users/dev/{name}"),
+                GIB,
+                true,
+            )
+        })
+    }
+
+    #[test]
+    fn removes_what_is_picked_and_tells_of_each() {
+        let mut findings = three();
+        findings[1].picked = false;
+        let mut gone = Vec::new();
+        let mut out = Vec::new();
+
+        let status = super::remove_picked(&findings, false, &mut out, |picked, stop, told| {
+            remove_like_the_cleaner(&mut gone, picked, stop, told)
+        })
+        .unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(status, 0);
+        assert_eq!(gone, [findings[0].path.clone(), findings[2].path.clone()]);
+        assert_eq!(text, "  deleted  a\n  deleted  c\nFreed 1.0 GB.\n");
+    }
+
+    #[test]
+    fn removes_nothing_when_the_json_could_not_be_written() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let mut findings = three();
+        findings[2].picked = false;
+        findings[2].path = PathBuf::from(OsStr::from_bytes(b"/Users/\xff/Library/Logs"));
+        let mut out = Vec::new();
+
+        let outcome = super::remove_picked(&findings, true, &mut out, |_, _, _| {
+            panic!("nothing may be removed")
+        });
+
+        assert!(outcome.is_err());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn stops_removing_once_what_it_did_cant_be_written() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let findings = three();
+        let mut gone = Vec::new();
+
+        let outcome = super::remove_picked(&findings, false, &mut Closed, |picked, stop, told| {
+            remove_like_the_cleaner(&mut gone, picked, stop, told)
+        });
+
+        assert!(outcome.is_err());
+        assert_eq!(gone, [findings[0].path.clone()]);
+    }
+
+    #[test]
+    fn says_it_stopped_for_the_output_even_when_removing_then_fails() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let findings = three();
+        let mut gone = Vec::new();
+
+        let outcome = super::remove_picked(&findings, false, &mut Closed, |picked, stop, told| {
+            remove_like_the_cleaner(&mut gone, picked, stop, told)?;
+            anyhow::bail!("the disk's free space couldn't be read")
+        });
+
+        let error = outcome.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "stopped removing: its progress couldn't be written"
+        );
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+        assert_eq!(gone, [findings[0].path.clone()]);
+    }
+
+    #[test]
+    fn puts_what_removing_did_in_the_json() {
+        let npm = finding(
+            Group::Packages,
+            Kind::Rebuildable,
+            "npm",
+            "/Users/dev/.npm/_cacache",
+            GIB,
+            true,
+        );
+        let cleaned = Cleaned {
+            removals: vec![Removal {
+                path: npm.path.clone(),
+                outcome: Outcome::Refused {
+                    why: "in use by node".into(),
+                },
+            }],
+            freed_bytes: 0,
+        };
+
+        let text = super::document(&[npm], Some(&cleaned)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(json["cleaned"]["freedBytes"], 0);
+        assert_eq!(
+            json["cleaned"]["removals"][0],
+            serde_json::json!({
+                "path": "/Users/dev/.npm/_cacache",
+                "outcome": "refused",
+                "why": "in use by node",
+            })
+        );
+        assert!(json["findings"][0].get("identity").is_none(), "{text}");
     }
 
     #[test]
@@ -200,13 +573,13 @@ mod tests {
         let mut odd = finding(Group::Logs, Kind::Rebuildable, "Logs", "/", 1, true);
         odd.path = PathBuf::from(OsStr::from_bytes(b"/Users/\xff/Library/Logs"));
 
-        assert!(super::document(&[odd]).is_err());
+        assert!(super::document(&[odd], None).is_err());
     }
 
     #[test]
     fn says_so_when_there_is_nothing() {
         assert_eq!(
-            lines(&[], Path::new("/Users/dev"), 0),
+            lines(&[], Path::new("/Users/dev"), 0, false),
             ["Nothing to clean up."]
         );
     }

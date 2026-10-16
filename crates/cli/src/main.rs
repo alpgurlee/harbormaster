@@ -3,7 +3,7 @@ mod format;
 mod stop;
 mod why;
 
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,6 +25,9 @@ const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// How long a project sits untouched before its build outputs are picked.
 const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
+
+/// Paths, each with what is using it.
+type UsedBy = Vec<(PathBuf, String)>;
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -77,11 +80,15 @@ enum Command {
         #[arg(long, default_value_t = 5, value_name = "SECONDS")]
         wait: u64,
     },
-    /// Show the caches, logs and other leftovers that could go; removes nothing yet
+    /// Show the build outputs, caches and other leftovers that could go
     Clean {
         /// Print machine-readable JSON
         #[arg(long)]
         json: bool,
+        /// Remove what is picked, without asking: build outputs and caches
+        /// that tools rebuild, never anything in use or of your own
+        #[arg(long, short)]
+        yes: bool,
     },
 }
 
@@ -101,7 +108,7 @@ fn main() -> ExitCode {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),
         Some(Command::Why { port }) => explain(port),
-        Some(Command::Clean { json }) => survey(json),
+        Some(Command::Clean { json, yes }) => survey(json, yes),
         Some(Command::Stop {
             port,
             pid,
@@ -187,11 +194,10 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
     row
 }
 
-fn survey(json: bool) -> anyhow::Result<u8> {
+fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
     let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
     let roots = harbormaster_cleaner::usual_roots(&home);
-    let busy = busy_paths().context("could not tell which folders are in use")?;
-    let running = running_projects(&home)?;
+    let (busy, running) = in_use_now(&home)?;
     let now = SystemTime::now();
     let survey = Survey {
         home: &home,
@@ -203,19 +209,48 @@ fn survey(json: bool) -> anyhow::Result<u8> {
     };
     let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
         .with_context(|| format!("could not look through {}", home.display()))?;
-    if json {
-        println!("{}", clean::document(&findings)?);
+    let mut out = io::stdout().lock();
+    if !json {
+        let now = now.duration_since(UNIX_EPOCH)?.as_secs();
+        for line in clean::lines(&findings, &home, now, yes) {
+            writeln!(out, "{line}")?;
+        }
+    }
+    if !yes {
+        if json {
+            writeln!(out, "{}", clean::document(&findings, None)?)?;
+        }
         return Ok(0);
     }
-    let now = now.duration_since(UNIX_EPOCH)?.as_secs();
-    for line in clean::lines(&findings, &home, now) {
-        println!("{line}");
-    }
-    Ok(0)
+    clean::remove_picked(&findings, json, &mut out, |picked, stop, told| {
+        // Scanning took a while, so what is in use is read again.
+        let (busy, running) = in_use_now(&home)?;
+        let survey = Survey {
+            busy: &busy,
+            running: &running,
+            now: SystemTime::now(),
+            ..survey
+        };
+        harbormaster_cleaner::remove(
+            &survey,
+            picked,
+            &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
+            stop,
+            told,
+        )
+        .with_context(|| format!("could not remove anything under {}", home.display()))
+    })
+}
+
+/// The paths this user's other processes hold, and the projects with a dev
+/// server running, as they are now.
+fn in_use_now(home: &Path) -> anyhow::Result<(UsedBy, UsedBy)> {
+    let busy = busy_paths().context("could not tell which folders are in use")?;
+    Ok((busy, running_projects(home)?))
 }
 
 /// Every path this user's other processes hold, each with its process's name.
-fn busy_paths() -> anyhow::Result<Vec<(PathBuf, String)>> {
+fn busy_paths() -> anyhow::Result<UsedBy> {
     let own = std::process::id();
     Ok(harbormaster_platform::whereabouts()?
         .into_iter()
@@ -231,7 +266,7 @@ fn busy_paths() -> anyhow::Result<Vec<(PathBuf, String)>> {
 }
 
 /// The projects with a dev server running, each with what to call the server.
-fn running_projects(home: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
+fn running_projects(home: &Path) -> anyhow::Result<UsedBy> {
     let snapshot = live::scan(&mut Scanner::default(), home)?;
     Ok(snapshot
         .services
@@ -439,6 +474,27 @@ mod tests {
 
         assert_eq!(row[1].chars().count(), NAME_WIDTH);
         assert_eq!(row[2].chars().count(), NAME_WIDTH);
+    }
+
+    #[test]
+    fn removes_only_when_told_to() {
+        let dry = Cli::try_parse_from(["harbormaster", "clean"]).unwrap();
+        let told = Cli::try_parse_from(["harbormaster", "clean", "-y", "--json"]).unwrap();
+
+        assert!(matches!(
+            dry.command,
+            Some(Command::Clean {
+                yes: false,
+                json: false
+            })
+        ));
+        assert!(matches!(
+            told.command,
+            Some(Command::Clean {
+                yes: true,
+                json: true
+            })
+        ));
     }
 
     #[test]
