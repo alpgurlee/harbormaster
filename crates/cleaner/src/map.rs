@@ -15,7 +15,8 @@ use crate::{Area, Chart, Charting, Identity, Short, measure};
 const SHOWN_INSIDE: usize = 50;
 /// A place taking less room than this is counted with the others.
 const SHOWN_FROM: u64 = 1024 * 1024;
-/// The most places a map keeps, whatever the disk holds.
+/// The most places kept below any one folder, and so in the whole map,
+/// whatever the disk holds.
 const KEPT_AT_MOST: usize = 20_000;
 /// Folders deeper than this aren't looked into.
 const DEEPEST: usize = 64;
@@ -29,12 +30,26 @@ pub(crate) fn chart(
     stop: &AtomicBool,
     told: &mut dyn FnMut(Charting),
 ) -> io::Result<Area> {
+    charted(chart, stop, told, KEPT_AT_MOST, TELL_EVERY)
+}
+
+/// The map `chart` asks for, with at most `kept` places below any folder,
+/// telling how far it has come every `tell_every`.
+fn charted(
+    chart: &Chart,
+    stop: &AtomicBool,
+    told: &mut dyn FnMut(Charting),
+    kept: usize,
+    tell_every: Duration,
+) -> io::Result<Area> {
     let home = Dir::open(chart.home)?;
     let stat = home.metadata()?;
     let mut walker = Walker {
         chart,
         stop,
         told,
+        kept,
+        tell_every,
         device: stat.st_dev,
         linked: HashSet::new(),
         bytes: 0,
@@ -42,7 +57,6 @@ pub(crate) fn chart(
         last: Instant::now(),
     };
     let mut root = walker.folder(&home, Path::new(""), &stat, 0);
-    trimmed(&mut root, KEPT_AT_MOST);
     numbered(&mut root, &mut 0);
     Ok(root)
 }
@@ -51,6 +65,8 @@ struct Walker<'a> {
     chart: &'a Chart<'a>,
     stop: &'a AtomicBool,
     told: &'a mut dyn FnMut(Charting),
+    kept: usize,
+    tell_every: Duration,
     device: libc::dev_t,
     /// Files with more than one name, so each is counted once.
     linked: HashSet<(libc::dev_t, libc::ino_t)>,
@@ -62,8 +78,9 @@ struct Walker<'a> {
 impl Walker<'_> {
     /// The folder `dir`, at `relative` from the home folder and stored as
     /// `stat`, with everything it holds. What is inside is taken in as it
-    /// is read, folders as they are gone through, so only what may be shown
-    /// is held, never the whole listing.
+    /// is read, folders as they are gone through, and each keeps no more
+    /// places below it than the map may, so only what may be shown is held:
+    /// never a whole listing, nor all of a wide folder's depths.
     fn folder(&mut self, dir: &Dir, relative: &Path, stat: &libc::stat, depth: usize) -> Area {
         let mut area = self.area(relative, stat, measure::blocks(stat));
         self.counted(area.bytes, relative);
@@ -99,6 +116,7 @@ impl Walker<'_> {
         if self.stopped() {
             area.short = area.short.max(Some(Short::Stopped));
         }
+        trimmed(&mut area, self.kept);
         area
     }
 
@@ -122,7 +140,7 @@ impl Walker<'_> {
             match dir.child_if_same(name, stat) {
                 Ok(Some(child)) => return self.folder(&child, below, stat, depth + 1),
                 Ok(None) => Short::Changed,
-                Err(_) => Short::Denied,
+                Err(error) => unopened(&error),
             }
         };
         let bytes = measure::blocks(stat);
@@ -161,7 +179,7 @@ impl Walker<'_> {
     fn counted(&mut self, bytes: u64, relative: &Path) {
         self.bytes += bytes;
         self.items += 1;
-        if self.last.elapsed() >= TELL_EVERY {
+        if self.last.elapsed() >= self.tell_every {
             self.last = Instant::now();
             (self.told)(Charting {
                 bytes: self.bytes,
@@ -176,13 +194,22 @@ impl Walker<'_> {
     }
 }
 
+/// Why a folder listed a moment ago couldn't be opened: gone since, or made
+/// something else, or kept from us.
+fn unopened(error: &io::Error) -> Short {
+    match error.raw_os_error() {
+        Some(libc::ENOENT | libc::ELOOP | libc::ENOTDIR) => Short::Changed,
+        _ => Short::Denied,
+    }
+}
+
 /// Takes `each` into `area`: its room, why it may hold more, and itself if
 /// it is among the largest worth showing. A place left out for a reason is
 /// worth showing whatever its size, so the reason is seen.
 fn offered(area: &mut Area, each: Area) {
     area.bytes += each.bytes;
     area.short = area.short.max(each.short);
-    let worth = each.bytes >= SHOWN_FROM || each.short.is_some_and(|short| short > Short::Changed);
+    let worth = each.bytes >= SHOWN_FROM || each.short.is_some();
     if !worth {
         area.rest += each.bytes;
         return;
@@ -253,11 +280,40 @@ fn numbered(area: &mut Area, next: &mut u32) {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::fs;
+    use std::io;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
-    use super::{shown, trimmed};
-    use crate::{Area, Identity};
+    use super::{KEPT_AT_MOST, charted, offered, shown, trimmed, unopened};
+    use crate::{Area, Chart, Charting, Identity, Short};
+
+    const MIB: usize = 1024 * 1024;
+
+    fn write(path: &Path, bytes: usize) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, vec![1; bytes]).unwrap();
+    }
+
+    /// The map of `home` with at most `kept` places, telling `told` of every place counted.
+    fn mapped(home: &Path, kept: usize, stop: &AtomicBool, told: &mut dyn FnMut(Charting)) -> Area {
+        let chart = Chart {
+            home,
+            others: false,
+        };
+        charted(&chart, stop, told, kept, Duration::ZERO).unwrap()
+    }
+
+    fn at<'a>(area: &'a Area, names: &[&str]) -> &'a Area {
+        names.iter().fold(area, |area, name| {
+            area.inside
+                .iter()
+                .find(|each| each.name == *name)
+                .unwrap_or_else(|| panic!("{name} in {:?}", area.inside))
+        })
+    }
 
     fn area(name: &str, bytes: u64, inside: Vec<Area>) -> Area {
         Area {
@@ -286,6 +342,82 @@ mod tests {
         assert_eq!(root.inside.len(), 1);
         assert!(root.inside[0].inside.is_empty());
         assert_eq!(root.inside[0].rest, 100);
+    }
+
+    #[test]
+    fn cuts_a_wide_folder_down_without_costing_a_narrow_one_its_depth() {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        for folder in 0..6 {
+            for file in 0..2 {
+                write(&home.join(format!("wide/d{folder}/f{file}")), 2 * MIB);
+            }
+        }
+        write(&home.join("narrow/x/y/z/file"), 2 * MIB);
+
+        let root = mapped(&home, 13, &AtomicBool::new(false), &mut |_| {});
+
+        // Its twelve files would take the wide folder past the budget, so
+        // what its folders hold is counted together...
+        let wide = at(&root, &["wide"]);
+        assert_eq!(wide.inside.len(), 6);
+        assert!(
+            wide.inside
+                .iter()
+                .all(|each| each.inside.is_empty() && each.rest >= 4 * MIB as u64),
+            "{wide:?}"
+        );
+        // ...while the narrow one, which fits, is kept to the end.
+        assert!(at(&root, &["narrow", "x", "y", "z", "file"]).bytes >= 2 * MIB as u64);
+    }
+
+    #[test]
+    fn stops_while_reading_a_folder_and_keeps_what_it_has_counted() {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        for name in ["a.bin", "b.bin"] {
+            write(&home.join(name), 2 * MIB);
+        }
+        let stop = AtomicBool::new(false);
+
+        // The home folder is the first place counted, the first file in it the second.
+        let root = mapped(&home, KEPT_AT_MOST, &stop, &mut |charting| {
+            if charting.items == 2 {
+                stop.store(true, Ordering::Relaxed);
+            }
+        });
+
+        assert_eq!(root.short, Some(Short::Stopped));
+        assert_eq!(root.inside.len(), 1);
+    }
+
+    #[test]
+    fn shows_a_place_left_out_for_any_reason_however_small() {
+        let mut home = area("home", 0, Vec::new());
+
+        for short in [Short::Deep, Short::Changed] {
+            let small = area("small", 4096, Vec::new());
+            offered(
+                &mut home,
+                Area {
+                    short: Some(short),
+                    ..small
+                },
+            );
+        }
+
+        assert_eq!(home.inside.len(), 2);
+        assert_eq!(home.rest, 0);
+    }
+
+    #[test]
+    fn takes_a_folder_gone_or_made_something_else_before_it_was_opened_as_changed() {
+        for code in [libc::ENOENT, libc::ELOOP, libc::ENOTDIR] {
+            let error = io::Error::from_raw_os_error(code);
+            assert_eq!(unopened(&error), Short::Changed, "{error}");
+        }
+        let denied = io::Error::from_raw_os_error(libc::EACCES);
+        assert_eq!(unopened(&denied), Short::Denied);
     }
 
     #[test]
