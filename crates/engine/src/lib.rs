@@ -324,6 +324,35 @@ impl Scanner {
     }
 }
 
+/// Why single processes may not be stopped now, whatever service they are
+/// in. Processes no longer there are left out; their signal reports them.
+pub fn protections(input: Input<'_>, keys: &[ProcessKey]) -> Vec<(ProcessKey, Protection)> {
+    let tree = ProcessTree::new(input.processes);
+    let args_of = |entry: &ProcessEntry| (input.details)(entry.key).args.known().cloned();
+    keys.iter()
+        .filter_map(|key| {
+            let entry = tree.get(key.pid).filter(|entry| entry.key == *key)?;
+            let details = (input.details)(entry.key);
+            let protection = if service::is_system(entry) {
+                Protection::System
+            } else if entry.owner != Owner::CurrentUser {
+                Protection::OtherUser
+            } else if details.exe.known().is_some_and(|exe| is_os_component(exe)) {
+                Protection::System
+            } else if details.exe.known().is_none() || details.args.known().is_none() {
+                Protection::Unverified
+            } else if service::is_session_boundary(entry, &tree, &args_of) {
+                Protection::Session
+            } else if DATABASES.contains(&normalize(&entry.name).as_str()) {
+                Protection::Database
+            } else {
+                return None;
+            };
+            Some((*key, protection))
+        })
+        .collect()
+}
+
 /// Up to the first system process, which is where a session ends.
 fn ancestors(
     root: &ProcessEntry,
@@ -863,6 +892,56 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].protected, Some(Protection::System));
+    }
+
+    #[test]
+    fn judges_single_processes_whatever_service_they_are_in() {
+        let home = tempfile::tempdir().unwrap();
+        let procs = [
+            proc(10, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+            proc(
+                20,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &["codex"],
+                home.path(),
+            ),
+            proc(
+                30,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &["node", "/srv/api.js"],
+                home.path(),
+            ),
+        ];
+        let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
+        let details = |key: ProcessKey| {
+            procs
+                .iter()
+                .find(|p| p.entry.key == key)
+                .map(|p| p.details.clone())
+                .unwrap()
+        };
+        let input = Input {
+            listeners: &[],
+            processes: &processes,
+            details: &details,
+            home: home.path(),
+            now: Instant::now(),
+        };
+        let keys: Vec<ProcessKey> = procs.iter().map(|p| p.entry.key).collect();
+
+        let found = super::protections(input, &keys);
+
+        assert_eq!(
+            found,
+            [
+                (keys[0], Protection::Session),
+                (keys[1], Protection::Session)
+            ]
+        );
     }
 
     #[test]

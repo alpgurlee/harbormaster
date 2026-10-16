@@ -84,12 +84,20 @@ pub fn order(service: &Service) -> Vec<ProcessKey> {
 }
 
 /// The approved processes, deepest first, once a fresh look confirms that
-/// none of them now serves a protected service or one with processes nobody
-/// approved. Call it before every round of signals. Processes that already
+/// none of them is protected now, nor serves a protected service or one with
+/// processes nobody approved. Call it before every round of signals. Processes that already
 /// exited stay in the list; their signal reports them gone.
-pub fn recheck<'a>(approved: &Service, now: &'a Snapshot) -> Result<Vec<ProcessKey>, Refusal<'a>> {
+pub fn recheck<'a>(
+    approved: &Service,
+    now: &'a Snapshot,
+    guard: &dyn Fn(ProcessKey) -> Option<Protection>,
+) -> Result<Vec<ProcessKey>, Refusal<'a>> {
     let approved_keys: HashSet<ProcessKey> =
         approved.processes.iter().map(|member| member.key).collect();
+    // A process may also have left every service, and changed on its way.
+    if approved_keys.iter().any(|&key| guard(key).is_some()) {
+        return Err(Refusal::Changed);
+    }
     let touched = now.services.iter().filter(|service| {
         service
             .processes
@@ -353,7 +361,10 @@ mod tests {
         let approved = service(20, &[20, 30], 5173, LOOPBACK);
         let now = snapshot(vec![service(20, &[20, 30, 31], 5173, LOOPBACK)]);
 
-        assert!(matches!(recheck(&approved, &now), Err(Refusal::Changed)));
+        assert!(matches!(
+            recheck(&approved, &now, &|_| None),
+            Err(Refusal::Changed)
+        ));
     }
 
     #[test]
@@ -364,7 +375,7 @@ mod tests {
         let now = snapshot(vec![shared]);
 
         assert!(matches!(
-            recheck(&approved, &now),
+            recheck(&approved, &now, &|_| None),
             Err(Refusal::Protected(_, Protection::SharedSocket))
         ));
     }
@@ -375,9 +386,12 @@ mod tests {
         // npm exited on the request; the vite it started now stands alone.
         let orphaned = snapshot(vec![service(30, &[30], 5173, LOOPBACK)]);
 
-        assert_eq!(recheck(&approved, &orphaned).unwrap(), [key(30), key(20)]);
         assert_eq!(
-            recheck(&approved, &snapshot(Vec::new())).unwrap(),
+            recheck(&approved, &orphaned, &|_| None).unwrap(),
+            [key(30), key(20)]
+        );
+        assert_eq!(
+            recheck(&approved, &snapshot(Vec::new()), &|_| None).unwrap(),
             [key(30), key(20)]
         );
     }
@@ -390,8 +404,20 @@ mod tests {
         let now = snapshot(vec![session]);
 
         assert!(matches!(
-            recheck(&approved, &now),
+            recheck(&approved, &now, &|_| None),
             Err(Refusal::Protected(_, Protection::Session))
+        ));
+    }
+
+    #[test]
+    fn refuses_when_an_approved_process_became_protected_on_its_own() {
+        let approved = service(20, &[20, 30], 5173, LOOPBACK);
+        // After the request it closed its port and calls itself an agent.
+        let guard = |target: ProcessKey| (target == key(30)).then_some(Protection::Session);
+
+        assert!(matches!(
+            recheck(&approved, &snapshot(Vec::new()), &guard),
+            Err(Refusal::Changed)
         ));
     }
 
@@ -400,7 +426,10 @@ mod tests {
         let approved = service(20, &[20, 30], 5173, LOOPBACK);
         let now = snapshot(vec![service(40, &[40, 30], 8080, LOOPBACK)]);
 
-        assert!(matches!(recheck(&approved, &now), Err(Refusal::Changed)));
+        assert!(matches!(
+            recheck(&approved, &now, &|_| None),
+            Err(Refusal::Changed)
+        ));
     }
 
     #[test]
