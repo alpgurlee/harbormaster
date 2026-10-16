@@ -13,7 +13,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use harbormaster_platform::{Listener, Owner, ProcessDetails, ProcessEntry, ProcessKey};
+use harbormaster_platform::{Listener, Owner, Presence, ProcessDetails, ProcessEntry, ProcessKey};
 use serde::Serialize;
 
 pub use port::{PortReport, explain_port};
@@ -324,33 +324,71 @@ impl Scanner {
     }
 }
 
-/// Why single processes may not be stopped now, whatever service they are
-/// in. Processes no longer there are left out; their signal reports them.
-pub fn protections(input: Input<'_>, keys: &[ProcessKey]) -> Vec<(ProcessKey, Protection)> {
+/// Where an approved process stands right before a round of signals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// Still the same process, and nothing protects it.
+    Clear,
+    Protected(Protection),
+    Gone,
+    /// Its pid belongs to another process now; the signal will say so.
+    Replaced,
+    /// It couldn't be judged, so no signal may go out.
+    Unknown,
+}
+
+/// Where each approved process stands now, whatever service it is in.
+pub fn standings(
+    input: Input<'_>,
+    keys: &[ProcessKey],
+    presence: &dyn Fn(ProcessKey) -> Presence,
+) -> Vec<(ProcessKey, Standing)> {
     let tree = ProcessTree::new(input.processes);
-    let args_of = |entry: &ProcessEntry| (input.details)(entry.key).args.known().cloned();
     keys.iter()
-        .filter_map(|key| {
-            let entry = tree.get(key.pid).filter(|entry| entry.key == *key)?;
-            let details = (input.details)(entry.key);
-            let protection = if service::is_system(entry) {
-                Protection::System
-            } else if entry.owner != Owner::CurrentUser {
-                Protection::OtherUser
-            } else if details.exe.known().is_some_and(|exe| is_os_component(exe)) {
-                Protection::System
-            } else if details.exe.known().is_none() || details.args.known().is_none() {
-                Protection::Unverified
-            } else if service::is_session_boundary(entry, &tree, &args_of) {
-                Protection::Session
-            } else if DATABASES.contains(&normalize(&entry.name).as_str()) {
-                Protection::Database
-            } else {
-                return None;
+        .map(|&key| {
+            let standing = match tree.get(key.pid).filter(|entry| entry.key == key) {
+                Some(entry) => judge(entry, &tree, input),
+                None => match presence(key) {
+                    Presence::Gone => Standing::Gone,
+                    Presence::Replaced => Standing::Replaced,
+                    // Alive but missing from the table, or unreadable.
+                    Presence::Running | Presence::Unknown => Standing::Unknown,
+                },
             };
-            Some((*key, protection))
+            (key, standing)
         })
         .collect()
+}
+
+/// Reads the process once, so a second read can't change the verdict.
+fn judge(entry: &ProcessEntry, tree: &ProcessTree<'_>, input: Input<'_>) -> Standing {
+    if service::is_system(entry) {
+        return Standing::Protected(Protection::System);
+    }
+    if entry.owner != Owner::CurrentUser {
+        return Standing::Protected(Protection::OtherUser);
+    }
+    let details = (input.details)(entry.key);
+    let (Some(exe), Some(args)) = (details.exe.known(), details.args.known()) else {
+        return Standing::Protected(Protection::Unverified);
+    };
+    let args_of = |other: &ProcessEntry| {
+        if other.key == entry.key {
+            Some(args.clone())
+        } else {
+            (input.details)(other.key).args.known().cloned()
+        }
+    };
+    let protection = if is_os_component(exe) {
+        Some(Protection::System)
+    } else if service::is_session_boundary(entry, tree, &args_of) {
+        Some(Protection::Session)
+    } else if DATABASES.contains(&normalize(&entry.name).as_str()) {
+        Some(Protection::Database)
+    } else {
+        None
+    };
+    protection.map_or(Standing::Clear, Standing::Protected)
 }
 
 /// Up to the first system process, which is where a session ends.
@@ -454,7 +492,12 @@ mod tests {
         Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, SocketId, StartTime,
     };
 
-    use super::{Classification, Input, Protection, Scanner, Snapshot};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use harbormaster_platform::Presence;
+
+    use super::{Classification, Input, Protection, Scanner, Snapshot, Standing};
 
     struct Proc {
         entry: ProcessEntry,
@@ -895,10 +938,11 @@ mod tests {
     }
 
     #[test]
-    fn judges_single_processes_whatever_service_they_are_in() {
+    fn judges_every_approved_process_whatever_service_it_is_in() {
         let home = tempfile::tempdir().unwrap();
         let procs = [
             proc(10, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+            // Retitled itself after it was approved, without an exec.
             proc(
                 20,
                 10,
@@ -917,12 +961,22 @@ mod tests {
             ),
         ];
         let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
+        // The second read of any process fails, as a racing exit or exec would make it.
+        let reads = RefCell::new(HashMap::<ProcessKey, u32>::new());
         let details = |key: ProcessKey| {
-            procs
-                .iter()
-                .find(|p| p.entry.key == key)
-                .map(|p| p.details.clone())
-                .unwrap()
+            let mut reads = reads.borrow_mut();
+            let count = reads.entry(key).or_default();
+            *count += 1;
+            let known = procs.iter().find(|p| p.entry.key == key).unwrap();
+            if *count == 1 {
+                known.details.clone()
+            } else {
+                ProcessDetails {
+                    exe: Field::Denied,
+                    args: Field::Denied,
+                    cwd: Field::Denied,
+                }
+            }
         };
         let input = Input {
             listeners: &[],
@@ -931,17 +985,44 @@ mod tests {
             home: home.path(),
             now: Instant::now(),
         };
-        let keys: Vec<ProcessKey> = procs.iter().map(|p| p.entry.key).collect();
+        let unlisted = |pid: u32| ProcessKey {
+            pid: Pid(pid),
+            start: StartTime(1),
+            exec: 0,
+        };
+        let presence = |key: ProcessKey| match key.pid.0 {
+            40 => Presence::Running,
+            _ => Presence::Gone,
+        };
+        let keys = [
+            procs[1].entry.key,
+            procs[2].entry.key,
+            unlisted(40),
+            unlisted(50),
+        ];
 
-        let found = super::protections(input, &keys);
+        let found = super::standings(input, &keys, &presence);
 
         assert_eq!(
             found,
             [
-                (keys[0], Protection::Session),
-                (keys[1], Protection::Session)
+                (keys[0], Standing::Protected(Protection::Session)),
+                (keys[1], Standing::Clear),
+                // Running yet missing from the table: it can't be judged.
+                (keys[2], Standing::Unknown),
+                (keys[3], Standing::Gone),
             ]
         );
+        for (pid, observed, expected) in [
+            (60, Presence::Unknown, Standing::Unknown),
+            (70, Presence::Replaced, Standing::Replaced),
+        ] {
+            let key = unlisted(pid);
+            assert_eq!(
+                super::standings(input, &[key], &|_| observed),
+                [(key, expected)]
+            );
+        }
     }
 
     #[test]

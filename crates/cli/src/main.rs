@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use harbormaster_engine::{
-    Classification, Input, Outcome, Protection, Scanner, Service, Signals, Snapshot, Target,
+    Classification, Input, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target,
 };
 use harbormaster_platform::{ProcessKey, Signal};
 
@@ -208,11 +208,12 @@ fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Resu
     let approved: Vec<ProcessKey> = service.processes.iter().map(|member| member.key).collect();
     let current = scan(&mut Scanner::default(), &home)?;
     let guard = guards(&home, &approved)?;
-    let targets =
-        match harbormaster_engine::recheck(service, &current, &|key| guard.get(&key).copied()) {
-            Ok(targets) => targets,
-            Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
-        };
+    let targets = match harbormaster_engine::recheck(service, &current, &|key| {
+        guard.get(&key).copied().unwrap_or(Standing::Unknown)
+    }) {
+        Ok(targets) => targets,
+        Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
+    };
     let signals = Signals {
         send: &harbormaster_platform::signal,
         presence: &harbormaster_platform::presence,
@@ -237,9 +238,9 @@ fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Resu
         // The wait, and the question, gave the server time to change.
         let current = scan(&mut Scanner::default(), &home)?;
         let guard = guards(&home, &approved)?;
-        if let Err(refused) =
-            harbormaster_engine::recheck(service, &current, &|key| guard.get(&key).copied())
-        {
+        if let Err(refused) = harbormaster_engine::recheck(service, &current, &|key| {
+            guard.get(&key).copied().unwrap_or(Standing::Unknown)
+        }) {
             for line in stop::report(service, &outcomes).0 {
                 println!("{line}");
             }
@@ -272,8 +273,8 @@ fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Resu
     Ok(status)
 }
 
-/// Why single processes may not be stopped right now.
-fn guards(home: &Path, keys: &[ProcessKey]) -> anyhow::Result<HashMap<ProcessKey, Protection>> {
+/// Where each approved process stands right now.
+fn guards(home: &Path, keys: &[ProcessKey]) -> anyhow::Result<HashMap<ProcessKey, Standing>> {
     let processes = harbormaster_platform::processes()?;
     let details = harbormaster_platform::details;
     let input = Input {
@@ -283,9 +284,11 @@ fn guards(home: &Path, keys: &[ProcessKey]) -> anyhow::Result<HashMap<ProcessKey
         home,
         now: Instant::now(),
     };
-    Ok(harbormaster_engine::protections(input, keys)
-        .into_iter()
-        .collect())
+    Ok(
+        harbormaster_engine::standings(input, keys, &harbormaster_platform::presence)
+            .into_iter()
+            .collect(),
+    )
 }
 
 fn refuse((lines, status): (Vec<String>, u8)) -> u8 {
