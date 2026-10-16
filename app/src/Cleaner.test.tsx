@@ -234,6 +234,25 @@ describe("the cleaner window", () => {
     expect(screen.getByText("1 item")).toBeTruthy();
   });
 
+  it("keeps what the search hides as it was when choosing all shown", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    section("Developer");
+    fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
+    const search = screen.getByRole("searchbox", { name: "Search" });
+
+    for (const chosen of [true, false]) {
+      fireEvent.change(search, { target: { value: "pip" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Choose all shown" }));
+      fireEvent.change(search, { target: { value: "" } });
+
+      const items = within(screen.getByRole("list", { name: "Package caches" }));
+      expect(items.getByRole("checkbox", { name: "npm" })).toHaveProperty("checked", true);
+      expect(items.getByRole("checkbox", { name: "pip" })).toHaveProperty("checked", chosen);
+    }
+  });
+
   it("says how to free what is in use, only where something is", () => {
     const driver = fake();
     show(driver.backend);
