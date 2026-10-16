@@ -2,18 +2,16 @@ mod format;
 mod stop;
 mod why;
 
-use std::collections::HashMap;
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::IpAddr;
-use std::path::Path;
 use std::process::ExitCode;
 use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use harbormaster_engine::{
-    Classification, Input, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target,
+    Classification, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target, live,
 };
 use harbormaster_platform::{ProcessKey, Signal};
 
@@ -178,7 +176,7 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
 
 fn explain(port: u16) -> anyhow::Result<u8> {
     let home = std::env::home_dir().context("could not find the home folder")?;
-    let snapshot = scan(&mut Scanner::default(), &home)?;
+    let snapshot = live::scan(&mut Scanner::default(), &home)?;
     let report =
         harbormaster_engine::explain_port(port, &snapshot, &harbormaster_platform::probe_bind);
     for line in why::lines(port, &report) {
@@ -207,8 +205,9 @@ fn when_exec_tracked(
 
 fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
     let home = std::env::home_dir().context("could not find the home folder")?;
-    let snapshot = scan(&mut Scanner::default(), &home)?;
-    let service = match harbormaster_engine::choose(&snapshot, &target, &lineage()?) {
+    let snapshot = live::scan(&mut Scanner::default(), &home)?;
+    let own = live::lineage()?.context("could not trace which processes started Harbormaster")?;
+    let service = match harbormaster_engine::choose(&snapshot, &target, &own) {
         Ok(service) => service,
         Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
     };
@@ -224,8 +223,8 @@ fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyh
 
     // What was approved is checked against a fresh look right before any signal.
     let approved: Vec<ProcessKey> = service.processes.iter().map(|member| member.key).collect();
-    let current = scan(&mut Scanner::default(), &home)?;
-    let guard = guards(&home, &approved)?;
+    let current = live::scan(&mut Scanner::default(), &home)?;
+    let guard = live::guards(&home, &approved)?;
     let targets = match harbormaster_engine::recheck(service, &current, &|key| {
         guard.get(&key).copied().unwrap_or(Standing::Unknown)
     }) {
@@ -254,8 +253,8 @@ fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyh
                 ))?));
     if forced {
         // The wait, and the question, gave the server time to change.
-        let current = scan(&mut Scanner::default(), &home)?;
-        let guard = guards(&home, &approved)?;
+        let current = live::scan(&mut Scanner::default(), &home)?;
+        let guard = live::guards(&home, &approved)?;
         if let Err(refused) = harbormaster_engine::recheck(service, &current, &|key| {
             guard.get(&key).copied().unwrap_or(Standing::Unknown)
         }) {
@@ -291,24 +290,6 @@ fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyh
     Ok(status)
 }
 
-/// Where each approved process stands right now.
-fn guards(home: &Path, keys: &[ProcessKey]) -> anyhow::Result<HashMap<ProcessKey, Standing>> {
-    let processes = harbormaster_platform::processes()?;
-    let details = harbormaster_platform::details;
-    let input = Input {
-        listeners: &[],
-        processes: &processes,
-        details: &details,
-        home,
-        now: Instant::now(),
-    };
-    Ok(
-        harbormaster_engine::standings(input, keys, &harbormaster_platform::presence)
-            .into_iter()
-            .collect(),
-    )
-}
-
 fn refuse((lines, status): (Vec<String>, u8)) -> u8 {
     for line in lines {
         eprintln!("{line}");
@@ -328,52 +309,13 @@ fn ask(question: &str) -> anyhow::Result<bool> {
     Ok(stop::confirmed(&answer))
 }
 
-/// This process and everything above it, which a stop must never reach.
-fn lineage() -> anyhow::Result<Vec<u32>> {
-    let parents: HashMap<u32, u32> = harbormaster_platform::processes()?
-        .iter()
-        .filter_map(|entry| entry.parent.map(|parent| (entry.key.pid.0, parent.0)))
-        .collect();
-    lineage_from(std::process::id(), &parents)
-        .context("could not trace which processes started Harbormaster")
-}
-
-/// The chain from `pid` up to launchd. A gap could hide an ancestor, so a
-/// chain that doesn't get there is no answer.
-fn lineage_from(pid: u32, parents: &HashMap<u32, u32>) -> Option<Vec<u32>> {
-    let mut lineage = vec![pid];
-    let mut current = pid;
-    while current > 1 {
-        let parent = *parents.get(&current)?;
-        if lineage.contains(&parent) {
-            return None;
-        }
-        lineage.push(parent);
-        current = parent;
-    }
-    Some(lineage)
-}
-
 /// Two scans a moment apart, so CPU use can be measured.
 fn sample() -> anyhow::Result<Snapshot> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let mut scanner = Scanner::default();
-    scan(&mut scanner, &home)?;
+    live::scan(&mut scanner, &home)?;
     sleep(CPU_SAMPLE_GAP);
-    scan(&mut scanner, &home)
-}
-
-fn scan(scanner: &mut Scanner, home: &Path) -> anyhow::Result<Snapshot> {
-    let processes = harbormaster_platform::processes()?;
-    let listeners = harbormaster_platform::listeners()?;
-    let details = harbormaster_platform::details;
-    Ok(scanner.scan(Input {
-        listeners: &listeners,
-        processes: &processes,
-        details: &details,
-        home,
-        now: Instant::now(),
-    }))
+    Ok(live::scan(&mut scanner, &home)?)
 }
 
 #[cfg(test)]
@@ -382,9 +324,7 @@ mod tests {
 
     use harbormaster_engine::{Classification, Project, Service};
 
-    use std::collections::HashMap;
-
-    use super::{Cli, Command, NAME_WIDTH, lineage_from, row, stop, when_exec_tracked};
+    use super::{Cli, Command, NAME_WIDTH, row, stop, when_exec_tracked};
 
     #[test]
     fn refuses_before_anything_is_scanned_when_keys_cant_follow_an_exec() {
@@ -429,18 +369,6 @@ mod tests {
 
         assert_eq!(row[1].chars().count(), NAME_WIDTH);
         assert_eq!(row[2].chars().count(), NAME_WIDTH);
-    }
-
-    #[test]
-    fn traces_harbormaster_up_to_launchd_or_not_at_all() {
-        let parents = HashMap::from([(77, 40), (40, 20), (20, 1)]);
-        assert_eq!(lineage_from(77, &parents), Some(vec![77, 40, 20, 1]));
-
-        let gap = HashMap::from([(77, 40), (40, 20)]);
-        assert_eq!(lineage_from(77, &gap), None);
-
-        let cycle = HashMap::from([(77, 40), (40, 77)]);
-        assert_eq!(lineage_from(77, &cycle), None);
     }
 
     #[test]
