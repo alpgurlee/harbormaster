@@ -67,7 +67,10 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
         ))}
       </ul>
       <section className={styles.detail} aria-label={i18n.t(NAMES[view.group])}>
-        <p className={styles.about}>{i18n.t(ABOUT[view.group])}</p>
+        <div className={styles.intro}>
+          <p className={styles.about}>{i18n.t(ABOUT[view.group])}</p>
+          {view.findings.every(selectable) ? null : <p className={styles.held}>{i18n.t("heldHint")}</p>}
+        </div>
         <div className={styles.toolbar}>
           <Check
             state={choiceOf(items, chosen)}

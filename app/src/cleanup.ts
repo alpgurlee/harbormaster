@@ -87,6 +87,11 @@ export function toggled(chosen: Set<string>, findings: Finding[]): Set<string> {
   return next;
 }
 
+/** What of `chosen` is still listed in `findings` and may still be chosen. */
+export function stillChosen(chosen: Set<string>, findings: Finding[]): Set<string> {
+  return new Set(findings.filter((finding) => selectable(finding) && chosen.has(finding.path)).map((finding) => finding.path));
+}
+
 export function plan(findings: Finding[], chosen: Set<string>): Plan {
   const picks = findings.filter((finding) => chosen.has(finding.path));
   const deleted = picks.filter((finding) => finding.kind === "rebuildable");

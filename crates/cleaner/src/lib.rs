@@ -308,6 +308,26 @@ pub fn remove(
     remove::all(home, findings, usage, trash, stop, told)
 }
 
+/// `findings`, from a scan of `home`, as they stand now: what was removed or
+/// made again since is left out, and who is using each is read again from
+/// `usage`. Sizes stay as the scan measured them.
+pub fn recheck(home: &Path, findings: &[Finding], usage: &Usage) -> io::Result<Vec<Finding>> {
+    let root = walk::Dir::open(home)?;
+    Ok(findings
+        .iter()
+        .filter(|finding| remove::still_there(&root, home, finding))
+        .map(|finding| Finding {
+            in_use: in_use(
+                &finding.path,
+                finding.project.as_deref(),
+                &usage.busy,
+                &usage.running,
+            ),
+            ..finding.clone()
+        })
+        .collect())
+}
+
 /// Who is using the folder at `path`, a build output of `project` if any: a
 /// dev server running in the project, above it or below it, or else a
 /// process holding a path inside the folder or the project.

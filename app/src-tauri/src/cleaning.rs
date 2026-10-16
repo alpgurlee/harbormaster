@@ -157,6 +157,25 @@ impl Cleaning {
         Ok(chosen)
     }
 
+    /// The findings shown under `token`, as they stand now: what was removed
+    /// or made again since is left out, and who is using each is read again.
+    /// What is shown stays as it was; a removal looks at each again anyway.
+    pub(crate) fn recheck(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
+        let findings = self.shown(token)?;
+        let home = harbormaster_cleaner::account_home().map_err(failed)?;
+        let usage = usage_now().map_err(failed)?;
+        harbormaster_cleaner::recheck(&home, &findings, &usage).map_err(failed)
+    }
+
+    fn shown(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
+        self.lock()
+            .shown
+            .as_ref()
+            .filter(|shown| shown.token == token)
+            .map(|shown| shown.findings.clone())
+            .ok_or(Refusal::Expired)
+    }
+
     /// Whether the findings shown now list `path`, byte for byte.
     pub(crate) fn lists(&self, path: &Path) -> bool {
         self.lock().shown.as_ref().is_some_and(|shown| {
@@ -345,6 +364,21 @@ mod tests {
 
         assert_eq!(odd, Err(Refusal::Unlisted));
         assert_eq!(twice.unwrap(), [finding("/Users/dev/.npm/_cacache")]);
+    }
+
+    #[test]
+    fn looks_again_only_at_the_findings_shown_now() {
+        let cleaning = Cleaning::default();
+        let token = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+
+        assert_eq!(cleaning.shown(token + 1), Err(Refusal::Expired));
+        assert_eq!(
+            cleaning.shown(token),
+            Ok(vec![finding("/Users/dev/.npm/_cacache")])
+        );
+        // Once a removal took them, there is nothing to look at.
+        cleaning.take(token, &[]).unwrap();
+        assert_eq!(cleaning.shown(token), Err(Refusal::Expired));
     }
 
     #[test]

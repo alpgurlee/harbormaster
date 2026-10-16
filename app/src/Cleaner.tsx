@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { cleanDisk, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
-import { MODULES, groupsOf, picked, plan, type CleanModule, type Plan } from "./cleanup";
+import { cleanDisk, cleanRecheck, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
+import { MODULES, groupsOf, picked, plan, stillChosen, type CleanModule, type Plan } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { useI18n, type Translator } from "./i18n";
 import { Review } from "./Review";
@@ -17,9 +17,20 @@ export interface CleanerBackend {
   stop: () => Promise<void>;
   disk: () => Promise<Disk>;
   reveal: (path: string) => Promise<void>;
+  recheck: (token: number) => Promise<Finding[]>;
 }
 
-const BACKEND: CleanerBackend = { scan: cleanScan, run: cleanRun, stop: cleanStop, disk: cleanDisk, reveal: cleanReveal };
+const BACKEND: CleanerBackend = {
+  scan: cleanScan,
+  run: cleanRun,
+  stop: cleanStop,
+  disk: cleanDisk,
+  reveal: cleanReveal,
+  recheck: cleanRecheck,
+};
+
+/** Coming back to the window more often than this doesn't look at the list again. */
+const RECHECK_EVERY_MS = 3_000;
 
 const SECTIONS: CleanModule[] = ["developer", "system"];
 const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem" } as const;
@@ -90,6 +101,38 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       })
       .catch((error: unknown) => setStep({ kind: "refused", refusal: asRefusal(error) }));
   }, [backend]);
+
+  // Coming back to the window, the list is looked at again: what was removed
+  // meanwhile drops out, and what is in use is read anew.
+  const token = step.kind === "found" ? step.token : null;
+  useEffect(() => {
+    if (token === null) return;
+    let live = true;
+    let asking = false;
+    let last = 0;
+    const recheck = () => {
+      if (asking || Date.now() - last < RECHECK_EVERY_MS) return;
+      asking = true;
+      last = Date.now();
+      backend
+        .recheck(token)
+        .then((findings) => {
+          if (!live) return;
+          setStep((current) => (current.kind === "found" ? { ...current, findings } : current));
+          setChosen((current) => stillChosen(current, findings));
+        })
+        // The list stays as it was.
+        .catch(console.error)
+        .finally(() => {
+          asking = false;
+        });
+    };
+    window.addEventListener("focus", recheck);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", recheck);
+    };
+  }, [backend, token]);
 
   const run = (found: Found) => {
     const going = found.findings.filter((finding) => chosen.has(finding.path));

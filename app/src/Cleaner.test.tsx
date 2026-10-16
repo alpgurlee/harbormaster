@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Cleaner, type CleanerBackend } from "./Cleaner";
 import { I18nProvider } from "./i18n";
@@ -60,6 +60,7 @@ function fake() {
   let stops = 0;
   let refusal: unknown = null;
   const revealed: string[] = [];
+  const rechecks: { token: number; answer: (findings: Finding[]) => void }[] = [];
   const backend: CleanerBackend = {
     scan: (onEvent) => {
       scans.push(onEvent);
@@ -78,12 +79,14 @@ function fake() {
       revealed.push(path);
       return Promise.resolve();
     },
+    recheck: (token) => new Promise((answer) => rechecks.push({ token, answer })),
   };
   return {
     backend,
     scans,
     runs,
     revealed,
+    rechecks,
     stops: () => stops,
     refuse: (next: unknown) => {
       refusal = next;
@@ -179,6 +182,67 @@ describe("the cleaner window", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
     expect(screen.getByRole("list", { name: "Package caches" })).toBeTruthy();
     expect(shown()).toHaveProperty("indeterminate", true);
+  });
+
+  it("looks at the list again on coming back: what went drops out, what is in use is read anew", async () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    section("Developer");
+    fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
+    expect(screen.getByText("2 items")).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(driver.rechecks.map(({ token }) => token)).toEqual([7]);
+    // npm was removed by hand meanwhile, and pip is in use now.
+    await act(async () => driver.rechecks[0].answer([shop, tool, { ...pip, inUse: "java" }, archive, trash]));
+
+    const items = within(screen.getByRole("list", { name: "Package caches" }));
+    expect(items.queryByText("npm")).toBeNull();
+    expect(items.getByText("In use by java")).toBeTruthy();
+    expect(items.getByRole("checkbox", { name: "pip" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("1 item")).toBeTruthy();
+  });
+
+  it("looks again at most every few seconds, and never over a newer list", async () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    const focus = () =>
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+    focus();
+    focus();
+    expect(driver.rechecks).toHaveLength(1);
+    await act(async () => driver.rechecks[0].answer(FINDINGS));
+    focus();
+    expect(driver.rechecks).toHaveLength(1);
+    const later = Date.now() + 5_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+    focus();
+    clock.mockRestore();
+    expect(driver.rechecks).toHaveLength(2);
+
+    // Another scan came and went before the answer: it is about the old list.
+    fireEvent.click(screen.getByRole("button", { name: "Scan again" }));
+    found(driver, [npm]);
+    await act(async () => driver.rechecks[1].answer([]));
+    expect(screen.getByText("1 item")).toBeTruthy();
+  });
+
+  it("says how to free what is in use, only where something is", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    section("Developer");
+
+    expect(screen.getByText("Quit what is using an item, then come back here: the list looks again.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Xcode/ }));
+    expect(screen.queryByText(/Quit what is using/)).toBeNull();
   });
 
   it("shows an item in Finder through the app, by its path", () => {

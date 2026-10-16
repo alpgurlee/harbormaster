@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use harbormaster_cleaner::Finding;
 use harbormaster_engine::Port;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
@@ -166,6 +167,20 @@ pub(crate) async fn clean_run(
 /// can't be asked, and a minimized one still counts.
 fn open(window: &WebviewWindow) -> bool {
     window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
+}
+
+/// The findings the scan under `token` listed, as they stand now.
+#[tauri::command]
+pub(crate) async fn clean_recheck(
+    token: u64,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<Vec<Finding>, Refusal> {
+    let cleaning = Arc::clone(&cleaning);
+    tauri::async_runtime::spawn_blocking(move || cleaning.recheck(token))
+        .await
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })?
 }
 
 #[tauri::command]

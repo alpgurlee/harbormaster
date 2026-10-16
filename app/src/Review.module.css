@@ -90,12 +90,26 @@
   background: var(--sheet);
 }
 
-.about {
-  margin: 0;
+.intro {
+  display: grid;
+  gap: 4px;
   padding: 12px 14px 0;
-  color: var(--muted);
   font-size: 11.5px;
   line-height: 1.45;
+}
+
+.about,
+.held {
+  margin: 0;
+}
+
+.about {
+  color: var(--muted);
+}
+
+/* What would free an item in use. */
+.held {
+  color: var(--brass);
 }
 
 .toolbar {

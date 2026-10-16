@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "cleaner",
-  "description": "What the cleaner window may ask of the app: to scan, to remove or show in Finder what its scan listed, to stop, to read the disk's size, and to be dragged by its top.",
+  "description": "What the cleaner window may ask of the app: to scan, to remove, look at again or show in Finder what its scan listed, to stop, to read the disk's size, and to be dragged by its top.",
   "windows": ["cleaner"],
   "permissions": [
     "allow-clean-scan",
     "allow-clean-run",
+    "allow-clean-recheck",
     "allow-clean-stop",
     "allow-clean-disk",
     "allow-clean-reveal",

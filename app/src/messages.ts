@@ -159,6 +159,7 @@ export interface Messages {
   orderName: string;
   orderAge: string;
   chooseShown: string;
+  heldHint: string;
   revealInFinder: string;
   noItemsMatch: string;
 }
@@ -320,6 +321,7 @@ export const en: Messages = {
   orderName: "By name",
   orderAge: "Oldest first",
   chooseShown: "Choose all shown",
+  heldHint: "Quit what is using an item, then come back here: the list looks again.",
   revealInFinder: "Show in Finder",
   noItemsMatch: "Nothing here matches “{query}”.",
 };
@@ -481,6 +483,7 @@ export const tr: Messages = {
   orderName: "Ada göre",
   orderAge: "En eski önce",
   chooseShown: "Görünenlerin tümünü seç",
+  heldHint: "Bir öğeyi kullananı kapat, sonra buraya dön; liste yeniden bakar.",
   revealInFinder: "Finder'da göster",
   noItemsMatch: "“{query}” ile eşleşen bir şey yok.",
 };

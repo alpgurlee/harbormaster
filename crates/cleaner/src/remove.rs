@@ -62,28 +62,10 @@ fn one(
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
-    let Ok(relative) = finding.path.strip_prefix(home) else {
-        return refused(Why::OutsideHome);
+    let (parent, dir, name) = match reached(root, home, finding) {
+        Ok(reached) => reached,
+        Err(why) => return refused(why),
     };
-    let Some((above, name)) = relative.parent().zip(relative.file_name()) else {
-        return refused(Why::OutsideHome);
-    };
-    let opened = root.descend(above).and_then(|parent| {
-        let dir = parent.child(name)?;
-        let seen = Identity::of(&dir.metadata()?);
-        Ok((parent, dir, seen))
-    });
-    let (parent, dir, seen) = match opened {
-        Ok(opened) => opened,
-        Err(error) => {
-            return refused(Why::NotReached {
-                error: error.to_string(),
-            });
-        }
-    };
-    if seen != finding.identity {
-        return refused(Why::Changed);
-    }
     if let Some(who) = in_use(
         &finding.path,
         finding.project.as_deref(),
@@ -106,6 +88,42 @@ fn one(
             why: error.to_string(),
         },
     }
+}
+
+/// Whether `finding` is still the folder the scan measured, reached through
+/// real folders inside `home`.
+pub(crate) fn still_there(root: &Dir, home: &Path, finding: &Finding) -> bool {
+    reached(root, home, finding).is_ok()
+}
+
+/// The folder `finding` names, opened through real folders from `root`,
+/// with the folder above it and its name there, if it is still the folder
+/// the scan measured.
+fn reached<'a>(
+    root: &Dir,
+    home: &Path,
+    finding: &'a Finding,
+) -> Result<(Dir, Dir, &'a OsStr), Why> {
+    let relative = finding
+        .path
+        .strip_prefix(home)
+        .map_err(|_| Why::OutsideHome)?;
+    let (above, name) = relative
+        .parent()
+        .zip(relative.file_name())
+        .ok_or(Why::OutsideHome)?;
+    let opened = root.descend(above).and_then(|parent| {
+        let dir = parent.child(name)?;
+        let seen = Identity::of(&dir.metadata()?);
+        Ok((parent, dir, seen))
+    });
+    let (parent, dir, seen) = opened.map_err(|error| Why::NotReached {
+        error: error.to_string(),
+    })?;
+    if seen != finding.identity {
+        return Err(Why::Changed);
+    }
+    Ok((parent, dir, name))
 }
 
 fn refused(why: Why) -> Outcome {

@@ -13,6 +13,7 @@ fn main() {
         "open_cleaner",
         "clean_scan",
         "clean_run",
+        "clean_recheck",
         "clean_stop",
         "clean_disk",
         "clean_reveal",

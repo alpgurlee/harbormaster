@@ -83,4 +83,5 @@ export const demo: CleanerBackend = {
   stop: () => Promise.resolve(),
   disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),
   reveal: () => Promise.resolve(),
+  recheck: () => Promise.resolve(FINDINGS),
 };
