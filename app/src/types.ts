@@ -79,7 +79,20 @@ export interface Update {
 }
 
 /** The cleaner's groups, in the order it lists them. */
-export type CleanGroup = "projects" | "packages" | "xcode" | "apps" | "logs" | "trash";
+export type CleanGroup =
+  | "projects"
+  | "packages"
+  | "xcode"
+  | "apps"
+  | "logs"
+  | "trash"
+  | "videos"
+  | "archives"
+  | "installers"
+  | "audio"
+  | "images"
+  | "documents"
+  | "otherFiles";
 
 /**
  * How a finding goes: deleted (its tool rebuilds it), to the Trash (it may
@@ -98,7 +111,7 @@ export interface Finding {
   picked: boolean;
   /** What is using it, which keeps it from being chosen at all. */
   inUse: string | null;
-  /** For a project's build output: seconds since the Unix epoch. */
+  /** When a project was last worked on, or a large file changed: seconds since the Unix epoch. */
   touched: number | null;
   project: string | null;
   emptied: boolean;
@@ -124,7 +137,16 @@ export interface Cleaned {
 
 export type ScanEvent =
   | { kind: "measured"; done: number; total: number; bytes: number }
-  | { kind: "done"; token: number; home: string; findings: Finding[] };
+  | {
+      kind: "done";
+      token: number;
+      home: string;
+      /** What this scan or hunt found, beside what the last of the other found. */
+      findings: Finding[];
+      /** Whether what tools and apps leave was scanned for, and whether the large files were hunted for, so none listed means none found. */
+      scanned: boolean;
+      hunted: boolean;
+    };
 
 export type RunEvent = ({ kind: "removed" } & Removal) | ({ kind: "done" } & Cleaned);
 

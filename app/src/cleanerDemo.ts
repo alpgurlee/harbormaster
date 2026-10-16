@@ -54,7 +54,34 @@ const FINDINGS: Finding[] = [
   finding("trash", "Trash", ".Trash", 0.19, { kind: "discarded", picked: false }),
 ];
 
+/** A file of the user's own, changed `days` ago. */
+function file(group: Finding["group"], path: string, gib: number, days: number): Finding {
+  return finding(group, path.split("/").pop() ?? path, path, gib, {
+    kind: "personal",
+    picked: false,
+    emptied: false,
+    touched: Date.now() / 1000 - days * DAY,
+  });
+}
+
+/** Large files a Mac might keep around. */
+const LARGE: Finding[] = [
+  file("videos", "Movies/Screen Recording 2026-03-02.mov", 3.2, 220),
+  file("videos", "Desktop/demo-final-4k.mp4", 1.1, 40),
+  file("archives", "Downloads/Xcode_26.xip", 7.9, 160),
+  file("archives", "Downloads/ubuntu-24.04-arm64.iso", 2.6, 300),
+  file("archives", "Downloads/assets.zip", 0.4, 12),
+  file("installers", "Downloads/Docker.dmg.pkg", 0.6, 95),
+  file("installers", "Desktop/app-release.apk", 0.09, 30),
+  file("documents", "Documents/scans/contracts.pdf", 0.12, 400),
+];
+
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/** What the pretend app shows: the last scan's and the last hunt's findings. */
+let scanned = false;
+let hunted = false;
+const shown = () => [...(scanned ? FINDINGS : []), ...(hunted ? LARGE : [])];
 
 /** A backend that pretends: it measures for a few seconds and removes nothing. */
 export const demo: CleanerBackend = {
@@ -64,13 +91,24 @@ export const demo: CleanerBackend = {
       await wait(120);
       onEvent({ kind: "measured", done: index + 1, total: FINDINGS.length, bytes: each.bytes });
     }
-    onEvent({ kind: "done", token: 1, home: HOME, findings: FINDINGS });
+    scanned = true;
+    onEvent({ kind: "done", token: 1, home: HOME, findings: shown(), scanned, hunted });
+  },
+  async hunt(onEvent: (event: ScanEvent) => void) {
+    const folders = ["Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures", "code"];
+    for (const [index, folder] of folders.entries()) {
+      await wait(300);
+      const bytes = LARGE.filter((each) => each.path.startsWith(`${HOME}/${folder}/`)).reduce((total, each) => total + each.bytes, 0);
+      onEvent({ kind: "measured", done: index + 1, total: folders.length, bytes });
+    }
+    hunted = true;
+    onEvent({ kind: "done", token: 2, home: HOME, findings: shown(), scanned, hunted });
   },
   async run(_token: number, paths: string[], onEvent: (event: RunEvent) => void) {
     let freed = 0;
     for (const path of paths) {
       await wait(250);
-      const going = FINDINGS.find((each) => each.path === path);
+      const going = shown().find((each) => each.path === path);
       if (going?.group === "logs") {
         onEvent({ kind: "removed", path, outcome: "refused", why: { code: "inUse", by: "Console" } });
       } else {
@@ -83,5 +121,5 @@ export const demo: CleanerBackend = {
   stop: () => Promise.resolve(),
   disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),
   reveal: () => Promise.resolve(),
-  recheck: () => Promise.resolve(FINDINGS),
+  recheck: () => Promise.resolve(shown()),
 };

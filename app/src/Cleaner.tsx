@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { cleanDisk, cleanRecheck, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
-import { MODULES, groupsOf, picked, plan, stillChosen, type CleanModule, type Plan } from "./cleanup";
+import { cleanDisk, cleanHunt, cleanRecheck, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
+import { MODULES, groupsOf, largeFile, plan, rechosen, stillChosen, type CleanModule, type Plan } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { useI18n, type Translator } from "./i18n";
 import { Review } from "./Review";
@@ -13,6 +13,7 @@ import sheet from "./Sheet.module.css";
 /** The backend's cleaner calls, which tests hand in themselves. */
 export interface CleanerBackend {
   scan: (onEvent: (event: ScanEvent) => void) => Promise<void>;
+  hunt: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   run: (token: number, paths: string[], onEvent: (event: RunEvent) => void) => Promise<void>;
   stop: () => Promise<void>;
   disk: () => Promise<Disk>;
@@ -22,6 +23,7 @@ export interface CleanerBackend {
 
 const BACKEND: CleanerBackend = {
   scan: cleanScan,
+  hunt: cleanHunt,
   run: cleanRun,
   stop: cleanStop,
   disk: cleanDisk,
@@ -32,15 +34,15 @@ const BACKEND: CleanerBackend = {
 /** Coming back to the window more often than this doesn't look at the list again. */
 const RECHECK_EVERY_MS = 3_000;
 
-const SECTIONS: CleanModule[] = ["developer", "system"];
-const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem" } as const;
+const SECTIONS: CleanModule[] = ["developer", "system", "large"];
+const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem", large: "moduleLarge" } as const;
 
 type View = "overview" | CleanModule;
 
 type Step =
   | { kind: "ready" }
-  | { kind: "scanning"; done: number; total: number; found: number }
-  | { kind: "found"; token: number; home: string; findings: Finding[] }
+  | { kind: "scanning"; hunt: boolean; done: number; total: number; found: number }
+  | { kind: "found"; token: number; home: string; findings: Finding[]; scanned: boolean; hunted: boolean }
   | { kind: "removing"; home: string; chosen: Finding[]; removals: Removal[] }
   | { kind: "cleaned"; home: string; chosen: Finding[]; cleaned: Cleaned; removals: Removal[] }
   | { kind: "refused"; refusal: CleanRefusal; partial?: { chosen: Finding[]; removals: Removal[] } };
@@ -77,17 +79,19 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   }, [backend]);
   useEffect(measureDisk, [measureDisk]);
 
-  const scan = useCallback(() => {
-    setStep({ kind: "scanning", done: 0, total: 0, found: 0 });
-    setView("overview");
-    setConfirming(false);
-    backend
-      .scan((event) => {
+  // A scan looks for what tools and apps leave; a hunt, for the user's large files.
+  const search = useCallback(
+    (hunt: boolean) => {
+      setStep({ kind: "scanning", hunt, done: 0, total: 0, found: 0 });
+      setView(hunt ? "large" : "overview");
+      setConfirming(false);
+      const look = hunt ? backend.hunt : backend.scan;
+      look((event) => {
         if (event.kind === "measured") {
           setStep((current) =>
             current.kind === "scanning"
               ? {
-                  kind: "scanning",
+                  ...current,
                   done: Math.max(current.done, event.done),
                   total: event.total,
                   found: current.found + event.bytes,
@@ -95,12 +99,14 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               : current,
           );
         } else {
-          setChosen(picked(event.findings));
-          setStep({ kind: "found", token: event.token, home: event.home, findings: event.findings });
+          setChosen((current) => rechosen(current, event.findings, hunt));
+          const { kind: _, ...found } = event;
+          setStep({ kind: "found", ...found });
         }
-      })
-      .catch((error: unknown) => setStep({ kind: "refused", refusal: asRefusal(error) }));
-  }, [backend]);
+      }).catch((error: unknown) => setStep({ kind: "refused", refusal: asRefusal(error) }));
+    },
+    [backend],
+  );
 
   // Coming back to the window, the list is looked at again: what was removed
   // meanwhile drops out, and what is in use is read anew.
@@ -200,6 +206,11 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const sectionBytes = (section: CleanModule) =>
     found?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
   const title = view === "overview" ? i18n.t("overview") : i18n.t(SECTION_NAMES[view]);
+  // A section shows what was looked for: the scan's, or the hunt's for large files.
+  const listed = (section: CleanModule) => found !== null && (section === "large" ? found.hunted : found.scanned);
+  // Each is started from where it shows, whether or not the other came first.
+  const huntFirst = view === "large" && (step.kind === "ready" || (found !== null && !found.hunted));
+  const scanFirst = view === "overview" && found !== null && !found.scanned;
 
   return (
     <div className={styles.window}>
@@ -219,11 +230,11 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             type="button"
             className={styles.section}
             aria-current={view === section ? "page" : undefined}
-            disabled={found === null}
+            disabled={section !== "large" && !listed(section)}
             onClick={() => setView(section)}
           >
             {i18n.t(SECTION_NAMES[section])}
-            {found === null ? null : <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span>}
+            {listed(section) ? <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span> : null}
           </button>
         ))}
         {disk === null ? null : (
@@ -239,14 +250,18 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
               {i18n.t("stop")}
             </button>
-          ) : step.kind === "ready" ? null : (
-            <button type="button" className={styles.action} onClick={scan}>
+          ) : step.kind === "ready" || huntFirst || scanFirst ? null : (
+            <button type="button" className={styles.action} onClick={() => search(view === "large")}>
               {i18n.t("cleanScanAgain")}
             </button>
           )}
         </header>
         <div className={styles.page}>
-          {view !== "overview" && found !== null ? (
+          {huntFirst || scanFirst ? (
+            <Start disk={disk} hint={i18n.t(huntFirst ? "huntHint" : "scanHint")} onScan={() => search(huntFirst)} />
+          ) : view === "large" && found !== null && !found.findings.some(largeFile) ? (
+            <p className={styles.empty}>{i18n.t("noLargeFiles")}</p>
+          ) : view !== "overview" && found !== null ? (
             <Review
               key={view}
               findings={found.findings.filter((finding) => MODULES[view].includes(finding.group))}
@@ -257,7 +272,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
             />
           ) : (
-            overview(step, { disk, chosen, i18n, onScan: scan, onReview: setView })
+            overview(step, { disk, chosen, i18n, onScan: () => search(false), onReview: setView })
           )}
         </div>
         {found !== null && found.findings.length > 0 ? (
@@ -289,29 +304,18 @@ interface Overview {
 function overview(step: Step, { disk, chosen, i18n, onScan, onReview }: Overview) {
   switch (step.kind) {
     case "ready":
-      return (
-        <div className={styles.start}>
-          <Ring fraction={disk === null ? 0 : 1 - disk.free / disk.total}>
-            {disk === null ? null : (
-              <>
-                <strong>{i18n.bytes(disk.free)}</strong>
-                <span>{i18n.t("diskOf", { total: i18n.bytes(disk.total) })}</span>
-              </>
-            )}
-          </Ring>
-          <button type="button" className={styles.scan} onClick={onScan}>
-            {i18n.t("scan")}
-          </button>
-          <p className={styles.hint}>{i18n.t("scanHint")}</p>
-        </div>
-      );
+      return <Start disk={disk} hint={i18n.t("scanHint")} onScan={onScan} />;
     case "scanning":
       return (
         <div className={styles.start} role="status">
           <Ring fraction={step.total === 0 ? 0 : step.done / step.total} waiting={step.total === 0}>
             <strong>{i18n.bytes(step.found)}</strong>
           </Ring>
-          <p className={styles.phase}>{step.total === 0 ? i18n.t("cleanLooking") : i18n.t("cleanMeasured", step)}</p>
+          <p className={styles.phase}>
+            {step.total === 0
+              ? i18n.t(step.hunt ? "huntLooking" : "cleanLooking")
+              : i18n.t(step.hunt ? "huntMeasured" : "cleanMeasured", { done: step.done, total: step.total })}
+          </p>
         </div>
       );
     case "found":
@@ -346,6 +350,27 @@ function overview(step: Step, { disk, chosen, i18n, onScan, onReview }: Overview
         </>
       );
   }
+}
+
+/** How full the disk is, and a button to look for what could go. */
+function Start({ disk, hint, onScan }: { disk: Disk | null; hint: string; onScan: () => void }) {
+  const i18n = useI18n();
+  return (
+    <div className={styles.start}>
+      <Ring fraction={disk === null ? 0 : 1 - disk.free / disk.total}>
+        {disk === null ? null : (
+          <>
+            <strong>{i18n.bytes(disk.free)}</strong>
+            <span>{i18n.t("diskOf", { total: i18n.bytes(disk.total) })}</span>
+          </>
+        )}
+      </Ring>
+      <button type="button" className={styles.scan} onClick={onScan}>
+        {i18n.t("scan")}
+      </button>
+      <p className={styles.hint}>{hint}</p>
+    </div>
+  );
 }
 
 /** A share of a whole, drawn as a ring with something to say in its middle. */

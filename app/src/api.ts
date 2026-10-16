@@ -60,6 +60,13 @@ export function cleanScan(onEvent: (event: ScanEvent) => void): Promise<void> {
   return invoke("clean_scan", { channel });
 }
 
+/** Hunts for the user's large files; rejects with a `CleanRefusal`. */
+export function cleanHunt(onEvent: (event: ScanEvent) => void): Promise<void> {
+  const channel = new Channel<ScanEvent>();
+  channel.onmessage = onEvent;
+  return invoke("clean_hunt", { channel });
+}
+
 /** Removes the findings at `paths`, which the scan under `token` listed. */
 export function cleanRun(token: number, paths: string[], onEvent: (event: RunEvent) => void): Promise<void> {
   const channel = new Channel<RunEvent>();

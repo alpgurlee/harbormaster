@@ -12,6 +12,7 @@ fn main() {
         "quit_app",
         "open_cleaner",
         "clean_scan",
+        "clean_hunt",
         "clean_run",
         "clean_recheck",
         "clean_stop",

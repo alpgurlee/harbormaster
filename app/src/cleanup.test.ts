@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MODULES, groupsOf, matching, ordered, picked, plan, toggled } from "./cleanup";
+import { MODULES, groupsOf, matching, ordered, picked, plan, rechosen, toggled } from "./cleanup";
 import type { Finding } from "./types";
 
 const GB = 1024 ** 3;
@@ -31,6 +31,17 @@ const trash = finding("/u/.Trash", { group: "trash", kind: "discarded", picked: 
 describe("the cleaner's choices", () => {
   it("starts from what the scan picked", () => {
     expect([...picked([npm, pip, held, shop])]).toEqual([npm.path, shop.path]);
+  });
+
+  it("takes a scan's picks and keeps the hunt's choice, and the other way round", () => {
+    const film = finding("/u/Movies/a.mov", { group: "videos", kind: "personal", picked: false, emptied: false });
+    const song = finding("/u/Music/b.wav", { group: "audio", kind: "personal", picked: false, emptied: false });
+    const before = new Set([pip.path, film.path]);
+
+    expect([...rechosen(before, [npm, pip, held, film, song], false)]).toEqual([npm.path, film.path]);
+    expect([...rechosen(before, [npm, pip, held, film, song], true)]).toEqual([pip.path]);
+    // What is in use is never chosen, whoever picked it.
+    expect([...rechosen(new Set([held.path]), [held], false)]).toEqual([]);
   });
 
   it("groups findings in the cleaner's order and says how much of each is chosen", () => {
@@ -92,5 +103,6 @@ describe("reviewing a group", () => {
   it("splits the groups between the developer's things and the system's", () => {
     expect(MODULES.developer).toEqual(["projects", "packages", "xcode"]);
     expect(MODULES.system).toEqual(["apps", "logs", "trash"]);
+    expect(MODULES.large).toEqual(["videos", "archives", "installers", "audio", "images", "documents", "otherFiles"]);
   });
 });

@@ -141,6 +141,25 @@ pub(crate) async fn clean_scan(
     })?
 }
 
+/// Hunts for this user's large files, telling the window as it goes.
+#[tauri::command]
+pub(crate) async fn clean_hunt(
+    channel: Channel<ScanEvent>,
+    window: WebviewWindow,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    let working = cleaning.begin(|| open(&window))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        working.hunt(&|event| {
+            let _ = channel.send(event);
+        })
+    })
+    .await
+    .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
 /// Removes the findings at `paths`, which the scan under `token` listed;
 /// any other path refuses the whole request.
 #[tauri::command]

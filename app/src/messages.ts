@@ -106,15 +106,30 @@ export interface Messages {
   groupApps: string;
   groupLogs: string;
   groupTrash: string;
+  groupVideos: string;
+  groupArchives: string;
+  groupInstallers: string;
+  groupAudio: string;
+  groupImages: string;
+  groupDocuments: string;
+  groupOtherFiles: string;
   aboutProjects: string;
   aboutPackages: string;
   aboutXcode: string;
   aboutApps: string;
   aboutLogs: string;
   aboutTrash: string;
+  aboutVideos: string;
+  aboutArchives: string;
+  aboutInstallers: string;
+  aboutAudio: string;
+  aboutImages: string;
+  aboutDocuments: string;
+  aboutOtherFiles: string;
   groupChosen: string;
   inUseBy: string;
   lastTouched: string;
+  changedAgo: string;
   goesToTrash: string;
   emptiedForGood: string;
   usedLast: string;
@@ -147,10 +162,15 @@ export interface Messages {
   overview: string;
   moduleDeveloper: string;
   moduleSystem: string;
+  moduleLarge: string;
   diskFree: string;
   diskOf: string;
   scan: string;
   scanHint: string;
+  huntHint: string;
+  huntLooking: string;
+  huntMeasured: string;
+  noLargeFiles: string;
   review: string;
   moduleSummary: string;
   searchItems: string;
@@ -268,15 +288,30 @@ export const en: Messages = {
   groupApps: "App caches",
   groupLogs: "Logs",
   groupTrash: "Trash",
+  groupVideos: "Videos",
+  groupArchives: "Archives",
+  groupInstallers: "Installers",
+  groupAudio: "Audio",
+  groupImages: "Images",
+  groupDocuments: "Documents",
+  groupOtherFiles: "Other files",
   aboutProjects: "Build outputs of projects left alone for 30 days. npm install or cargo build makes them again.",
   aboutPackages: "Downloads your package managers keep. They come back when needed.",
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
   aboutLogs: "What apps wrote down about their past runs.",
   aboutTrash: "What you threw away. Emptying it is for good.",
+  aboutVideos: "Films and screen recordings. What you choose goes to the Trash, where you can put it back.",
+  aboutArchives: "Archives and disk images, often left behind once something was unpacked or installed.",
+  aboutInstallers: "Installers and app packages, for this Mac or for phones and other systems.",
+  aboutAudio: "Recordings and music files.",
+  aboutImages: "Large pictures, such as camera raw files and layered designs.",
+  aboutDocuments: "Large documents, presentations and spreadsheets.",
+  aboutOtherFiles: "Large files of other kinds. Look at each before you choose it.",
   groupChosen: "{chosen} of {count} chosen",
   inUseBy: "In use by {who}",
   lastTouched: "last touched {ago}",
+  changedAgo: "changed {ago}",
   goesToTrash: "goes to the Trash",
   emptiedForGood: "emptied for good",
   usedLast: "used most recently",
@@ -309,10 +344,16 @@ export const en: Messages = {
   overview: "Overview",
   moduleDeveloper: "Developer",
   moduleSystem: "System junk",
+  moduleLarge: "Large files",
   diskFree: "{free} free of {total}",
   diskOf: "free of {total}",
   scan: "Scan",
   scanHint: "Looks for build outputs, package caches, Xcode data, app caches, logs and the Trash. Nothing goes without your say.",
+  huntHint:
+    "Looks through your folders outside the Library for files over 50 MB. None is chosen for you, and what you choose goes to the Trash. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
+  huntLooking: "Looking through your folders…",
+  huntMeasured: "Looked through {done} of {total} folders",
+  noLargeFiles: "No files over 50 MB were found in the folders looked in.",
   review: "Review",
   moduleSummary: "{found} found · {chosen} chosen",
   searchItems: "Search",
@@ -430,15 +471,30 @@ export const tr: Messages = {
   groupApps: "Uygulama önbellekleri",
   groupLogs: "Kayıtlar",
   groupTrash: "Çöp Sepeti",
+  groupVideos: "Videolar",
+  groupArchives: "Arşivler",
+  groupInstallers: "Yükleyiciler",
+  groupAudio: "Ses",
+  groupImages: "Görseller",
+  groupDocuments: "Belgeler",
+  groupOtherFiles: "Diğer dosyalar",
   aboutProjects: "30 gündür dokunulmayan projelerin derleme çıktıları. npm install ya da cargo build onları yeniden oluşturur.",
   aboutPackages: "Paket yöneticilerinin sakladığı indirmeler. Gerektiğinde yeniden iner.",
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
   aboutTrash: "Attıkların. Boşaltmak kalıcıdır.",
+  aboutVideos: "Filmler ve ekran kayıtları. Seçtiklerin Çöp Sepeti'ne gider; oradan geri alabilirsin.",
+  aboutArchives: "Arşivler ve disk görüntüleri; çoğu bir şey açıldıktan ya da kurulduktan sonra geride kalır.",
+  aboutInstallers: "Bu Mac ya da telefonlar ve başka sistemler için yükleyiciler ve uygulama paketleri.",
+  aboutAudio: "Kayıtlar ve müzik dosyaları.",
+  aboutImages: "Kamera RAW dosyaları ve katmanlı tasarımlar gibi büyük görseller.",
+  aboutDocuments: "Büyük belgeler, sunumlar ve tablolar.",
+  aboutOtherFiles: "Başka türden büyük dosyalar. Seçmeden önce her birine bak.",
   groupChosen: "{count} öğeden {chosen} seçili",
   inUseBy: "{who} kullanıyor",
   lastTouched: "son dokunuş {ago}",
+  changedAgo: "{ago} değişti",
   goesToTrash: "Çöp Sepeti'ne gider",
   emptiedForGood: "kalıcı olarak boşaltılır",
   usedLast: "en son kullanılan",
@@ -471,10 +527,16 @@ export const tr: Messages = {
   overview: "Genel Bakış",
   moduleDeveloper: "Geliştirici",
   moduleSystem: "Sistem çöpü",
+  moduleLarge: "Büyük dosyalar",
   diskFree: "{total} içinde {free} boş",
   diskOf: "boş · toplam {total}",
   scan: "Tara",
   scanHint: "Derleme çıktıları, paket önbellekleri, Xcode verileri, uygulama önbellekleri, kayıtlar ve Çöp Sepeti aranır. Sen onaylamadan hiçbir şey silinmez.",
+  huntHint:
+    "Library dışındaki klasörlerinde 50 MB'tan büyük dosyaları arar. Hiçbirini senin yerine seçmez; seçtiklerin Çöp Sepeti'ne gider. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
+  huntLooking: "Klasörlerin taranıyor…",
+  huntMeasured: "{total} klasörden {done} tanesine bakıldı",
+  noLargeFiles: "Bakılan klasörlerde 50 MB'tan büyük dosya bulunamadı.",
   review: "İncele",
   moduleSummary: "{found} bulundu · {chosen} seçili",
   searchItems: "Ara",

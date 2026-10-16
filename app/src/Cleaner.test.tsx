@@ -56,6 +56,7 @@ const FINDINGS = [shop, tool, npm, pip, archive, trash];
 /** A backend the test drives: it keeps what the window asked for. */
 function fake() {
   const scans: ((event: ScanEvent) => void)[] = [];
+  const hunts: ((event: ScanEvent) => void)[] = [];
   const runs: { token: number; paths: string[]; onEvent: (event: RunEvent) => void }[] = [];
   let stops = 0;
   let refusal: unknown = null;
@@ -65,6 +66,10 @@ function fake() {
     scan: (onEvent) => {
       scans.push(onEvent);
       return refusal === null ? Promise.resolve() : Promise.reject(refusal);
+    },
+    hunt: (onEvent) => {
+      hunts.push(onEvent);
+      return Promise.resolve();
     },
     run: (token, paths, onEvent) => {
       runs.push({ token, paths, onEvent });
@@ -84,6 +89,7 @@ function fake() {
   return {
     backend,
     scans,
+    hunts,
     runs,
     revealed,
     rechecks,
@@ -107,7 +113,23 @@ const scanButton = () => screen.getByRole("button", { name: "Scan" });
 /** Asks for a scan, and lists `findings` as it ends. */
 function found(driver: ReturnType<typeof fake>, findings = FINDINGS) {
   if (driver.scans.length === 0) fireEvent.click(scanButton());
-  act(() => driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings }));
+  act(() =>
+    driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings, scanned: true, hunted: false }),
+  );
+}
+
+const film = finding("trip.mov", `${HOME}/Movies/trip.mov`, {
+  group: "videos",
+  kind: "personal",
+  bytes: 2 * GB,
+  picked: false,
+  emptied: false,
+  touched: NOW / 1000 - 90 * DAY,
+});
+
+/** Ends the latest hunt with `findings`, as the app sends them: a scan's too, when one came first. */
+function hunted(driver: ReturnType<typeof fake>, findings: Finding[], scanned = false) {
+  act(() => driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true }));
 }
 
 /** Opens a section of the window from its side. */
@@ -304,6 +326,73 @@ describe("the cleaner window", () => {
     expect(screen.getByText("Quit what is using an item, then come back here: the list looks again.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Xcode/ }));
     expect(screen.queryByText(/Quit what is using/)).toBeNull();
+  });
+
+  it("hunts for large files only when asked, from their own section", () => {
+    const driver = fake();
+    show(driver.backend);
+
+    section("Large files");
+    expect(screen.getByText(/files over 50 MB/)).toBeTruthy();
+    fireEvent.click(scanButton());
+    expect(driver.hunts).toHaveLength(1);
+    expect(driver.scans).toHaveLength(0);
+    expect(screen.getByText("Looking through your folders…")).toBeTruthy();
+    act(() => driver.hunts[0]({ kind: "measured", done: 2, total: 5, bytes: 2 * GB }));
+    expect(screen.getByText("Looked through 2 of 5 folders")).toBeTruthy();
+
+    hunted(driver, [film]);
+
+    const items = within(screen.getByRole("list", { name: "Videos" }));
+    expect(items.getByRole("checkbox", { name: "trip.mov" })).toHaveProperty("checked", false);
+    expect(items.getByText("~/Movies · changed 3 months ago")).toBeTruthy();
+    // Nothing was scanned for yet: the other sections wait for a scan.
+    expect(screen.getByRole("button", { name: "Developer" })).toHaveProperty("disabled", true);
+    section("Overview");
+    expect(scanButton()).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Scan again" })).toBeNull();
+  });
+
+  it("keeps the scan's choice through a hunt, and the hunt's through a scan", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    expect(screen.getByText("2 items")).toBeTruthy();
+
+    section("Large files");
+    fireEvent.click(scanButton());
+    hunted(driver, [...FINDINGS, film], true);
+    expect(screen.getByText("2 items")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "trip.mov" }));
+    expect(screen.getByText("3 items")).toBeTruthy();
+
+    section("Overview");
+    fireEvent.click(screen.getByRole("button", { name: "Scan again" }));
+    act(() =>
+      driver.scans[driver.scans.length - 1]({
+        kind: "done",
+        token: 9,
+        home: HOME,
+        findings: [npm, film],
+        scanned: true,
+        hunted: true,
+      }),
+    );
+    expect(screen.getByText("2 items")).toBeTruthy();
+  });
+
+  it("says no large files were found only of the folders it looked in", () => {
+    const driver = fake();
+    show(driver.backend);
+    section("Large files");
+    fireEvent.click(scanButton());
+    // Stopped at once, the hunt ends with what it found by then: nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(driver.stops()).toBe(1);
+
+    hunted(driver, []);
+
+    expect(screen.getByText("No files over 50 MB were found in the folders looked in.")).toBeTruthy();
   });
 
   it("shows an item in Finder through the app, by its path", () => {

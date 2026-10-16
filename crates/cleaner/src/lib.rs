@@ -63,6 +63,23 @@ pub enum Group {
     OtherFiles,
 }
 
+impl Group {
+    /// Whether the group holds the user's large files, which a hunt finds
+    /// rather than a scan.
+    pub fn of_large_files(self) -> bool {
+        matches!(
+            self,
+            Self::Videos
+                | Self::Archives
+                | Self::Installers
+                | Self::Audio
+                | Self::Images
+                | Self::Documents
+                | Self::OtherFiles
+        )
+    }
+}
+
 /// How a finding would go, which decides whether it is picked unasked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

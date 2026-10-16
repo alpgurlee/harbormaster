@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use harbormaster_cleaner::{Cleaned, Finding, Measured, Removal, Survey, Usage};
+use harbormaster_cleaner::{Cleaned, Finding, Hunt, Measured, Removal, Survey, Usage};
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
 
@@ -17,6 +17,8 @@ use crate::scanning;
 
 /// How long a project sits untouched before its build outputs are picked.
 const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
+/// The least room a file takes to be listed as large: 50 MB, as the window says.
+const LARGE_FROM: u64 = 50 * 1024 * 1024;
 
 /// What a scan tells the window as it goes.
 #[derive(Debug, Serialize)]
@@ -27,12 +29,29 @@ const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
 )]
 pub(crate) enum ScanEvent {
     Measured(Measured),
-    /// Everything found, under the token that removing some of it needs.
+    /// Everything found, by this scan or hunt and the last of the other,
+    /// under the token that removing some of it needs.
     Done {
         token: u64,
         home: PathBuf,
         findings: Vec<Finding>,
+        /// Whether what tools and apps leave was scanned for, and whether the
+        /// large files were hunted for, so that none listed means none found.
+        scanned: bool,
+        hunted: bool,
     },
+}
+
+impl ScanEvent {
+    fn done(home: PathBuf, shown: Shown) -> Self {
+        Self::Done {
+            token: shown.token,
+            home,
+            findings: shown.findings,
+            scanned: shown.scanned,
+            hunted: shown.hunted,
+        }
+    }
 }
 
 /// What a removal tells the window as it goes.
@@ -79,10 +98,24 @@ struct Ledger {
     working: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Shown {
     token: u64,
     findings: Vec<Finding>,
+    /// What a look again found gone since: no longer shown, and left out of
+    /// the next search's list, yet still taken if a window not told yet asks
+    /// for it, so the removal says it isn't there rather than nothing going.
+    gone: Vec<Finding>,
+    scanned: bool,
+    hunted: bool,
+}
+
+/// What looked for the findings: a scan for what tools and apps leave, or
+/// a hunt for the user's large files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Search {
+    Scan,
+    Hunt,
 }
 
 /// The one scan or removal under way, taken before its work is queued so
@@ -121,14 +154,30 @@ impl Cleaning {
         self.stop.store(true, Ordering::Relaxed);
     }
 
-    /// Keeps `findings` as the ones shown, in place of any before, and
-    /// hands back the token they go by.
-    fn show(&self, findings: Vec<Finding>) -> u64 {
+    /// Shows what `search` found in place of what the last of its kind
+    /// found, beside what the other kind found, all under a new token, and
+    /// hands all of it back.
+    fn show(&self, search: Search, findings: Vec<Finding>) -> Shown {
         let mut ledger = self.lock();
         ledger.last += 1;
-        let token = ledger.last;
-        ledger.shown = Some(Shown { token, findings });
-        token
+        let hunt = search == Search::Hunt;
+        let mut shown = ledger.shown.take().unwrap_or(Shown {
+            token: 0,
+            findings: Vec::new(),
+            gone: Vec::new(),
+            scanned: false,
+            hunted: false,
+        });
+        shown.token = ledger.last;
+        shown.gone.clear();
+        shown
+            .findings
+            .retain(|finding| finding.group.of_large_files() != hunt);
+        shown.findings.extend(findings);
+        shown.scanned |= !hunt;
+        shown.hunted |= hunt;
+        ledger.shown = Some(shown.clone());
+        shown
     }
 
     /// The findings at `paths` among those shown under `token`, each once,
@@ -148,6 +197,7 @@ impl Cleaning {
                 shown
                     .findings
                     .iter()
+                    .chain(&shown.gone)
                     .find(|finding| finding.path.as_os_str() == path.as_os_str())
                     .cloned()
                     .ok_or(Refusal::Unlisted)
@@ -159,12 +209,32 @@ impl Cleaning {
 
     /// The findings shown under `token`, as they stand now: what was removed
     /// or made again since is left out, and who is using each is read again.
-    /// What is shown stays as it was; a removal looks at each again anyway.
+    /// They are shown from then on, so the next search keeps them so.
     pub(crate) fn recheck(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
         let findings = self.shown(token)?;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let usage = usage_now().map_err(failed)?;
-        harbormaster_cleaner::recheck(&home, &findings, &usage).map_err(failed)
+        let now = harbormaster_cleaner::recheck(&home, &findings, &usage).map_err(failed)?;
+        self.looked_again(token, now.clone())?;
+        Ok(now)
+    }
+
+    /// Shows `now`, what a look again found of the findings shown under
+    /// `token`, in their place; what it left out is set aside as gone.
+    fn looked_again(&self, token: u64, now: Vec<Finding>) -> Result<(), Refusal> {
+        let mut ledger = self.lock();
+        let shown = ledger
+            .shown
+            .as_mut()
+            .filter(|shown| shown.token == token)
+            .ok_or(Refusal::Expired)?;
+        let went = shown
+            .findings
+            .drain(..)
+            .filter(|finding| !now.iter().any(|kept| kept.path == finding.path));
+        shown.gone.extend(went);
+        shown.findings = now;
+        Ok(())
     }
 
     fn shown(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
@@ -204,12 +274,28 @@ impl Working {
         })
         .map_err(failed)?;
         findings.retain(showable);
-        let token = cleaning.show(findings.clone());
-        told(ScanEvent::Done {
-            token,
-            home,
-            findings,
-        });
+        let shown = cleaning.show(Search::Scan, findings);
+        told(ScanEvent::done(home, shown));
+        Ok(())
+    }
+
+    /// Hunts for this user's large files, telling `told` as it goes.
+    pub(crate) fn hunt(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
+        let cleaning = &self.0;
+        let home = harbormaster_cleaner::account_home().map_err(failed)?;
+        let usage = usage_now().map_err(failed)?;
+        let hunt = Hunt {
+            home: &home,
+            smallest: LARGE_FROM,
+            busy: &usage.busy,
+        };
+        let mut findings = harbormaster_cleaner::large(&hunt, &cleaning.stop, &|measured| {
+            told(ScanEvent::Measured(measured));
+        })
+        .map_err(failed)?;
+        findings.retain(showable);
+        let shown = cleaning.show(Search::Hunt, findings);
+        told(ScanEvent::done(home, shown));
         Ok(())
     }
 
@@ -290,7 +376,7 @@ mod tests {
         Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal, Why,
     };
 
-    use super::{Cleaning, Refusal, RunEvent, ScanEvent};
+    use super::{Cleaning, Refusal, RunEvent, ScanEvent, Search};
 
     fn finding(path: &str) -> Finding {
         Finding {
@@ -312,10 +398,87 @@ mod tests {
         paths.iter().map(PathBuf::from).collect()
     }
 
+    /// Shows `findings` as a scan found them, handing back their token.
+    fn scanned(cleaning: &Cleaning, findings: Vec<Finding>) -> u64 {
+        cleaning.show(Search::Scan, findings).token
+    }
+
+    #[test]
+    fn keeps_what_a_look_again_saw_through_the_next_search() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let token = scanned(&cleaning, vec![npm.clone(), pip.clone()]);
+        let held = Finding {
+            in_use: Some("java".into()),
+            ..pip
+        };
+
+        // npm was removed by hand, and pip is in use now.
+        cleaning.looked_again(token, vec![held.clone()]).unwrap();
+
+        assert_eq!(cleaning.show(Search::Hunt, Vec::new()).findings, [held]);
+    }
+
+    #[test]
+    fn still_takes_what_went_for_a_window_not_yet_told() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let token = scanned(&cleaning, vec![npm.clone(), pip.clone()]);
+        cleaning.looked_again(token, vec![pip.clone()]).unwrap();
+
+        // The removal then finds it gone and says so, rather than nothing going at all.
+        let chosen = cleaning.take(
+            token,
+            &paths(&["/Users/dev/.npm/_cacache", "/Users/dev/Library/Caches/pip"]),
+        );
+
+        assert_eq!(chosen, Ok(vec![npm, pip]));
+        assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
+    }
+
+    #[test]
+    fn looks_again_only_at_the_scan_still_shown() {
+        let cleaning = Cleaning::default();
+        let older = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
+        let newer = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
+
+        assert_eq!(
+            cleaning.looked_again(older, Vec::new()),
+            Err(Refusal::Expired)
+        );
+        assert_eq!(cleaning.shown(newer).map(|shown| shown.len()), Ok(1));
+    }
+
+    #[test]
+    fn keeps_a_hunt_beside_the_scan_each_in_place_of_its_own_last() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let film = Finding {
+            group: Group::Videos,
+            kind: Kind::Personal,
+            ..finding("/Users/dev/Movies/trip.mov")
+        };
+
+        let hunt = cleaning.show(Search::Hunt, vec![film.clone()]);
+        assert_eq!((hunt.scanned, hunt.hunted), (false, true));
+        let scan = cleaning.show(Search::Scan, vec![npm.clone()]);
+        assert_eq!(scan.findings, [film.clone(), npm.clone()]);
+        assert_eq!((scan.scanned, scan.hunted), (true, true));
+        assert_eq!(cleaning.take(hunt.token, &[]), Err(Refusal::Expired));
+        let again = cleaning.show(Search::Scan, vec![pip.clone()]);
+        assert_eq!(again.findings, [film, pip.clone()]);
+        let none = cleaning.show(Search::Hunt, Vec::new());
+        assert_eq!(none.findings, [pip]);
+        assert_eq!(cleaning.take(scan.token, &[]), Err(Refusal::Expired));
+    }
+
     #[test]
     fn hands_out_what_a_scan_showed_once() {
         let cleaning = Cleaning::default();
-        let token = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         let chosen = cleaning.take(token, &paths(&["/Users/dev/.npm/_cacache"]));
 
@@ -329,7 +492,7 @@ mod tests {
     #[test]
     fn takes_nothing_the_scan_didnt_list() {
         let cleaning = Cleaning::default();
-        let token = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         let made_up = cleaning.take(token, &paths(&["/Users/dev/.npm/_cacache", "/Users/dev"]));
 
@@ -344,8 +507,8 @@ mod tests {
     #[test]
     fn lets_a_newer_scan_replace_the_one_before() {
         let cleaning = Cleaning::default();
-        let older = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
-        let newer = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        let older = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
+        let newer = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         assert_eq!(cleaning.take(older, &[]), Err(Refusal::Expired));
         assert!(cleaning.take(newer, &[]).is_ok());
@@ -354,7 +517,7 @@ mod tests {
     #[test]
     fn takes_each_listed_finding_once_and_only_by_its_exact_path() {
         let cleaning = Cleaning::default();
-        let token = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         let odd = cleaning.take(token, &paths(&["/Users/dev/.npm/./_cacache"]));
         let twice = cleaning.take(
@@ -369,7 +532,7 @@ mod tests {
     #[test]
     fn looks_again_only_at_the_findings_shown_now() {
         let cleaning = Cleaning::default();
-        let token = cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         assert_eq!(cleaning.shown(token + 1), Err(Refusal::Expired));
         assert_eq!(
@@ -386,7 +549,7 @@ mod tests {
         let cleaning = Cleaning::default();
         assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
 
-        cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+        scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
         assert!(cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
         assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm")));
@@ -468,6 +631,8 @@ mod tests {
             token: 3,
             home: PathBuf::from("/Users/dev"),
             findings: Vec::new(),
+            scanned: true,
+            hunted: false,
         };
         let removed = RunEvent::Removed(Removal {
             path: PathBuf::from("/Users/dev/.npm/_cacache"),
@@ -487,7 +652,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(found)),
-            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": []})
+            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": [], "scanned": true, "hunted": false})
         );
         assert_eq!(
             json(serde_json::to_value(removed)),

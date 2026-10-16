@@ -1,14 +1,29 @@
 import type { CleanGroup, Finding } from "./types";
 
 /** The order the cleaner lists its groups in. */
-export const GROUPS: CleanGroup[] = ["projects", "packages", "xcode", "apps", "logs", "trash"];
+export const GROUPS: CleanGroup[] = [
+  "projects",
+  "packages",
+  "xcode",
+  "apps",
+  "logs",
+  "trash",
+  "videos",
+  "archives",
+  "installers",
+  "audio",
+  "images",
+  "documents",
+  "otherFiles",
+];
 
 /** The window's sections past the overview, and the groups each reviews. */
-export type CleanModule = "developer" | "system";
+export type CleanModule = "developer" | "system" | "large";
 
 export const MODULES: Record<CleanModule, CleanGroup[]> = {
   developer: ["projects", "packages", "xcode"],
   system: ["apps", "logs", "trash"],
+  large: ["videos", "archives", "installers", "audio", "images", "documents", "otherFiles"],
 };
 
 /** How a group's items are listed. */
@@ -40,6 +55,21 @@ export interface Plan {
 
 /** Something in use can't be chosen; the window says by what. */
 export const selectable = (finding: Finding) => finding.inUse === null;
+
+/** Whether a finding is one of the user's large files, which a hunt finds. */
+export const largeFile = (finding: Finding) => MODULES.large.includes(finding.group);
+
+/**
+ * What is chosen once a scan, or a hunt when `hunt`, ends with `findings`:
+ * of what it looked for, what it picked; of the rest, what was chosen before.
+ */
+export function rechosen(chosen: Set<string>, findings: Finding[], hunt: boolean): Set<string> {
+  return new Set(
+    findings
+      .filter((finding) => selectable(finding) && (largeFile(finding) === hunt ? finding.picked : chosen.has(finding.path)))
+      .map((finding) => finding.path),
+  );
+}
 
 /** What the scan chose, by path. */
 export function picked(findings: Finding[]): Set<string> {

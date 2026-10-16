@@ -31,6 +31,7 @@ fn main() {
             commands::quit_app,
             commands::open_cleaner,
             commands::clean_scan,
+            commands::clean_hunt,
             commands::clean_run,
             commands::clean_recheck,
             commands::clean_stop,

@@ -1,3 +1,4 @@
+import { largeFile } from "./cleanup";
 import type { TextKey, Translator } from "./i18n";
 import type { CleanGroup, CleanRefusal, Finding, Removal, Why } from "./types";
 
@@ -8,6 +9,13 @@ export const NAMES: Record<CleanGroup, TextKey> = {
   apps: "groupApps",
   logs: "groupLogs",
   trash: "groupTrash",
+  videos: "groupVideos",
+  archives: "groupArchives",
+  installers: "groupInstallers",
+  audio: "groupAudio",
+  images: "groupImages",
+  documents: "groupDocuments",
+  otherFiles: "groupOtherFiles",
 };
 
 export const ABOUT: Record<CleanGroup, TextKey> = {
@@ -17,18 +25,40 @@ export const ABOUT: Record<CleanGroup, TextKey> = {
   apps: "aboutApps",
   logs: "aboutLogs",
   trash: "aboutTrash",
+  videos: "aboutVideos",
+  archives: "aboutArchives",
+  installers: "aboutInstallers",
+  audio: "aboutAudio",
+  images: "aboutImages",
+  documents: "aboutDocuments",
+  otherFiles: "aboutOtherFiles",
 };
 
 /** Each group's color, from the panel's project tints. */
-export const TINTS: Record<CleanGroup, number> = { projects: 0, packages: 3, xcode: 1, apps: 5, logs: 4, trash: 2 };
+export const TINTS: Record<CleanGroup, number> = {
+  projects: 0,
+  packages: 3,
+  xcode: 1,
+  apps: 5,
+  logs: 4,
+  trash: 2,
+  videos: 2,
+  archives: 0,
+  installers: 1,
+  audio: 5,
+  images: 4,
+  documents: 3,
+  otherFiles: 0,
+};
 
 /** Where it is, then why it is or isn't chosen. */
 export function note(finding: Finding, home: string, now: number, i18n: Translator): string {
   if (finding.inUse !== null) return i18n.t("inUseBy", { who: finding.inUse });
-  const where = shown(finding.project ?? finding.path, home);
+  // A large file's name is shown already; the folder it is in is what's left to say.
+  const where = shown(largeFile(finding) ? folderOf(finding.path) : (finding.project ?? finding.path), home);
   const why =
     finding.touched !== null
-      ? i18n.t("lastTouched", { ago: i18n.ago(now - finding.touched * 1000) })
+      ? i18n.t(largeFile(finding) ? "changedAgo" : "lastTouched", { ago: i18n.ago(now - finding.touched * 1000) })
       : finding.kind === "personal"
         ? i18n.t("goesToTrash")
         : finding.kind === "discarded"
@@ -37,6 +67,10 @@ export function note(finding: Finding, home: string, now: number, i18n: Translat
             ? null
             : i18n.t("usedLast");
   return why === null ? where : `${where} · ${why}`;
+}
+
+function folderOf(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/"))) || "/";
 }
 
 /** `~/code/shop` for a path in the home folder. */
