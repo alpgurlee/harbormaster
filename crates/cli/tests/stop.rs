@@ -1,12 +1,22 @@
 use std::net::{IpAddr, Ipv4Addr, TcpListener};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::sleep;
 use std::time::Duration;
 
 use harbormaster_platform::{BindProbe, probe_bind};
 
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+/// macOS marks a new socket close-on-exec only after creating it, so a
+/// process that another test starts in between inherits the socket. Two test
+/// servers holding one socket would then look like a single service.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+fn take_turn() -> MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// A test server, ended whatever happens to the test.
 struct Server(Child);
@@ -53,6 +63,7 @@ fn harbormaster(args: &[&str]) -> Output {
 
 #[test]
 fn stops_the_server_on_a_port_when_told_yes() {
+    let _turn = take_turn();
     let (mut server, port) = listener();
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes"]);
@@ -64,6 +75,7 @@ fn stops_the_server_on_a_port_when_told_yes() {
 
 #[test]
 fn stops_nothing_without_a_yes() {
+    let _turn = take_turn();
     let (mut server, port) = listener();
 
     let output = harbormaster(&["stop", &port.to_string()]);
@@ -75,6 +87,7 @@ fn stops_nothing_without_a_yes() {
 
 #[test]
 fn stops_the_server_a_process_belongs_to() {
+    let _turn = take_turn();
     let (mut server, _) = listener();
 
     let output = harbormaster(&["stop", "--pid", &server.0.id().to_string(), "--yes"]);
@@ -85,6 +98,7 @@ fn stops_the_server_a_process_belongs_to() {
 
 #[test]
 fn exits_with_3_when_nothing_listens() {
+    let _turn = take_turn();
     let output = harbormaster(&["stop", &free_port().to_string(), "--yes"]);
 
     assert_eq!(output.status.code(), Some(3), "{output:?}");
@@ -113,6 +127,7 @@ fn stubborn_listener() -> (Server, u16) {
 
 #[test]
 fn reports_a_server_that_outlives_the_grace_period() {
+    let _turn = take_turn();
     let (mut server, port) = stubborn_listener();
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes", "--wait", "1"]);
@@ -125,6 +140,7 @@ fn reports_a_server_that_outlives_the_grace_period() {
 
 #[test]
 fn ends_a_server_that_ignores_the_request_when_forced() {
+    let _turn = take_turn();
     let (mut server, port) = stubborn_listener();
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes", "--force", "--wait", "1"]);
