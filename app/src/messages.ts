@@ -158,8 +158,7 @@ export interface Messages {
   orderSize: string;
   orderName: string;
   orderAge: string;
-  chooseAll: string;
-  chooseNone: string;
+  chooseShown: string;
   revealInFinder: string;
   noItemsMatch: string;
 }
@@ -320,8 +319,7 @@ export const en: Messages = {
   orderSize: "Largest first",
   orderName: "By name",
   orderAge: "Oldest first",
-  chooseAll: "Choose all",
-  chooseNone: "Choose none",
+  chooseShown: "Choose all shown",
   revealInFinder: "Show in Finder",
   noItemsMatch: "Nothing here matches “{query}”.",
 };
@@ -482,8 +480,7 @@ export const tr: Messages = {
   orderSize: "En büyük önce",
   orderName: "Ada göre",
   orderAge: "En eski önce",
-  chooseAll: "Tümünü seç",
-  chooseNone: "Hiçbirini seçme",
+  chooseShown: "Görünenlerin tümünü seç",
   revealInFinder: "Finder'da göster",
   noItemsMatch: "“{query}” ile eşleşen bir şey yok.",
 };

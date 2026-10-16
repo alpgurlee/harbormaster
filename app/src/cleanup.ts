@@ -51,7 +51,6 @@ export function groupsOf(findings: Finding[], chosen: Set<string>): GroupView[] 
     const members = findings.filter((finding) => finding.group === group);
     if (members.length === 0) return [];
     const picks = members.filter((finding) => chosen.has(finding.path));
-    const choosable = members.filter(selectable);
     return [
       {
         group,
@@ -59,11 +58,18 @@ export function groupsOf(findings: Finding[], chosen: Set<string>): GroupView[] 
         bytes: sum(members),
         chosen: picks.length,
         chosenBytes: sum(picks),
-        state: picks.length === 0 ? "none" : picks.length === choosable.length ? "all" : "some",
-        selectable: choosable.length > 0,
+        state: choiceOf(members, chosen),
+        selectable: members.some(selectable),
       },
     ];
   });
+}
+
+/** Whether all, some or none of what may be chosen of `findings` is. */
+export function choiceOf(findings: Finding[], chosen: Set<string>): GroupView["state"] {
+  const choosable = findings.filter(selectable);
+  const picks = choosable.filter((finding) => chosen.has(finding.path)).length;
+  return picks === 0 ? "none" : picks === choosable.length ? "all" : "some";
 }
 
 /**

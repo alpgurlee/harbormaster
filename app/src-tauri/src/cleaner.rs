@@ -17,8 +17,8 @@ pub(crate) fn show(app: &AppHandle) -> tauri::Result<()> {
     }
     let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::default())
         .title("Harbormaster")
-        .inner_size(760.0, 560.0)
-        .min_inner_size(640.0, 480.0)
+        .inner_size(880.0, 600.0)
+        .min_inner_size(760.0, 520.0)
         .center();
     // The page runs up under the title bar, as a Mac app's own content does.
     #[cfg(target_os = "macos")]

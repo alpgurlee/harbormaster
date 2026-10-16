@@ -165,14 +165,20 @@ describe("the cleaner window", () => {
 
     fireEvent.click(items.getByRole("checkbox", { name: "shop · node_modules" }));
     expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", false);
-    fireEvent.click(screen.getByRole("button", { name: "Choose all" }));
+    const shown = () => screen.getByRole("checkbox", { name: "Choose all shown" });
+    expect(shown()).toHaveProperty("checked", false);
+    fireEvent.click(shown());
     expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", true);
+    expect(shown()).toHaveProperty("checked", true);
 
+    // Only what the search shows is chosen at once, and an item in use never is.
     fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "TOOL" } });
     expect(within(screen.getByRole("list", { name: "Projects" })).getAllByRole("checkbox")).toHaveLength(1);
+    expect(shown()).toHaveProperty("disabled", true);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
     expect(screen.getByRole("list", { name: "Package caches" })).toBeTruthy();
+    expect(shown()).toHaveProperty("indeterminate", true);
   });
 
   it("shows an item in Finder through the app, by its path", () => {

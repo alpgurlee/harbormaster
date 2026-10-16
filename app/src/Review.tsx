@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { groupsOf, matching, ordered, selectable, toggled, type GroupView, type Order } from "./cleanup";
+import { choiceOf, groupsOf, matching, ordered, selectable, toggled, type GroupView, type Order } from "./cleanup";
 import { ABOUT, NAMES, TINTS, note } from "./cleanerText";
 import { useI18n } from "./i18n";
 import { OpenOut } from "./icons";
@@ -34,8 +34,6 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
   const view = groups.find((group) => group.group === current) ?? groups[0];
   if (view === undefined) return <p className={styles.empty}>{i18n.t("cleanNothing")}</p>;
   const items = ordered(matching(view.findings, query), order);
-  const choosable = items.filter(selectable);
-  const allChosen = choosable.length > 0 && choosable.every((finding) => chosen.has(finding.path));
 
   return (
     <div className={styles.review}>
@@ -61,7 +59,7 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
             >
               <span className={styles.groupName}>
                 <span className={styles.dot} />
-                {i18n.t(NAMES[group.group])}
+                <span className={styles.groupLabel}>{i18n.t(NAMES[group.group])}</span>
               </span>
               <span className={styles.groupSize}>{i18n.bytes(group.bytes)}</span>
             </button>
@@ -71,6 +69,12 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
       <section className={styles.detail} aria-label={i18n.t(NAMES[view.group])}>
         <p className={styles.about}>{i18n.t(ABOUT[view.group])}</p>
         <div className={styles.toolbar}>
+          <Check
+            state={choiceOf(items, chosen)}
+            label={i18n.t("chooseShown")}
+            disabled={!items.some(selectable)}
+            onChange={() => onChoose(toggled(chosen, items))}
+          />
           <input
             type="search"
             className={styles.search}
@@ -91,14 +95,6 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className={styles.all}
-            disabled={choosable.length === 0}
-            onClick={() => onChoose(allChosen ? unchosen(chosen, choosable) : toggled(unchosen(chosen, choosable), choosable))}
-          >
-            {i18n.t(allChosen ? "chooseNone" : "chooseAll")}
-          </button>
         </div>
         {items.length === 0 ? (
           <p className={styles.empty}>{i18n.t("noItemsMatch", { query: query.trim() })}</p>
@@ -133,13 +129,6 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
       </section>
     </div>
   );
-}
-
-/** `chosen` without any of `findings`. */
-function unchosen(chosen: Set<string>, findings: Finding[]): Set<string> {
-  const next = new Set(chosen);
-  for (const finding of findings) next.delete(finding.path);
-  return next;
 }
 
 export function Check({

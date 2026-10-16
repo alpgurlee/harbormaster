@@ -1,6 +1,6 @@
 .review {
   display: grid;
-  grid-template-columns: 210px 1fr;
+  grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
   min-height: 0;
   height: 100%;
@@ -56,8 +56,12 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  overflow: hidden;
   font-weight: 500;
+}
+
+.groupLabel {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -79,7 +83,7 @@
 .detail {
   display: grid;
   grid-template-rows: auto auto 1fr;
-  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -97,14 +101,13 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
 
 .search,
-.order,
-.all {
+.order {
   height: 26px;
   border: 1px solid var(--field-edge);
   border-radius: 6px;
@@ -116,7 +119,7 @@
 
 .search {
   flex: 1;
-  min-width: 80px;
+  min-width: 0;
   padding: 0 8px;
 }
 
@@ -126,17 +129,8 @@
 }
 
 .order {
+  flex: none;
   padding: 0 6px;
-}
-
-.all {
-  padding: 0 10px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.all:disabled {
-  opacity: 0.5;
 }
 
 .items {
