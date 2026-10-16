@@ -26,11 +26,17 @@ function useWindowFit(frame: RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const element = frame.current;
     if (!inApp || element === null) return;
-    const observer = new ResizeObserver(() => {
+    const fit = () => {
       resizePanel(Math.ceil(element.getBoundingClientRect().height)).catch(console.error);
-    });
+    };
+    const observer = new ResizeObserver(fit);
     observer.observe(element);
-    return () => observer.disconnect();
+    // A resize that went astray would otherwise stand until the panel's height changes.
+    window.addEventListener("focus", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("focus", fit);
+    };
   }, [frame]);
 }
 
