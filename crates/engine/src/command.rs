@@ -95,6 +95,10 @@ fn mask(words: &[String]) -> Vec<String> {
             hide_next = false;
         } else if let Some(name) = whole_assignment(word) {
             masked.push(format!("{name}={HIDDEN}"));
+            hide_next = word
+                .split_whitespace()
+                .next_back()
+                .is_some_and(names_the_next);
         } else {
             let (text, after) = mask_argument(word);
             masked.push(text);
@@ -120,36 +124,48 @@ fn whole_assignment(word: &str) -> Option<&str> {
 /// title, where quoting can carry a value past the next space, so everything
 /// after a secret in it is hidden.
 fn mask_argument(argument: &str) -> (String, After) {
-    let mut words = Vec::new();
-    let mut tokens = argument.split_whitespace().peekable();
-    while let Some(token) = tokens.next() {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    // `scheme://user:pa ss@host`: user info with a space, split in two.
+    let last_at_sign = tokens.iter().rposition(|token| token.contains('@'));
+    let mut words = Vec::with_capacity(tokens.len());
+    let mut shown = tokens.len();
+    for (index, &token) in tokens.iter().enumerate() {
         let token = if is_path(token) {
             file_name(token)
         } else {
             token.to_string()
         };
-        // `scheme://user:pa ss@host`: a password with a space, split in two.
-        if let Some(password) = dangling_password(&token)
-            && tokens.clone().any(|later| later.contains('@'))
-        {
-            words.push(format!("{}{HIDDEN}", &token[..password]));
-            return (words.join(" "), After::Nothing);
-        }
-        let (text, after) = mask_token(&token);
+        let at_sign_follows = last_at_sign.is_some_and(|last| last > index);
+        let (text, after) = mask_token(&token, at_sign_follows);
         words.push(text);
         match after {
-            After::Nothing => {}
-            After::RestHidden => break,
-            After::NextHidden if tokens.peek().is_none() => {
+            After::Nothing => continue,
+            After::RestHidden => shown = index + 1,
+            After::NextHidden if index + 1 == tokens.len() => {
                 return (words.join(" "), After::NextHidden);
             }
             After::NextHidden => {
                 words.push(HIDDEN.to_string());
-                break;
+                shown = index + 2;
             }
         }
+        break;
     }
-    (words.join(" "), After::Nothing)
+    // The hidden rest may end with a flag whose value is the next argument.
+    let after = if tokens[shown..]
+        .last()
+        .is_some_and(|last| names_the_next(last))
+    {
+        After::NextHidden
+    } else {
+        After::Nothing
+    };
+    (words.join(" "), after)
+}
+
+/// A secret flag or header whose value is the word after it.
+fn names_the_next(word: &str) -> bool {
+    mask_token(word, false).1 == After::NextHidden
 }
 
 /// Characters after which a shell starts a new word even without a space.
@@ -157,29 +173,47 @@ const SHELL_OPERATORS: &[char] = &['&', ';', '|', '(', ')', '<', '>'];
 
 /// Every detector marks what to hide in the word, and all of it is hidden at
 /// once, so no detector's output can shield a secret another one found.
-fn mask_token(token: &str) -> (String, After) {
+fn mask_token(token: &str, at_sign_follows: bool) -> (String, After) {
     // Quotes and escapes don't change what a shell hands on: `"--to\ken=x"` is `--token=x`.
     let normal: String = token
         .chars()
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
         .collect();
     let mut hidden: Vec<Range<usize>> = Vec::new();
+    let mut after = After::Nothing;
     // A URL runs to the end of the word: its password may hold any of the
-    // characters a shell would split at.
+    // characters a shell would split at. Quoted, a password or a query value
+    // goes on past the space that ends the word.
     let urls = url_starts(&normal);
     for &start in &urls {
-        hide_url_secrets(&normal[start..], start, &mut hidden);
+        let url = &normal[start..];
+        if hide_url_secrets(url, start, &mut hidden) {
+            after = After::RestHidden;
+        }
+        if at_sign_follows && let Some(user_info) = spanning_user_info(url) {
+            hidden.push(start + user_info..normal.len());
+            after = After::RestHidden;
+        }
     }
-    let mut after = After::Nothing;
+    // One pass: the latest URL, `?` or `#`, and `&&` before each piece.
+    let bytes = normal.as_bytes();
+    let mut next_url = urls.iter().copied().peekable();
+    let (mut url, mut query, mut chain) = (None, None, None);
     let mut offset = 0;
     for piece in normal.split(SHELL_OPERATORS) {
+        while let Some(start) = next_url.next_if(|&start| start <= offset) {
+            url = Some(start);
+        }
+        if bytes[..offset].ends_with(b"&&") {
+            chain = Some(offset - 2);
+        }
         // The URL itself, or a pair of its query, ends at the next `&`. Any
-        // other piece is a new command to a shell.
-        let url = urls.iter().rev().find(|&&start| start <= offset);
-        let pair = url.is_some_and(|&start| {
+        // other piece, and all after `&&`, is a new command to a shell.
+        let pair = url.is_some_and(|start| {
             offset == start
-                || (normal.as_bytes()[offset - 1] == b'&'
-                    && normal[start..offset].contains(['?', '#']))
+                || (bytes[offset - 1] == b'&'
+                    && query.is_some_and(|at| at >= start)
+                    && !chain.is_some_and(|at| at >= start))
         });
         if pair {
             hide_secret_names(piece, offset, offset + piece.len(), &mut hidden);
@@ -189,6 +223,9 @@ fn mask_token(token: &str) -> (String, After) {
             }
             hide_plain_value(piece, offset, &urls, normal.len(), &mut hidden);
         }
+        if let Some(at) = piece.rfind(['?', '#']) {
+            query = Some(offset + at);
+        }
         offset += piece.len() + 1;
     }
     let last = normal.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
@@ -196,7 +233,8 @@ fn mask_token(token: &str) -> (String, After) {
     let header = last
         .strip_suffix(':')
         .is_some_and(|name| mentions_a_credential(name_at_end(name)));
-    if after == After::Nothing && (flag || header) {
+    // A flag that ends the word hides the next one, even after a secret.
+    if flag || header {
         after = After::NextHidden;
     }
     if after == After::Nothing && hidden.is_empty() {
@@ -205,19 +243,18 @@ fn mask_token(token: &str) -> (String, After) {
     (with_hidden(&normal, hidden), after)
 }
 
-/// Where the password starts in `scheme://user:password` when no `@` follows
-/// in the same word.
-fn dangling_password(token: &str) -> Option<usize> {
-    let after_scheme = token.find("://")? + 3;
-    let rest = &token[after_scheme..];
-    if rest.contains('@') {
-        return None;
+/// Where user info starts that may go on into a later word: a password after
+/// the first `:`, or a user name whose host doesn't end in this word. A port's
+/// colon reads like a password's and is hidden the same way.
+fn spanning_user_info(url: &str) -> Option<usize> {
+    let start = url.find("://")? + 3;
+    let rest = &url[start..];
+    match rest.find([':', '/', '?', '#', '@']) {
+        Some(at) if rest.as_bytes()[at] == b':' => Some(start + at + 1),
+        Some(at) if rest.as_bytes()[at] == b'@' && !rest.contains(['/', '?', '#']) => Some(start),
+        Some(_) => None,
+        None => Some(start),
     }
-    let colon = rest.find(':')?;
-    if rest[..colon].contains(['/', '?', '#']) {
-        return None;
-    }
-    Some(after_scheme + colon + 1)
 }
 
 /// Where URLs start in a word: the scheme in front of each `://`.
@@ -241,13 +278,20 @@ fn hide_secret_names(
     end: usize,
     hidden: &mut Vec<Range<usize>>,
 ) -> bool {
+    // A flag's name grows at every separator, so where it first names a
+    // credential is looked up once.
+    let flag_credential_end = piece
+        .starts_with('-')
+        .then(|| credential_end(piece))
+        .flatten();
     for (at, separator) in piece.match_indices(['=', ':']) {
         // `Authorization:` ending the word has its value in the next one.
         if separator == ":" && offset + at + 1 == end {
             break;
         }
-        let name = &piece[..at];
-        if is_secret_flag(name) || mentions_a_credential(name_at_end(name)) {
+        if flag_credential_end.is_some_and(|until| until <= at)
+            || mentions_a_credential(name_at_end(&piece[..at]))
+        {
             hidden.push(offset + at + 1..end);
             return true;
         }
@@ -271,7 +315,7 @@ fn hide_plain_value(
         return;
     }
     let value = offset + at + 1;
-    let value_end = if urls.contains(&value) {
+    let value_end = if urls.binary_search(&value).is_ok() {
         end
     } else {
         offset + piece.len()
@@ -280,9 +324,10 @@ fn hide_plain_value(
 }
 
 /// A URL's user info, whole, and query values whose key names a credential.
-fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>) {
+/// Returns whether there was such a value.
+fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>) -> bool {
     let Some(scheme_end) = segment.find("://") else {
-        return;
+        return false;
     };
     let start = scheme_end + 3;
     let rest = &segment[start..];
@@ -297,21 +342,24 @@ fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>
     if let Some(at) = user_end {
         hidden.push(offset + start..offset + start + at);
     }
-    let after_user = user_end.map_or(start, |at| start + at + 1);
     // The query and the fragment, where OAuth hands out tokens, both hold
-    // `key=value` pairs.
-    let Some(pairs_at) = segment[after_user..].find(['?', '#']) else {
-        return;
+    // `key=value` pairs. A value may hold `:` and `@` too, so they are read
+    // from the first `?` or `#` whatever the user info turned out to be.
+    let Some(pairs_at) = segment[start..].find(['?', '#']) else {
+        return false;
     };
-    let mut pair_start = after_user + pairs_at + 1;
+    let mut found = false;
+    let mut pair_start = start + pairs_at + 1;
     for pair in segment[pair_start..].split(['&', '#', '?']) {
         if let Some((key, _)) = pair.split_once('=')
             && is_credential_key(key)
         {
             hidden.push(offset + pair_start + key.len() + 1..offset + pair_start + pair.len());
+            found = true;
         }
         pair_start += pair.len() + 1;
     }
+    found
 }
 
 /// Replaces the marked ranges with the mask, touching ranges as one.
@@ -350,8 +398,16 @@ fn is_secret_flag(word: &str) -> bool {
 }
 
 fn mentions_a_credential(name: &str) -> bool {
+    credential_end(name).is_some()
+}
+
+/// Where the first part of `name` that marks a credential ends.
+fn credential_end(name: &str) -> Option<usize> {
     let name = name.to_ascii_lowercase().replace('_', "-");
-    CREDENTIAL_PARTS.iter().any(|part| name.contains(part))
+    CREDENTIAL_PARTS
+        .iter()
+        .filter_map(|part| name.find(part).map(|at| at + part.len()))
+        .min()
 }
 
 /// Query keys that carry a credential without saying so in their name.
@@ -778,6 +834,103 @@ mod tests {
         assert_eq!(
             show(&["sh", "-c", "psql postgres://u:pa ss@h/db"]),
             "sh -c psql postgres://u:***"
+        );
+    }
+
+    #[test]
+    fn hides_a_secret_flag_whose_url_password_runs_past_a_space() {
+        assert_eq!(
+            show(&["sh", "-c", "app --token=https://u:pa ss@h/db"]),
+            "sh -c app --token=***"
+        );
+    }
+
+    #[test]
+    fn hides_a_url_password_with_an_at_sign_that_runs_past_a_space() {
+        assert_eq!(
+            show(&["sh", "-c", "psql postgres://u:pa@ss wo@h/db"]),
+            "sh -c psql postgres://***"
+        );
+    }
+
+    #[test]
+    fn hides_the_rest_of_a_shell_string_after_a_credential_in_a_query() {
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/?token='alpha beta' -o x"]),
+            "sh -c curl https://h/?token=***"
+        );
+    }
+
+    #[test]
+    fn hides_the_next_argument_when_the_hidden_rest_ends_with_a_secret_flag() {
+        assert_eq!(
+            show(&["sh", "-c", "app --token=a --password", "hunter2"]),
+            "sh -c app --token=*** ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/?token=x --password", "hunter2"]),
+            "sh -c curl https://h/?token=*** ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/?token=x;--password", "hunter2"]),
+            "sh -c curl https://h/?token=*** ***"
+        );
+    }
+
+    #[test]
+    fn hides_the_next_argument_after_an_assignment_that_ends_with_a_secret_flag() {
+        assert_eq!(
+            show(&["sh", "-c", "FOO=x app --password", "hunter2"]),
+            "sh -c FOO=*** ***"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "FOO=x curl -H Authorization:", "Bearer abc"]),
+            "sh -c FOO=*** ***"
+        );
+    }
+
+    #[test]
+    fn hides_a_url_user_name_that_runs_past_a_space() {
+        assert_eq!(
+            show(&["sh", "-c", "git clone https://'alpha hunter2'@h/r"]),
+            "sh -c git clone https://***"
+        );
+        assert_eq!(
+            show(&[
+                "sh",
+                "-c",
+                "git clone https://tok@github.com/o/r && npm i @types/node"
+            ]),
+            "sh -c git clone https://***@github.com/o/r && npm i @types/node"
+        );
+    }
+
+    #[test]
+    fn masks_a_long_word_of_separators_without_rescanning_it() {
+        let word = format!("--x{}", "=x".repeat(20_000));
+        let started = std::time::Instant::now();
+        show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+    }
+
+    #[test]
+    fn finds_a_query_secret_whatever_the_value_holds() {
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/?token='a:b@c hunter2'"]),
+            "sh -c curl https://***"
+        );
+    }
+
+    #[test]
+    fn reads_a_double_ampersand_after_a_query_as_the_end_of_the_command() {
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/?q=1&&FOO=x run"]),
+            "sh -c curl https://h/?q=1&&FOO=*** run"
+        );
+        assert_eq!(
+            show(&["open", "https://h/?q=1&mode=dev"]),
+            "open https://h/?q=1&mode=dev"
         );
     }
 
