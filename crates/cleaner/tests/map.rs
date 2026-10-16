@@ -191,7 +191,7 @@ fn knows_a_place_is_still_there_only_as_the_map_found_it() {
     assert!(still_there(home, &cut.path, cut.identity));
 
     // Made again in its place, a file is another one.
-    fs::remove_file(&trip.path).expect("removed");
+    fs::rename(&trip.path, home.join("Movies/old-trip.mov")).expect("moved aside");
     write(&trip.path, b"again");
     assert!(!still_there(home, &trip.path, trip.identity));
     // A link in a folder's place is never gone through, even to it.

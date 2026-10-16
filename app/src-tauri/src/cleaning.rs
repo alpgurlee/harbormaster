@@ -375,6 +375,10 @@ impl Cleaning {
                 .ok_or(Refusal::Unlisted)?;
             (map.root.path.clone(), place.path.clone(), place.identity)
         };
+        // Finder is told a path as text, so one that isn't would be told as another.
+        if path.to_str().is_none() {
+            return Err(failed("this path can't be shown in Finder"));
+        }
         // Looked at once the lock is let go: it reads the disk.
         if !harbormaster_cleaner::still_there(&home, &path, identity) {
             return Err(Refusal::Changed);
@@ -559,7 +563,9 @@ fn failed(error: impl Display) -> Refusal {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
+    use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -668,11 +674,50 @@ mod tests {
         let (_place, home) = home_with_a_film();
         let cleaning = Cleaning::default();
         let film = home.join("Movies/trip.mov");
+        let cache = finding("/Users/dev/.npm/_cacache");
+        let scan = scanned(&cleaning, vec![cache.clone()]);
 
         let token = cleaning.keep_map(mapped(&home));
 
+        assert_ne!(scan, token);
+        assert!(cleaning.lists(&cache.path));
         assert!(!cleaning.lists(&film));
         assert_eq!(chosen(&cleaning, token, &[film]), Err(Refusal::Expired));
+        assert_eq!(
+            chosen(&cleaning, scan, std::slice::from_ref(&cache.path)),
+            Ok(vec![cache])
+        );
+    }
+
+    #[test]
+    fn never_shows_in_finder_a_path_finder_would_be_told_another_way() {
+        let cleaning = Cleaning::default();
+        let place = |id, path: PathBuf, inside| Area {
+            id,
+            name: String::new(),
+            bytes: 0,
+            folder: true,
+            short: None,
+            inside,
+            rest: 0,
+            folded: false,
+            path,
+            identity: Identity::default(),
+        };
+        let odd = PathBuf::from(OsStr::from_bytes(b"/Users/dev/caf\xe9"));
+        let root = place(
+            0,
+            PathBuf::from("/Users/dev"),
+            vec![place(1, odd, Vec::new())],
+        );
+
+        let token = cleaning.keep_map(root);
+
+        assert!(
+            matches!(cleaning.mapped(token, 1), Err(Refusal::Failed { .. })),
+            "{:?}",
+            cleaning.mapped(token, 1)
+        );
     }
 
     #[test]
