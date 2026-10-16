@@ -86,7 +86,7 @@ fn workers_for(open_files: u64) -> usize {
 /// The blocks a folder's tree takes: each hard-linked file once, never
 /// following a link, and never onto another disk. Anything that would leave
 /// the count short fails it instead: a stop, a tree deeper than `DEEPEST`, or
-/// running out of open files.
+/// a folder it can't read.
 pub(crate) fn size(dir: &Dir, stop: &AtomicBool) -> io::Result<u64> {
     let top = dir.metadata()?;
     Ok(blocks(&top) + below(dir, top.st_dev, 0, &mut HashSet::new(), stop)?)
@@ -105,11 +105,7 @@ fn below(
     if depth >= DEEPEST {
         return Err(io::Error::other("the folder goes deeper than is measured"));
     }
-    let entries = match dir.entries_while(|| !stop.load(Ordering::Relaxed)) {
-        Ok(entries) => entries,
-        Err(error) if out_of_files(&error) => return Err(error),
-        Err(_) => return Ok(0),
-    };
+    let entries = dir.entries_while(|| !stop.load(Ordering::Relaxed))?;
     let mut total = 0;
     for (name, stat) in entries {
         if stop.load(Ordering::Relaxed) {
@@ -119,11 +115,8 @@ fn below(
             continue;
         }
         if walk::is_folder(&stat) {
-            let child = match dir.child_if_same(&name, &stat) {
-                Ok(Some(child)) => child,
-                Ok(None) => continue,
-                Err(error) if out_of_files(&error) => return Err(error),
-                Err(_) => continue,
+            let Some(child) = dir.child_if_same(&name, &stat)? else {
+                continue;
             };
             total += blocks(&stat) + below(&child, device, depth + 1, linked, stop)?;
         } else if stat.st_nlink <= 1 || linked.insert(stat.st_ino) {
@@ -134,10 +127,6 @@ fn below(
         return Err(io::ErrorKind::Interrupted.into());
     }
     Ok(total)
-}
-
-fn out_of_files(error: &io::Error) -> bool {
-    matches!(error.raw_os_error(), Some(libc::EMFILE | libc::ENFILE))
 }
 
 fn blocks(stat: &libc::stat) -> u64 {

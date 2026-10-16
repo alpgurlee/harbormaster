@@ -69,11 +69,32 @@ impl Dir {
             unsafe { libc::close(raw) };
             return Err(error);
         }
+        let listed = self.read_all(stream, &mut keep_going);
+        // SAFETY: closes the stream and the handle it owns, once.
+        unsafe { libc::closedir(stream) };
+        listed
+    }
+
+    /// The entries `stream` lists. An entry that vanished meanwhile is left
+    /// out; any other failure fails the listing, so it is never taken as whole.
+    fn read_all(
+        &self,
+        stream: *mut libc::DIR,
+        keep_going: &mut impl FnMut() -> bool,
+    ) -> io::Result<Vec<(OsString, libc::stat)>> {
         let mut found = Vec::new();
         while keep_going() {
-            // SAFETY: `stream` stays open until `closedir` below.
+            // readdir reports a failure only through errno, so clear it first.
+            // SAFETY: errno() points at this thread's errno.
+            unsafe { *errno() = 0 };
+            // SAFETY: `stream` is open; the caller closes it after this returns.
             let entry = unsafe { libc::readdir(stream) };
             if entry.is_null() {
+                // SAFETY: as above, read right after readdir.
+                let code = unsafe { *errno() };
+                if code != 0 {
+                    return Err(io::Error::from_raw_os_error(code));
+                }
                 break;
             }
             // SAFETY: readdir returned an entry whose name is NUL-terminated.
@@ -81,12 +102,12 @@ impl Dir {
             if matches!(name.to_bytes(), b"." | b"..") {
                 continue;
             }
-            if let Ok(stat) = self.stat(name) {
-                found.push((OsString::from_vec(name.to_bytes().to_vec()), stat));
+            match self.stat(name) {
+                Ok(stat) => found.push((OsString::from_vec(name.to_bytes().to_vec()), stat)),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
             }
         }
-        // SAFETY: closes the stream and the handle it owns, once.
-        unsafe { libc::closedir(stream) };
         Ok(found)
     }
 
@@ -149,6 +170,18 @@ pub(crate) fn is_folder(stat: &libc::stat) -> bool {
 /// Whether `stat` describes a link.
 pub(crate) fn is_link(stat: &libc::stat) -> bool {
     stat.st_mode & libc::S_IFMT == libc::S_IFLNK
+}
+
+#[cfg(target_os = "macos")]
+fn errno() -> *mut libc::c_int {
+    // SAFETY: __error has no preconditions; it returns this thread's errno.
+    unsafe { libc::__error() }
+}
+
+#[cfg(target_os = "linux")]
+fn errno() -> *mut libc::c_int {
+    // SAFETY: __errno_location has no preconditions; it returns this thread's errno.
+    unsafe { libc::__errno_location() }
 }
 
 fn plain_path() -> io::Error {
