@@ -282,8 +282,19 @@ fn script_position(rest: &[String]) -> Option<usize> {
     while let Some(arg) = rest.get(at) {
         match arg.as_str() {
             "--" => return (at + 1 < rest.len()).then_some(at + 1),
-            // Code on the command line rather than a script file.
-            "-e" | "--eval" | "-p" | "--print" | "-c" => return None,
+            // Code on the command line rather than a script file, alone,
+            // bundled (`-pe`) or with the code attached (`--eval=…`).
+            "--eval" | "--print" => return None,
+            option if option.starts_with("--eval=") || option.starts_with("--print=") => {
+                return None;
+            }
+            option
+                if !option.starts_with("--")
+                    && option.starts_with('-')
+                    && option[1..].contains(['e', 'p', 'c']) =>
+            {
+                return None;
+            }
             option if VALUE_OPTIONS.contains(&option) => at += 2,
             option if option.starts_with('-') => at += 1,
             _ => return Some(at),
@@ -564,6 +575,14 @@ mod tests {
         assert!(!supervises(
             "python3",
             &["python3", "-c", "import manage", "runserver"]
+        ));
+        assert!(!supervises(
+            "node",
+            &["node", "-pe", "1 // /app/node_modules/next/x"]
+        ));
+        assert!(!supervises(
+            "node",
+            &["node", "--eval=1", "/app/node_modules/next/x"]
         ));
     }
 
