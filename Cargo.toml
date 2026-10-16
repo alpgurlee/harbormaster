@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/platform", "crates/engine", "crates/cli", "app/src-tauri"]
+members = ["crates/platform", "crates/engine", "crates/cleaner", "crates/cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ repository = "https://github.com/alpgurlee/harbormaster"
 [workspace.dependencies]
 harbormaster-platform = { path = "crates/platform" }
 harbormaster-engine = { path = "crates/engine" }
+harbormaster-cleaner = { path = "crates/cleaner" }
 ab_glyph = "=0.2.32"
 anyhow = "=1.0.104"
 clap = { version = "=4.6.7", features = ["derive"] }

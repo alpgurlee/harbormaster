@@ -1,0 +1,251 @@
+use std::fs::{self, File};
+use std::os::unix::fs::symlink;
+use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, SystemTime};
+
+use harbormaster_cleaner::{Finding, Group, Kind, scan};
+
+const MIB: usize = 1024 * 1024;
+
+fn write(path: &Path, bytes: usize) {
+    let folder = path.parent().expect("a file inside a folder");
+    fs::create_dir_all(folder).expect("the folder should be created");
+    fs::write(path, vec![7u8; bytes]).expect("the file should be written");
+}
+
+/// Temp folders sit under `/var`, a link to `/private/var`; the cleaner only
+/// starts from a real path.
+fn scanned(home: &Path) -> Vec<Finding> {
+    let real = home.canonicalize().expect("the temp folder should exist");
+    scan(&real, &AtomicBool::new(false)).expect("the scan should start")
+}
+
+fn named<'a>(findings: &'a [Finding], name: &str) -> Option<&'a Finding> {
+    findings.iter().find(|finding| finding.name == name)
+}
+
+#[test]
+fn finds_and_measures_what_the_catalog_names() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join(".npm/_cacache/content/a"), 2 * MIB);
+    write(&home.path().join("Library/Caches/pip/http/b"), 3 * MIB / 2);
+
+    let findings = scanned(home.path());
+
+    let npm = named(&findings, "npm").unwrap();
+    assert_eq!(
+        (npm.group, npm.kind, npm.picked),
+        (Group::Packages, Kind::Rebuildable, true)
+    );
+    assert_eq!(
+        npm.path,
+        home.path().canonicalize().unwrap().join(".npm/_cacache")
+    );
+    assert!(npm.bytes >= 2 * MIB as u64, "{npm:?}");
+    assert!(named(&findings, "pip").unwrap().bytes >= 3 * MIB as u64 / 2);
+    assert!(named(&findings, "Gradle").is_none(), "{findings:?}");
+}
+
+#[test]
+fn never_follows_a_link() {
+    let home = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write(&outside.path().join("big"), 8 * MIB);
+    write(&home.path().join(".npm/_cacache/small"), 3 * MIB / 2);
+    symlink(
+        outside.path().join("big"),
+        home.path().join(".npm/_cacache/link"),
+    )
+    .unwrap();
+    fs::create_dir_all(home.path().join("Library/Caches")).unwrap();
+    symlink(outside.path(), home.path().join("Library/Caches/pip")).unwrap();
+
+    let findings = scanned(home.path());
+
+    assert!(named(&findings, "npm").unwrap().bytes < 8 * MIB as u64);
+    assert!(named(&findings, "pip").is_none(), "{findings:?}");
+}
+
+#[test]
+fn never_reaches_a_place_through_a_linked_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write(&outside.path().join("Caches/pip/data"), 2 * MIB);
+    symlink(outside.path(), home.path().join("Library")).unwrap();
+
+    assert!(named(&scanned(home.path()), "pip").is_none());
+}
+
+#[test]
+fn counts_a_hard_linked_file_once() {
+    let home = tempfile::tempdir().unwrap();
+    let one = home.path().join(".npm/_cacache/one");
+    write(&one, 2 * MIB);
+    fs::hard_link(&one, home.path().join(".npm/_cacache/two")).unwrap();
+
+    let bytes = named(&scanned(home.path()), "npm").unwrap().bytes;
+
+    assert!((2 * MIB as u64..4 * MIB as u64).contains(&bytes), "{bytes}");
+}
+
+#[test]
+fn offers_the_caches_of_apps_but_never_apples() {
+    let home = tempfile::tempdir().unwrap();
+    for name in ["com.spotify.client", "com.apple.Safari", "CloudKit"] {
+        write(
+            &home.path().join("Library/Caches").join(name).join("data"),
+            3 * MIB / 2,
+        );
+    }
+
+    let findings = scanned(home.path());
+
+    let spotify = named(&findings, "com.spotify.client").unwrap();
+    assert_eq!((spotify.group, spotify.picked), (Group::Apps, true));
+    assert!(named(&findings, "com.apple.Safari").is_none());
+    assert!(named(&findings, "CloudKit").is_none());
+}
+
+#[test]
+fn never_picks_the_users_own_work_or_what_cant_come_back() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home
+            .path()
+            .join("Library/Developer/Xcode/Archives/2026-01-02/App.xcarchive/Info.plist"),
+        3 * MIB / 2,
+    );
+    write(&home.path().join(".Trash/old.txt"), 3 * MIB / 2);
+
+    let findings = scanned(home.path());
+
+    let archive = named(&findings, "2026-01-02").unwrap();
+    assert_eq!(
+        (archive.group, archive.kind, archive.picked),
+        (Group::Xcode, Kind::Personal, false)
+    );
+    let trash = named(&findings, "Trash").unwrap();
+    assert_eq!(
+        (trash.group, trash.kind, trash.picked),
+        (Group::Trash, Kind::Discarded, false)
+    );
+}
+
+#[test]
+fn keeps_the_device_symbols_used_last() {
+    let home = tempfile::tempdir().unwrap();
+    let support = home
+        .path()
+        .join("Library/Developer/Xcode/iOS DeviceSupport");
+    write(&support.join("16.4 (20E247)/Symbols/a"), 3 * MIB / 2);
+    write(&support.join("17.5 (21F79)/Symbols/a"), 3 * MIB / 2);
+    let older = SystemTime::now() - Duration::from_secs(86_400);
+    File::open(support.join("16.4 (20E247)"))
+        .unwrap()
+        .set_modified(older)
+        .unwrap();
+
+    let findings = scanned(home.path());
+
+    assert!(named(&findings, "16.4 (20E247)").unwrap().picked);
+    assert!(!named(&findings, "17.5 (21F79)").unwrap().picked);
+}
+
+#[test]
+fn lists_each_group_together_largest_first() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join(".npm/_cacache/a"), 3 * MIB / 2);
+    write(&home.path().join("Library/Caches/pip/a"), 3 * MIB);
+    write(&home.path().join("Library/Logs/a.log"), 2 * MIB);
+
+    let order: Vec<String> = scanned(home.path())
+        .into_iter()
+        .map(|finding| finding.name)
+        .collect();
+
+    assert_eq!(order, ["pip", "npm", "Logs"]);
+}
+
+#[test]
+fn leaves_out_what_is_too_small_to_matter() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join("Library/Caches/pip/a"), 10_000);
+
+    assert!(named(&scanned(home.path()), "pip").is_none());
+}
+
+#[test]
+fn starts_only_from_a_real_home_folder() {
+    let place = tempfile::tempdir().unwrap();
+    let real = place.path().canonicalize().unwrap();
+    write(&real.join("home/.npm/_cacache/a"), 2 * MIB);
+    symlink(real.join("home"), real.join("link")).unwrap();
+
+    assert!(scan(&real.join("link"), &AtomicBool::new(false)).is_err());
+    assert!(scan(Path::new("relative/home"), &AtomicBool::new(false)).is_err());
+}
+
+#[test]
+fn takes_only_folders_for_apps_and_device_symbols() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home.path().join("Library/Caches/com.example.data"),
+        2 * MIB,
+    );
+    let support = home
+        .path()
+        .join("Library/Developer/Xcode/iOS DeviceSupport");
+    write(&support.join("16.4 (20E247)/Symbols/a"), 3 * MIB / 2);
+    write(&support.join("17.5 (21F79)/Symbols/a"), 3 * MIB / 2);
+    let older = SystemTime::now() - Duration::from_secs(86_400);
+    File::open(support.join("16.4 (20E247)"))
+        .unwrap()
+        .set_modified(older)
+        .unwrap();
+    write(&support.join(".DS_Store"), 2 * MIB);
+
+    let findings = scanned(home.path());
+
+    assert!(named(&findings, "com.example.data").is_none());
+    assert!(named(&findings, ".DS_Store").is_none());
+    assert!(!named(&findings, "17.5 (21F79)").unwrap().picked);
+}
+
+#[test]
+fn keeps_jetbrains_local_history_as_the_users_own() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home
+            .path()
+            .join("Library/Caches/JetBrains/IntelliJIdea2026.2/LocalHistory/changes.storageData"),
+        2 * MIB,
+    );
+
+    let findings = scanned(home.path());
+
+    let jetbrains = named(&findings, "JetBrains IDEs").unwrap();
+    assert_eq!((jetbrains.kind, jetbrains.picked), (Kind::Personal, false));
+}
+
+#[test]
+fn measures_nothing_once_told_to_stop() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join(".npm/_cacache/a"), 2 * MIB);
+    let real = home.path().canonicalize().unwrap();
+
+    let findings = scan(&real, &AtomicBool::new(true)).unwrap();
+
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn leaves_out_a_place_too_deep_to_measure_in_full() {
+    let home = tempfile::tempdir().unwrap();
+    let cache = home.path().join(".npm/_cacache");
+    write(&cache.join("top"), 2 * MIB);
+    let deep = (0..70).fold(cache.clone(), |path, _| path.join("d"));
+    write(&deep.join("bottom"), 2 * MIB);
+
+    assert!(named(&scanned(home.path()), "npm").is_none());
+}

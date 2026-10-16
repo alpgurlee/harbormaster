@@ -1570,11 +1570,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "harbormaster-cleaner"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "tempfile",
+]
+
+[[package]]
 name = "harbormaster-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "harbormaster-cleaner",
  "harbormaster-engine",
  "harbormaster-platform",
  "libc",

@@ -1,3 +1,4 @@
+mod clean;
 mod format;
 mod stop;
 mod why;
@@ -5,6 +6,7 @@ mod why;
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::IpAddr;
 use std::process::ExitCode;
+use std::sync::atomic::AtomicBool;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -71,6 +73,12 @@ enum Command {
         #[arg(long, default_value_t = 5, value_name = "SECONDS")]
         wait: u64,
     },
+    /// Show the caches, logs and other leftovers that could go; removes nothing yet
+    Clean {
+        /// Print machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -89,6 +97,7 @@ fn main() -> ExitCode {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),
         Some(Command::Why { port }) => explain(port),
+        Some(Command::Clean { json }) => survey(json),
         Some(Command::Stop {
             port,
             pid,
@@ -172,6 +181,20 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
         row.insert(0, format!("{:?}", service.classification).to_lowercase());
     }
     row
+}
+
+fn survey(json: bool) -> anyhow::Result<u8> {
+    let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
+    let findings = harbormaster_cleaner::scan(&home, &AtomicBool::new(false))
+        .with_context(|| format!("could not look through {}", home.display()))?;
+    if json {
+        println!("{}", clean::document(&findings)?);
+        return Ok(0);
+    }
+    for line in clean::lines(&findings, &home) {
+        println!("{line}");
+    }
+    Ok(0)
 }
 
 fn explain(port: u16) -> anyhow::Result<u8> {
