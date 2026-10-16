@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cleaner;
+mod cleaning;
 mod commands;
 mod panel;
 mod quitting;
@@ -25,6 +27,10 @@ fn main() {
             commands::force_stop,
             commands::quit_app_preview,
             commands::quit_app,
+            commands::open_cleaner,
+            commands::clean_scan,
+            commands::clean_run,
+            commands::clean_stop,
             commands::resize_panel,
             commands::hide_panel,
             commands::quit,
@@ -36,6 +42,7 @@ fn main() {
             app.manage(panel::Anchor::default());
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
+            app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             panel::create(app.handle())?;
             tray::create(app.handle())?;
             app.manage(scanning::start(app.handle().clone()));

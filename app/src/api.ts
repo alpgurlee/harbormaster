@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Holder, Protection, Update } from "./types";
+import type { Holder, Protection, RunEvent, ScanEvent, Update } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -51,3 +51,20 @@ export const quitAppPreview = (name: string) => invoke<QuitPreview>("quit_app_pr
 export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");
+export const openCleaner = () => invoke<void>("open_cleaner");
+
+/** Rejects with a `CleanRefusal`; the findings come as the last event. */
+export function cleanScan(onEvent: (event: ScanEvent) => void): Promise<void> {
+  const channel = new Channel<ScanEvent>();
+  channel.onmessage = onEvent;
+  return invoke("clean_scan", { channel });
+}
+
+/** Removes the findings at `paths`, which the scan under `token` listed. */
+export function cleanRun(token: number, paths: string[], onEvent: (event: RunEvent) => void): Promise<void> {
+  const channel = new Channel<RunEvent>();
+  channel.onmessage = onEvent;
+  return invoke("clean_run", { token, paths, channel });
+}
+
+export const cleanStop = () => invoke<void>("clean_stop");

@@ -1556,6 +1556,7 @@ name = "harbormaster-app"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "harbormaster-cleaner",
  "harbormaster-engine",
  "harbormaster-platform",
  "objc2",

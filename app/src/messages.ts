@@ -94,6 +94,56 @@ export interface Messages {
   quitGone: string;
   quitChanged: string;
   wontQuit: string;
+  cleanLooking: string;
+  cleanMeasured: string;
+  cleanFoundSoFar: string;
+  cleanChosen: string;
+  cleanScanAgain: string;
+  cleanNothing: string;
+  groupProjects: string;
+  groupPackages: string;
+  groupXcode: string;
+  groupApps: string;
+  groupLogs: string;
+  groupTrash: string;
+  aboutProjects: string;
+  aboutPackages: string;
+  aboutXcode: string;
+  aboutApps: string;
+  aboutLogs: string;
+  aboutTrash: string;
+  groupChosen: string;
+  inUseBy: string;
+  lastTouched: string;
+  goesToTrash: string;
+  emptiedForGood: string;
+  usedLast: string;
+  items: Plural;
+  cleanEllipsis: string;
+  confirmClean: string;
+  confirmDeleted: Plural;
+  confirmTrashed: Plural;
+  confirmEmptied: string;
+  confirmChecked: string;
+  removing: string;
+  freed: string;
+  cleanedItems: Plural;
+  leftItems: Plural;
+  outcomeDeleted: string;
+  outcomeTrashed: string;
+  outcomeLeft: string;
+  outcomeFailedWith: string;
+  outcomeNotReached: string;
+  outcomeInterrupted: string;
+  whyOutsideHome: string;
+  whyChanged: string;
+  whyNotReached: string;
+  whyInUse: string;
+  whyUnchecked: string;
+  cleanBusy: string;
+  cleanClosed: string;
+  cleanExpired: string;
+  cleanUnlisted: string;
 }
 
 export const en: Messages = {
@@ -188,6 +238,56 @@ export const en: Messages = {
   quitGone: "{name} isn't running anymore.",
   quitChanged: "It changed since you looked. Look again before quitting it.",
   wontQuit: "Harbormaster won't quit this: {reason}.",
+  cleanLooking: "Looking for projects and caches…",
+  cleanMeasured: "Measured {done} of {total} places",
+  cleanFoundSoFar: "{bytes} found so far",
+  cleanChosen: "chosen to clean up, of {total} found",
+  cleanScanAgain: "Scan again",
+  cleanNothing: "Nothing to clean up.",
+  groupProjects: "Projects",
+  groupPackages: "Package caches",
+  groupXcode: "Xcode",
+  groupApps: "App caches",
+  groupLogs: "Logs",
+  groupTrash: "Trash",
+  aboutProjects: "Build outputs of projects left alone for 30 days. npm install or cargo build makes them again.",
+  aboutPackages: "Downloads your package managers keep. They come back when needed.",
+  aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
+  aboutApps: "Caches apps fill as they run, and fill again.",
+  aboutLogs: "What apps wrote down about their past runs.",
+  aboutTrash: "What you threw away. Emptying it is for good.",
+  groupChosen: "{chosen} of {count} chosen",
+  inUseBy: "In use by {who}",
+  lastTouched: "last touched {ago}",
+  goesToTrash: "goes to the Trash",
+  emptiedForGood: "emptied for good",
+  usedLast: "used most recently",
+  items: { one: "{count} item", other: "{count} items" },
+  cleanEllipsis: "Clean up…",
+  confirmClean: "Clean up {bytes}?",
+  confirmDeleted: { one: "{count} item is deleted for good; its tool makes it again.", other: "{count} items are deleted for good; their tools make them again." },
+  confirmTrashed: { one: "{count} item goes to the Trash, where you can put it back.", other: "{count} items go to the Trash, where you can put them back." },
+  confirmEmptied: "The Trash is emptied for good.",
+  confirmChecked: "Each item is checked again right before it goes; anything in use by then is left alone.",
+  removing: "Cleaning up… {done} of {total}",
+  freed: "{bytes} freed",
+  cleanedItems: { one: "{count} item cleaned up", other: "{count} items cleaned up" },
+  leftItems: { one: "{count} not cleaned up", other: "{count} not cleaned up" },
+  outcomeDeleted: "deleted",
+  outcomeTrashed: "moved to the Trash",
+  outcomeLeft: "left alone: {why}",
+  outcomeFailedWith: "failed: {why}",
+  outcomeNotReached: "stopped before its turn",
+  outcomeInterrupted: "stopped during cleanup; some contents may have been deleted",
+  whyOutsideHome: "it isn't in your home folder",
+  whyChanged: "another folder is in its place now",
+  whyNotReached: "a link or something else stands in its way",
+  whyInUse: "{who} is using it",
+  whyUnchecked: "what is using it couldn't be read",
+  cleanBusy: "A scan or clean-up is running already.",
+  cleanClosed: "The window was closed before the work could start.",
+  cleanExpired: "This list is out of date. Scan again to clean up.",
+  cleanUnlisted: "Something chosen wasn't in the list. Scan again to clean up.",
 };
 
 export const tr: Messages = {
@@ -282,4 +382,54 @@ export const tr: Messages = {
   quitGone: "{name} artık çalışmıyor.",
   quitChanged: "Sen baktıktan sonra değişti. Kapatmadan önce yeniden bak.",
   wontQuit: "Harbormaster bunu kapatmaz: {reason}.",
+  cleanLooking: "Projeler ve önbellekler aranıyor…",
+  cleanMeasured: "{total} yerden {done} tanesi ölçüldü",
+  cleanFoundSoFar: "Şimdiye dek {bytes} bulundu",
+  cleanChosen: "temizlemek için seçili; bulunan {total}",
+  cleanScanAgain: "Yeniden tara",
+  cleanNothing: "Temizlenecek bir şey yok.",
+  groupProjects: "Projeler",
+  groupPackages: "Paket önbellekleri",
+  groupXcode: "Xcode",
+  groupApps: "Uygulama önbellekleri",
+  groupLogs: "Kayıtlar",
+  groupTrash: "Çöp Sepeti",
+  aboutProjects: "30 gündür dokunulmayan projelerin derleme çıktıları. npm install ya da cargo build onları yeniden oluşturur.",
+  aboutPackages: "Paket yöneticilerinin sakladığı indirmeler. Gerektiğinde yeniden iner.",
+  aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
+  aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
+  aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
+  aboutTrash: "Attıkların. Boşaltmak kalıcıdır.",
+  groupChosen: "{count} öğeden {chosen} seçili",
+  inUseBy: "{who} kullanıyor",
+  lastTouched: "son dokunuş {ago}",
+  goesToTrash: "Çöp Sepeti'ne gider",
+  emptiedForGood: "kalıcı olarak boşaltılır",
+  usedLast: "en son kullanılan",
+  items: { one: "{count} öğe", other: "{count} öğe" },
+  cleanEllipsis: "Temizle…",
+  confirmClean: "{bytes} temizlensin mi?",
+  confirmDeleted: { one: "{count} öğe kalıcı olarak silinir; aracı onu yeniden oluşturur.", other: "{count} öğe kalıcı olarak silinir; araçları onları yeniden oluşturur." },
+  confirmTrashed: { one: "{count} öğe Çöp Sepeti'ne gider; oradan geri alınabilir.", other: "{count} öğe Çöp Sepeti'ne gider; oradan geri alınabilir." },
+  confirmEmptied: "Çöp Sepeti kalıcı olarak boşaltılır.",
+  confirmChecked: "Her öğe gitmeden hemen önce yeniden denetlenir; o an kullanımda olan bırakılır.",
+  removing: "Temizleniyor… {done}/{total}",
+  freed: "{bytes} boşaldı",
+  cleanedItems: { one: "{count} öğe temizlendi", other: "{count} öğe temizlendi" },
+  leftItems: { one: "{count} öğe temizlenmedi", other: "{count} öğe temizlenmedi" },
+  outcomeDeleted: "silindi",
+  outcomeTrashed: "Çöp Sepeti'ne taşındı",
+  outcomeLeft: "bırakıldı: {why}",
+  outcomeFailedWith: "başarısız: {why}",
+  outcomeNotReached: "sırası gelmeden durduruldu",
+  outcomeInterrupted: "temizlik sırasında durduruldu; içeriğin bir kısmı silinmiş olabilir",
+  whyOutsideHome: "ana klasörünün içinde değil",
+  whyChanged: "yerinde artık başka bir klasör var",
+  whyNotReached: "yolunda bir bağlantı ya da başka bir şey var",
+  whyInUse: "{who} kullanıyor",
+  whyUnchecked: "onu neyin kullandığı okunamadı",
+  cleanBusy: "Bir tarama ya da temizlik zaten sürüyor.",
+  cleanClosed: "İş başlamadan pencere kapandı.",
+  cleanExpired: "Bu liste eskidi. Temizlemek için yeniden tara.",
+  cleanUnlisted: "Seçilenlerden biri listede yoktu. Temizlemek için yeniden tara.",
 };

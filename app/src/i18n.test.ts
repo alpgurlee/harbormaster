@@ -38,3 +38,19 @@ describe("translator", () => {
     expect(localeOf("de")).toBe("en");
   });
 });
+
+describe("how long ago", () => {
+  it("counts days, then months, in each language", () => {
+    const day = 86_400_000;
+    const en = translator("en");
+    const tr = translator("tr");
+
+    expect([en.ago(3_600_000), en.ago(day), en.ago(12 * day), en.ago(75 * day)]).toEqual([
+      "today",
+      "yesterday",
+      "12 days ago",
+      "2 months ago",
+    ]);
+    expect([tr.ago(day), tr.ago(12 * day), tr.ago(75 * day)]).toEqual(["dün", "12 gün önce", "2 ay önce"]);
+  });
+});

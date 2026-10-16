@@ -273,11 +273,20 @@ describe("Panel", () => {
     expect(screen.getByText(/^Updated /)).toBeTruthy();
   });
 
-  it("keeps the cleaner and settings buttons off until their windows exist", () => {
+  it("opens the cleaner, and keeps settings off until its window exists", () => {
+    const onClean = vi.fn();
+    show({ onClean });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clean up" }));
+
+    expect(onClean).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: "Settings" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps the cleaner's button off where nothing can open it", () => {
     show();
 
     expect((screen.getByRole("button", { name: "Clean up" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Settings" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("waits for the first scan before saying nothing listens", () => {

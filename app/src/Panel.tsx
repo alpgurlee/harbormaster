@@ -26,9 +26,11 @@ export interface PanelProps {
   onOpen: (service: Service) => void;
   onStop: (service: Service) => void;
   onQuit: (app: AppUsage) => void;
+  /** Opens the cleaner; its button stays off without it. */
+  onClean?: () => void;
 }
 
-export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit }: PanelProps) {
+export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit, onClean }: PanelProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -43,7 +45,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   if (update === null) {
     return (
       <div className={styles.panel} hidden={hidden}>
-        <Header />
+        <Header onClean={onClean} />
         <p className={styles.note}>{i18n.t("looking")}</p>
       </div>
     );
@@ -104,7 +106,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
 
   return (
     <div className={styles.panel} hidden={hidden}>
-      <Header />
+      <Header onClean={onClean} />
       <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
@@ -168,18 +170,18 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   );
 }
 
-function Header() {
+function Header({ onClean }: { onClean?: () => void }) {
   const i18n = useI18n();
   return (
     <header className={styles.header}>
       <Mark className={styles.mark} />
       Harbormaster
       <span className={styles.tools}>
-        {/* Off until the cleaner and settings windows arrive. */}
-        <button type="button" className={styles.tool} disabled>
+        <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
           <Sweep />
           {i18n.t("clean")}
         </button>
+        {/* Off until the settings window arrives. */}
         <button type="button" className={styles.tool} aria-label={i18n.t("settings")} title={i18n.t("settings")} disabled>
           <Gear />
         </button>

@@ -13,6 +13,7 @@ tauri-build.workspace = true
 
 [dependencies]
 ab_glyph.workspace = true
+harbormaster-cleaner.workspace = true
 harbormaster-engine.workspace = true
 harbormaster-platform.workspace = true
 serde.workspace = true

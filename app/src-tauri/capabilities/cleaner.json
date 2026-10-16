@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "cleaner",
+  "description": "What the cleaner window may ask of the app: to scan, to remove what its scan listed, to stop, and to be dragged by its top.",
+  "windows": ["cleaner"],
+  "permissions": [
+    "allow-clean-scan",
+    "allow-clean-run",
+    "allow-clean-stop",
+    "core:window:allow-start-dragging"
+  ]
+}

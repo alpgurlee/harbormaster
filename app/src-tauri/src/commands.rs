@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use harbormaster_engine::Port;
@@ -6,10 +7,11 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::panel;
+use crate::cleaning::{Cleaning, Refusal, RunEvent, ScanEvent};
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning, Update};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
+use crate::{cleaner, panel};
 
 #[tauri::command]
 pub(crate) fn subscribe(channel: Channel<Update>, scanning: State<'_, Arc<Scanning>>) {
@@ -109,6 +111,66 @@ pub(crate) async fn quit_app_preview(name: String, app: AppHandle) -> Result<Qui
 #[tauri::command]
 pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || app.state::<Quits>().quit(token)).await
+}
+
+#[tauri::command]
+pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
+    cleaner::show(&app).map_err(|error| error.to_string())
+}
+
+/// Looks through this user's home for what could go; the findings come
+/// last, under the token removing some of them takes.
+#[tauri::command]
+pub(crate) async fn clean_scan(
+    channel: Channel<ScanEvent>,
+    window: WebviewWindow,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    // Taken before the work is queued, so closing the window stops it from here on.
+    let working = cleaning.begin(|| open(&window))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        working.scan(&|event| {
+            // A closed window stops the scan itself.
+            let _ = channel.send(event);
+        })
+    })
+    .await
+    .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
+/// Removes the findings at `paths`, which the scan under `token` listed;
+/// any other path refuses the whole request.
+#[tauri::command]
+pub(crate) async fn clean_run(
+    token: u64,
+    paths: Vec<PathBuf>,
+    channel: Channel<RunEvent>,
+    window: WebviewWindow,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    let working = cleaning.begin(|| open(&window))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        working.run(token, &paths, &mut |event| {
+            let _ = channel.send(event);
+        })
+    })
+    .await
+    .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
+/// Whether `window` is still there to see the work through; a closed one
+/// can't be asked, and a minimized one still counts.
+fn open(window: &WebviewWindow) -> bool {
+    window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
+}
+
+#[tauri::command]
+pub(crate) fn clean_stop(cleaning: State<'_, Arc<Cleaning>>) {
+    cleaning.stop();
 }
 
 /// Scans and waits for processes to exit run off the thread that draws.

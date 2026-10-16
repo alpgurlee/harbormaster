@@ -24,6 +24,7 @@ export function translator(locale: Locale) {
     new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits });
   const conjunction = new Intl.ListFormat(locale, { type: "conjunction" });
   const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
 
   const template = (key: keyof Messages, values: Values): string => {
     const message = messages[key];
@@ -68,6 +69,11 @@ export function translator(locale: Locale) {
     },
     time(milliseconds: number) {
       return clock.format(milliseconds);
+    },
+    /** `yesterday`, `12 days ago`, then months: how long a project has sat. */
+    ago(milliseconds: number) {
+      const days = Math.max(0, Math.floor(milliseconds / 86_400_000));
+      return days < 60 ? relative.format(-days, "day") : relative.format(-Math.floor(days / 30), "month");
     },
     /** The two largest units, as a glance needs. */
     uptime(seconds: number) {

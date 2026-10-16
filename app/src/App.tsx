@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
-import { hidePanel, inApp, openInBrowser, resizePanel, revealFolder } from "./api";
+import { hidePanel, inApp, openCleaner, openInBrowser, resizePanel, revealFolder } from "./api";
 import { Detail } from "./Detail";
 import { I18nProvider, localeOf } from "./i18n";
 import { projectOf, tintsOf } from "./model";
@@ -53,6 +53,10 @@ function open(service: Service) {
 
 function copy(url: string): Promise<void> {
   return navigator.clipboard.writeText(url);
+}
+
+function clean() {
+  openCleaner().catch(console.error);
 }
 
 function reveal(service: Service) {
@@ -115,6 +119,7 @@ export function App() {
             onOpen={open}
             onStop={askStop}
             onQuit={askQuit}
+            onClean={inApp ? clean : undefined}
           />
           {shown === null ? null : (
             <Detail

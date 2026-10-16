@@ -12,6 +12,7 @@
     "allow-force-stop",
     "allow-quit-app-preview",
     "allow-quit-app",
+    "allow-open-cleaner",
     "allow-resize-panel",
     "allow-hide-panel",
     "allow-quit"

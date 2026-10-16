@@ -1,0 +1,405 @@
+.window {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  background: var(--surface);
+  color: var(--text);
+  font: 13px var(--font);
+}
+
+/* The page runs up under the title bar, so the bar is where the window is held. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+:root[data-platform="mac"] .bar {
+  padding-left: 84px;
+}
+
+.title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.action {
+  height: 26px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.page {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 24px 24px;
+}
+
+.hero {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 14px;
+}
+
+.figure {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Each group's share of what was found, the chosen part full. */
+.spread {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.share {
+  position: relative;
+  flex-basis: 0;
+  min-width: 3px;
+  background: color-mix(in srgb, var(--tint) 24%, transparent);
+}
+
+.shareChosen {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--tint);
+}
+
+.groups {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--sheet);
+}
+
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 14px;
+}
+
+.check {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--brass);
+}
+
+.opener {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.groupText {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.groupName {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tint);
+}
+
+.about {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.size {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.chevron {
+  flex: none;
+  color: var(--muted);
+  transition: transform 120ms ease-out;
+}
+
+.opener[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.items {
+  display: grid;
+  margin: 0;
+  padding: 2px 14px 6px 41px;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.item + .item {
+  border-top: 1px solid var(--line);
+}
+
+.itemText {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+
+.itemName {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemNote {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemSize {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Something in use stays in the list, out of reach. */
+.item[data-held] .itemName,
+.item[data-held] .itemSize {
+  color: var(--muted);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 12px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.total {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.total strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.primary {
+  height: 30px;
+  margin-left: auto;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--brass);
+  color: var(--sheet);
+  font: inherit;
+  font-weight: 600;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+}
+
+.primary:focus-visible {
+  outline-color: var(--text);
+}
+
+.progress {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+  margin: 72px auto 0;
+  text-align: center;
+}
+
+.phase {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--track);
+}
+
+.fill {
+  width: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--brass);
+  transition: width 200ms ease-out;
+}
+
+/* Before anything is measured, how much there is to measure isn't known yet. */
+.track[data-waiting] .fill {
+  width: 30%;
+  animation: look 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes look {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(333%);
+  }
+}
+
+.detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  max-width: 420px;
+  margin: 72px auto 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.outcomes {
+  display: grid;
+  margin: 20px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.outcome {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.outcome .itemName {
+  flex: 1;
+  min-width: 0;
+}
+
+.outcome .itemNote {
+  flex: none;
+  max-width: 60%;
+  font-size: 11.5px;
+}
+
+/* What didn't go is what needs reading. */
+.outcome:not([data-gone]) .itemNote {
+  color: var(--brass);
+}
+
+.scrim {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-radius: 0;
+}
+
+.sheet {
+  max-width: 460px;
+  padding: 18px;
+}
+
+.consequences {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill,
+  .chevron {
+    transition: none;
+  }
+
+  .track[data-waiting] .fill {
+    animation: none;
+  }
+}
