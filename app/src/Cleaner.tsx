@@ -109,9 +109,21 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
     if (token === null) return;
     let live = true;
     let asking = false;
+    let again = false;
     let last = 0;
+    let later: ReturnType<typeof setTimeout> | undefined;
     const recheck = () => {
-      if (asking || Date.now() - last < RECHECK_EVERY_MS) return;
+      // Coming back while it looks, or too soon after, looks once more later.
+      if (asking) {
+        again = true;
+        return;
+      }
+      clearTimeout(later);
+      const wait = last + RECHECK_EVERY_MS - Date.now();
+      if (wait > 0) {
+        later = setTimeout(recheck, wait);
+        return;
+      }
       asking = true;
       last = Date.now();
       backend
@@ -125,11 +137,16 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
         .catch(console.error)
         .finally(() => {
           asking = false;
+          if (again && live) {
+            again = false;
+            recheck();
+          }
         });
     };
     window.addEventListener("focus", recheck);
     return () => {
       live = false;
+      clearTimeout(later);
       window.removeEventListener("focus", recheck);
     };
   }, [backend, token]);
@@ -137,6 +154,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const run = (found: Found) => {
     const going = found.findings.filter((finding) => chosen.has(finding.path));
     setConfirming(false);
+    // Looking again may have left nothing chosen; the scan stays for later.
+    if (going.length === 0) return;
     setView("overview");
     setStep({ kind: "removing", home: found.home, chosen: going, removals: [] });
     backend
@@ -459,7 +478,7 @@ function Confirm({ plan, onCancel, onConfirm }: { plan: Plan; onCancel: () => vo
           <button type="button" className={sheet.quiet} onClick={onCancel}>
             {i18n.t("cancel")}
           </button>
-          <button type="button" data-main className={sheet.danger} onClick={onConfirm}>
+          <button type="button" data-main className={sheet.danger} disabled={plan.count === 0} onClick={onConfirm}>
             {i18n.t("clean")}
           </button>
         </div>

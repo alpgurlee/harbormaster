@@ -234,6 +234,48 @@ describe("the cleaner window", () => {
     expect(screen.getByText("1 item")).toBeTruthy();
   });
 
+  it("looks again once the wait is over when coming back too soon", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const driver = fake();
+      show(driver.backend);
+      found(driver);
+      const focus = () =>
+        act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+      focus();
+      await act(async () => driver.rechecks[0].answer([shop, tool, npm, { ...pip, inUse: "java" }, archive, trash]));
+
+      // Java was quit at once, and the window came back within the wait.
+      act(() => vi.advanceTimersByTime(1_000));
+      focus();
+      expect(driver.rechecks).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(2_000));
+
+      expect(driver.rechecks).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans nothing once looking again leaves nothing chosen", async () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => driver.rechecks[0].answer(FINDINGS.map((finding) => ({ ...finding, inUse: "java" }))));
+
+    const go = within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" });
+    expect(go).toHaveProperty("disabled", true);
+    fireEvent.click(go);
+    expect(driver.runs).toHaveLength(0);
+  });
+
   it("keeps what the search hides as it was when choosing all shown", () => {
     const driver = fake();
     show(driver.backend);
