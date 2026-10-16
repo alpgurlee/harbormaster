@@ -180,10 +180,32 @@ const PROC_PIDUNIQIDENTIFIERINFO: c_int = 17;
 /// start time alone tell processes apart.
 fn exec_version(pid: libc::pid_t) -> io::Result<u32> {
     static ANSWERS: OnceLock<bool> = OnceLock::new();
-    let answers = *ANSWERS.get_or_init(|| {
-        libc::pid_t::try_from(std::process::id()).is_ok_and(|own| id_version(own).is_ok())
-    });
+    let answers = match ANSWERS.get() {
+        Some(&answers) => answers,
+        None => {
+            let own = libc::pid_t::try_from(std::process::id())
+                .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+            let probe = id_version(own);
+            let Some(answers) = verdict(&probe) else {
+                // Not settled yet, so nothing can be identified this round.
+                return probe;
+            };
+            *ANSWERS.get_or_init(|| answers)
+        }
+    };
     if answers { id_version(pid) } else { Ok(0) }
+}
+
+/// Only a success, or a flavor this kernel doesn't know, settles whether exec
+/// versions are available; any other failure may pass.
+fn verdict(probe: &io::Result<u32>) -> Option<bool> {
+    match probe {
+        Ok(_) => Some(true),
+        Err(error) if matches!(error.raw_os_error(), Some(libc::EINVAL | libc::ENOTSUP)) => {
+            Some(false)
+        }
+        Err(_) => None,
+    }
 }
 
 fn id_version(pid: libc::pid_t) -> io::Result<u32> {
@@ -306,7 +328,22 @@ fn mach_to_nanos(ticks: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::c_string;
+    use std::io;
+
+    use super::{c_string, verdict};
+
+    #[test]
+    fn decides_about_exec_versions_only_on_a_clear_answer() {
+        assert_eq!(verdict(&Ok(7)), Some(true));
+        assert_eq!(
+            verdict(&Err(io::Error::from_raw_os_error(libc::EINVAL))),
+            Some(false)
+        );
+        assert_eq!(
+            verdict(&Err(io::Error::from_raw_os_error(libc::EAGAIN))),
+            None
+        );
+    }
 
     #[test]
     fn c_string_stops_at_the_first_nul() {

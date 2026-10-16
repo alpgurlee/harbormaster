@@ -119,6 +119,9 @@ fn reason(service: &Service, protection: Protection) -> String {
         Protection::System => "it is part of the operating system".into(),
         Protection::OtherUser => "it runs as another user".into(),
         Protection::Session => "the port belongs to your shell, terminal or coding agent".into(),
+        Protection::Unverified => {
+            "some of its processes couldn't be read, so it can't be checked".into()
+        }
         Protection::Database => {
             "it runs a database; stop that with the database's own tools".into()
         }

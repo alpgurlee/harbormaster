@@ -69,6 +69,9 @@ pub enum Protection {
     OtherUser,
     /// The user's own shell, terminal or coding agent holds the socket.
     Session,
+    /// Some of its processes couldn't be read, so none of the above can be
+    /// ruled out.
+    Unverified,
     Database,
     /// A process outside the service holds its socket too, so stopping the
     /// service would not free the port.
@@ -217,6 +220,10 @@ impl Scanner {
             .iter()
             .any(|entry| entry.owner != Owner::CurrentUser);
 
+        let unreadable = members.iter().any(|entry| {
+            let details = details_of(entry.key);
+            details.exe.known().is_none() || details.args.known().is_none()
+        });
         // A part of the OS anywhere in the service keeps all of it out of reach.
         let os_component = std::iter::once(owner)
             .chain(members.iter().copied())
@@ -265,6 +272,8 @@ impl Scanner {
             Some(Protection::OtherUser)
         } else if os_component {
             Some(Protection::System)
+        } else if unreadable {
+            Some(Protection::Unverified)
         } else if service::is_session_boundary(owner, tree, args_of) {
             Some(Protection::Session)
         } else if database {
@@ -854,6 +863,42 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].protected, Some(Protection::System));
+    }
+
+    #[test]
+    fn protects_a_service_whose_processes_it_cannot_fully_read() {
+        let home = tempfile::tempdir().unwrap();
+        let mut hidden = proc(
+            30,
+            20,
+            "node",
+            "/usr/local/bin/node",
+            &["node", "/srv/worker.js"],
+            home.path(),
+        );
+        hidden.details.args = Field::Denied;
+        let procs = [
+            proc(10, 1, "zsh", "/bin/zsh", &["-zsh"], home.path()),
+            proc(
+                20,
+                10,
+                "node",
+                "/usr/local/bin/node",
+                &["node", "/srv/api.js"],
+                home.path(),
+            ),
+            hidden,
+        ];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(20, 4000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        assert_eq!(snapshot.services[0].protected, Some(Protection::Unverified));
     }
 
     #[test]
