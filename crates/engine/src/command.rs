@@ -128,6 +128,13 @@ fn mask_argument(argument: &str) -> (String, After) {
         } else {
             token.to_string()
         };
+        // `scheme://user:pa ss@host`: a password with a space, split in two.
+        if let Some(password) = dangling_password(&token)
+            && tokens.clone().any(|later| later.contains('@'))
+        {
+            words.push(format!("{}{HIDDEN}", &token[..password]));
+            return (words.join(" "), After::Nothing);
+        }
         let (text, after) = mask_token(&token);
         words.push(text);
         match after {
@@ -157,18 +164,32 @@ fn mask_token(token: &str) -> (String, After) {
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
         .collect();
     let mut hidden: Vec<Range<usize>> = Vec::new();
+    // A URL runs to the end of the word: its password may hold any of the
+    // characters a shell would split at.
+    let urls = url_starts(&normal);
+    for &start in &urls {
+        hide_url_secrets(&normal[start..], start, &mut hidden);
+    }
     let mut after = After::Nothing;
     let mut offset = 0;
-    // `&` stays inside URLs, where it separates query pairs.
-    for segment in normal.split([';', '|', '(', ')', '<', '>']) {
-        let rest_hidden = match url_start(segment) {
-            Some(url_at) => hide_around_url(segment, url_at, offset, normal.len(), &mut hidden),
-            None => hide_parts(segment, offset, normal.len(), &mut hidden),
-        };
-        if rest_hidden {
-            after = After::RestHidden;
+    for piece in normal.split(SHELL_OPERATORS) {
+        // The URL itself, or a pair of its query, ends at the next `&`. Any
+        // other piece is a new command to a shell.
+        let url = urls.iter().rev().find(|&&start| start <= offset);
+        let pair = url.is_some_and(|&start| {
+            offset == start
+                || (normal.as_bytes()[offset - 1] == b'&'
+                    && normal[start..offset].contains(['?', '#']))
+        });
+        if pair {
+            hide_secret_names(piece, offset, offset + piece.len(), &mut hidden);
+        } else {
+            if hide_secret_names(piece, offset, normal.len(), &mut hidden) {
+                after = After::RestHidden;
+            }
+            hide_plain_value(piece, offset, &urls, normal.len(), &mut hidden);
         }
-        offset += segment.len() + 1;
+        offset += piece.len() + 1;
     }
     let last = normal.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
     let flag = !last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer"));
@@ -184,84 +205,78 @@ fn mask_token(token: &str) -> (String, After) {
     (with_hidden(&normal, hidden), after)
 }
 
-/// Each `&`-separated part of a word without a URL.
-fn hide_parts(segment: &str, offset: usize, end: usize, hidden: &mut Vec<Range<usize>>) -> bool {
-    let mut start = offset;
-    let mut rest_hidden = false;
-    for part in segment.split('&') {
-        rest_hidden |= hide_assignment_secrets(part, start, end, hidden);
-        start += part.len() + 1;
+/// Where the password starts in `scheme://user:password` when no `@` follows
+/// in the same word.
+fn dangling_password(token: &str) -> Option<usize> {
+    let after_scheme = token.find("://")? + 3;
+    let rest = &token[after_scheme..];
+    if rest.contains('@') {
+        return None;
     }
-    rest_hidden
+    let colon = rest.find(':')?;
+    if rest[..colon].contains(['/', '?', '#']) {
+        return None;
+    }
+    Some(after_scheme + colon + 1)
 }
 
-/// Where a URL starts in a word: the scheme in front of its `://`.
-fn url_start(segment: &str) -> Option<usize> {
-    let scheme_end = segment.find("://")?;
-    let start = segment[..scheme_end]
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
-        .map_or(0, |at| at + 1);
-    Some(start)
+/// Where URLs start in a word: the scheme in front of each `://`.
+fn url_starts(text: &str) -> Vec<usize> {
+    text.match_indices("://")
+        .map(|(scheme_end, _)| {
+            text[..scheme_end]
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+                .map_or(0, |(at, c)| at + c.len_utf8())
+        })
+        .collect()
 }
 
-/// A URL and what surrounds it in one word.
-fn hide_around_url(
-    segment: &str,
-    url_at: usize,
+/// `--secret-flag=value`, `API_TOKEN=value`, `X-Api-Key:value` in one piece.
+/// Returns whether the rest of the argument has to go too.
+fn hide_secret_names(
+    piece: &str,
     offset: usize,
     end: usize,
     hidden: &mut Vec<Range<usize>>,
 ) -> bool {
-    let prefix = &segment[..url_at];
-    // `--api-key=https://…`, `API_TOKEN=https://…`: the URL is a secret's value.
-    if hide_assignment_secrets(prefix, offset, end, hidden) {
-        return true;
-    }
-    let url = &segment[url_at..];
-    // Without a query or fragment, `&` ends the URL and starts another command.
-    let url_length = if url.contains(['?', '#']) {
-        url.len()
-    } else {
-        url.find('&').unwrap_or(url.len())
-    };
-    if prefix.ends_with('=') && !prefix.starts_with('-') {
-        // `NAME=https://…`: the whole URL is that name's value.
-        hidden.push(offset + url_at..offset + url_at + url_length);
-    } else {
-        hide_url_secrets(&url[..url_length], offset + url_at, hidden);
-    }
-    match segment.get(url_at + url_length + 1..) {
-        Some(rest) => hide_parts(rest, offset + url_at + url_length + 1, end, hidden),
-        None => false,
-    }
-}
-
-/// `--secret-flag=value`, `API_TOKEN=value`, `X-Api-Key:value` in one word.
-/// Returns whether the rest of the argument has to go too. Any other
-/// `name=value` keeps its name only: it may be the environment.
-fn hide_assignment_secrets(
-    part: &str,
-    offset: usize,
-    end: usize,
-    hidden: &mut Vec<Range<usize>>,
-) -> bool {
-    for (at, separator) in part.match_indices(['=', ':']) {
+    for (at, separator) in piece.match_indices(['=', ':']) {
         // `Authorization:` ending the word has its value in the next one.
         if separator == ":" && offset + at + 1 == end {
             break;
         }
-        let name = &part[..at];
+        let name = &piece[..at];
         if is_secret_flag(name) || mentions_a_credential(name_at_end(name)) {
             hidden.push(offset + at + 1..end);
             return true;
         }
     }
-    if let Some(at) = part.find('=')
-        && !part.starts_with('-')
-    {
-        hidden.push(offset + at + 1..offset + part.len());
-    }
     false
+}
+
+/// Any other `name=value` keeps its name only: it may be the environment.
+/// When the value is a URL, all of the URL is the value.
+fn hide_plain_value(
+    piece: &str,
+    offset: usize,
+    urls: &[usize],
+    end: usize,
+    hidden: &mut Vec<Range<usize>>,
+) {
+    let Some(at) = piece.find('=') else {
+        return;
+    };
+    if piece.starts_with('-') {
+        return;
+    }
+    let value = offset + at + 1;
+    let value_end = if urls.contains(&value) {
+        end
+    } else {
+        offset + piece.len()
+    };
+    hidden.push(value..value_end);
 }
 
 /// A URL's user info, whole, and query values whose key names a credential.
@@ -734,6 +749,35 @@ mod tests {
         assert_eq!(
             show(&["open", "https://h/cb#access_token=abc&state=s"]),
             "open https://h/cb#access_token=***&state=s"
+        );
+    }
+
+    #[test]
+    fn survives_a_scheme_that_is_not_ascii() {
+        assert_eq!(show(&["x", "é://a@b"]), "x é://***@b");
+    }
+
+    #[test]
+    fn reads_a_url_to_the_end_of_the_word() {
+        assert_eq!(
+            show(&["git", "clone", "https://u:p&ss@h/r"]),
+            "git clone https://***@h/r"
+        );
+        assert_eq!(
+            show(&["psql", "postgres://u:pa(ss)@h/db"]),
+            "psql postgres://***@h/db"
+        );
+        assert_eq!(
+            show(&["sh", "-c", "curl https://h/x&API_TOKEN=y?z"]),
+            "sh -c curl https://h/x&API_TOKEN=***"
+        );
+    }
+
+    #[test]
+    fn hides_a_url_password_that_runs_past_a_space() {
+        assert_eq!(
+            show(&["sh", "-c", "psql postgres://u:pa ss@h/db"]),
+            "sh -c psql postgres://u:***"
         );
     }
 
