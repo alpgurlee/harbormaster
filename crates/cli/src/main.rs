@@ -210,10 +210,6 @@ fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Resu
         Ok(targets) => targets,
         Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
     };
-    if targets.is_empty() {
-        println!("It had already stopped.");
-        return Ok(0);
-    }
     let signals = Signals {
         send: &harbormaster_platform::signal,
         is_running: &harbormaster_platform::is_running,
@@ -235,6 +231,14 @@ fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Resu
                     grace.as_secs()
                 ))?));
     if forced {
+        // The wait, and the question, gave the server time to change.
+        let current = scan(&mut Scanner::default(), &home)?;
+        if let Err(refused) = harbormaster_engine::recheck(service, &current) {
+            for line in stop::report(service, &outcomes).0 {
+                println!("{line}");
+            }
+            return Ok(refuse(stop::refusal(&refused, &target)));
+        }
         for (key, outcome) in harbormaster_engine::stop(&left, Signal::Kill, KILL_GRACE, &signals) {
             if let Some(slot) = outcomes.iter_mut().find(|(target, _)| *target == key) {
                 slot.1 = outcome;

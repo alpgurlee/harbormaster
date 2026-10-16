@@ -83,29 +83,32 @@ pub fn order(service: &Service) -> Vec<ProcessKey> {
         .collect()
 }
 
-/// What may still be stopped of an approved service, looked at again right
-/// before the signals go out.
+/// The approved processes, deepest first, once a fresh look confirms that
+/// none of them now serves a protected service or one with processes nobody
+/// approved. Call it before every round of signals. Processes that already
+/// exited stay in the list; their signal reports them gone.
 pub fn recheck<'a>(approved: &Service, now: &'a Snapshot) -> Result<Vec<ProcessKey>, Refusal<'a>> {
-    let Some(current) = now
-        .services
-        .iter()
-        .find(|service| service.id == approved.id)
-    else {
-        return Ok(Vec::new());
-    };
-    if let Some(protection) = current.protected {
-        return Err(Refusal::Protected(current, protection));
-    }
     let approved_keys: HashSet<ProcessKey> =
         approved.processes.iter().map(|member| member.key).collect();
-    if current
-        .processes
-        .iter()
-        .any(|member| !approved_keys.contains(&member.key))
-    {
-        return Err(Refusal::Changed);
+    let touched = now.services.iter().filter(|service| {
+        service
+            .processes
+            .iter()
+            .any(|member| approved_keys.contains(&member.key))
+    });
+    for service in touched {
+        if let Some(protection) = service.protected {
+            return Err(Refusal::Protected(service, protection));
+        }
+        if service
+            .processes
+            .iter()
+            .any(|member| !approved_keys.contains(&member.key))
+        {
+            return Err(Refusal::Changed);
+        }
     }
-    Ok(order(current))
+    Ok(order(approved))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -345,12 +348,37 @@ mod tests {
     }
 
     #[test]
-    fn keeps_to_the_approved_processes_that_are_still_there() {
+    fn still_targets_approved_processes_that_left_their_service() {
         let approved = service(20, &[20, 30], 5173, LOOPBACK);
-        let now = snapshot(vec![service(20, &[20], 5173, LOOPBACK)]);
+        // npm exited on the request; the vite it started now stands alone.
+        let orphaned = snapshot(vec![service(30, &[30], 5173, LOOPBACK)]);
 
-        assert_eq!(recheck(&approved, &now).unwrap(), [key(20)]);
-        assert_eq!(recheck(&approved, &snapshot(Vec::new())).unwrap(), []);
+        assert_eq!(recheck(&approved, &orphaned).unwrap(), [key(30), key(20)]);
+        assert_eq!(
+            recheck(&approved, &snapshot(Vec::new())).unwrap(),
+            [key(30), key(20)]
+        );
+    }
+
+    #[test]
+    fn refuses_when_an_approved_process_now_serves_a_protected_service() {
+        let approved = service(20, &[20, 30], 5173, LOOPBACK);
+        let mut session = service(30, &[30], 5173, LOOPBACK);
+        session.protected = Some(Protection::Session);
+        let now = snapshot(vec![session]);
+
+        assert!(matches!(
+            recheck(&approved, &now),
+            Err(Refusal::Protected(_, Protection::Session))
+        ));
+    }
+
+    #[test]
+    fn refuses_when_another_service_took_in_an_approved_process() {
+        let approved = service(20, &[20, 30], 5173, LOOPBACK);
+        let now = snapshot(vec![service(40, &[40, 30], 8080, LOOPBACK)]);
+
+        assert!(matches!(recheck(&approved, &now), Err(Refusal::Changed)));
     }
 
     #[test]

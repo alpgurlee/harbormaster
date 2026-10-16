@@ -105,7 +105,7 @@ pub(crate) fn refusal(refusal: &Refusal<'_>, target: &Target) -> (Vec<String>, u
         ),
         Refusal::Changed => (
             vec![
-                "The server changed since it was shown, so nothing was stopped. Run the command again."
+                "The server changed since you approved it. Run the command again to see what is left."
                     .to_string(),
             ],
             REFUSED,
@@ -156,6 +156,12 @@ pub(crate) fn report(service: &Service, outcomes: &[(ProcessKey, Outcome)]) -> (
         })
         .collect();
     let name = printable(label(service));
+    if outcomes
+        .iter()
+        .all(|(_, outcome)| *outcome == Outcome::AlreadyGone)
+    {
+        return (vec![format!("{name} had already stopped.")], 0);
+    }
     if problems.is_empty() {
         return (vec![format!("Stopped {name}.")], 0);
     }
@@ -331,6 +337,20 @@ mod tests {
             ["Could not stop all of node:", "  20  still running"]
         );
         assert_eq!(status, 5);
+    }
+
+    #[test]
+    fn says_when_the_server_had_already_stopped() {
+        let (lines, status) = report(
+            &server(),
+            &[
+                (key(30), Outcome::AlreadyGone),
+                (key(20), Outcome::AlreadyGone),
+            ],
+        );
+
+        assert_eq!(lines, ["node had already stopped."]);
+        assert_eq!(status, 0);
     }
 
     #[test]
