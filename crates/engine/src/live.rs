@@ -25,9 +25,14 @@ pub fn scan(scanner: &mut Scanner, home: &Path) -> Result<Snapshot, Error> {
 }
 
 /// Every path this user's processes other than this one hold, such as
-/// working folders, programs and open files, each with its process's name.
+/// working folders, programs and open files, each with its process's name,
+/// and this one's own program, so nothing it runs from is taken from it.
 pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
     let own = std::process::id();
+    let program = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .ok()
+        .map(|path| (path, "Harbormaster".to_owned()));
     Ok(harbormaster_platform::whereabouts()?
         .into_iter()
         .filter(|process| process.key.pid.0 != own)
@@ -42,6 +47,7 @@ pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
                 .into_iter()
                 .map(move |path| (path, name.clone()))
         })
+        .chain(program)
         .collect())
 }
 

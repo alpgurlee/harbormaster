@@ -92,8 +92,7 @@ fn shelved(
 }
 
 /// The bundle at `relative` from `folder`, the last of it named in `dir`
-/// and stored as `stat`, if it is an app of the user's own: it has its
-/// Info.plist in its Contents, a file of its own rather than a link.
+/// and stored as `stat`, if it is an app of the user's own.
 fn candidate(
     dir: &Dir,
     relative: &Path,
@@ -102,16 +101,8 @@ fn candidate(
     busy: &[(PathBuf, String)],
 ) -> Option<Candidate> {
     let name = relative.file_name()?;
-    if !owned(stat) {
-        return None;
-    }
     let bundle = dir.child_if_same(name, stat).ok()??;
-    let info = bundle
-        .child(OsStr::new("Contents"))
-        .and_then(|contents| contents.item(OsStr::new("Info.plist")))
-        .and_then(|info| info.metadata())
-        .ok()?;
-    if !walk::is_file(&info) {
+    if !eligible(&bundle).ok()? {
         return None;
     }
     let path = folder.join(relative);
@@ -127,6 +118,18 @@ fn candidate(
         touched: None,
         emptied: false,
     })
+}
+
+/// Whether the open `bundle` is an app of the user's own: theirs, not
+/// locked, with its Info.plist in its Contents, a file of its own rather
+/// than a link. Asked of the very folder measured too, so what is offered
+/// is what was asked about.
+pub(crate) fn eligible(bundle: &Dir) -> io::Result<bool> {
+    let info = bundle
+        .child(OsStr::new("Contents"))?
+        .item(OsStr::new("Info.plist"))?
+        .metadata()?;
+    Ok(owned(&bundle.metadata()?) && walk::is_file(&info))
 }
 
 /// Whether the user may move what `stat` describes: it is theirs, and not
@@ -151,8 +154,12 @@ fn stem(name: &OsStr) -> String {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::fs;
+    use std::sync::atomic::AtomicBool;
 
-    use super::{SF_NOUNLINK, SF_RESTRICTED, is_bundle, owned};
+    use super::{SF_NOUNLINK, SF_RESTRICTED, is_bundle, owned, shelved};
+    use crate::measure;
+    use crate::walk::Dir;
 
     fn stat(uid: libc::uid_t, flags: u32) -> libc::stat {
         // SAFETY: a stat is plain integers, for which zero is valid.
@@ -177,6 +184,27 @@ mod tests {
         ] {
             assert!(!owned(&stat(user, flag)), "{flag:#x}");
         }
+    }
+
+    #[test]
+    fn measures_a_bundle_only_while_it_is_still_the_users_app() {
+        let place = tempfile::tempdir().unwrap();
+        let folder = place.path().canonicalize().unwrap();
+        fs::create_dir_all(folder.join("Big.app/Contents")).unwrap();
+        fs::write(folder.join("Big.app/Contents/Info.plist"), b"<plist/>").unwrap();
+        let root = Dir::open(&folder).unwrap();
+        let stop = AtomicBool::new(false);
+        let candidates = shelved(&root, &folder, &[], &stop).unwrap();
+        assert_eq!(candidates.len(), 1);
+
+        // Swapped, once seen, for a folder that isn't an app.
+        fs::rename(folder.join("Big.app"), folder.join("Old.app")).unwrap();
+        fs::create_dir_all(folder.join("Big.app/Contents/MacOS")).unwrap();
+        fs::write(folder.join("Big.app/Contents/MacOS/app"), vec![1; 1 << 20]).unwrap();
+
+        let found = measure::all(&root, candidates, &stop, &|_| {});
+
+        assert!(found.iter().all(|app| app.bytes == 0), "{found:?}");
     }
 
     #[test]

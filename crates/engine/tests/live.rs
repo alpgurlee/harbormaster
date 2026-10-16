@@ -83,3 +83,17 @@ fn shows_processes_as_a_stop_would_and_leaves_out_the_exited() {
     assert_eq!(members[0].pid, own);
     assert!(members[0].command.is_some());
 }
+
+#[test]
+fn holds_this_programs_own_file_while_it_runs() {
+    let own =
+        std::fs::canonicalize(std::env::current_exe().expect("this program")).expect("its path");
+
+    let held = harbormaster_engine::live::held().expect("what is held should be read");
+
+    assert!(
+        held.iter()
+            .any(|(path, who)| *path == own && who == "Harbormaster"),
+        "{own:?} in {held:?}"
+    );
+}

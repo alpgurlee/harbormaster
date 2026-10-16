@@ -6,7 +6,7 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Candidate, Finding, Identity, Measured};
+use crate::{Candidate, Finding, Group, Identity, Measured, apps};
 
 /// The most places measured at once.
 const WORKERS: usize = 4;
@@ -38,6 +38,9 @@ pub(crate) fn all(
                             break;
                         };
                         let sized = home.descend(&candidate.relative).and_then(|dir| {
+                            if candidate.group == Group::Applications && !apps::eligible(&dir)? {
+                                return Err(io::Error::other("no longer an app of the user's"));
+                            }
                             Ok((Identity::of(&dir.metadata()?), size(&dir, stop)?))
                         });
                         let bytes = sized.as_ref().map_or(0, |(_, bytes)| *bytes);
