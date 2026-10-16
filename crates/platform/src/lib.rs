@@ -29,6 +29,13 @@ pub fn whereabouts() -> Result<Vec<Whereabouts>, Error> {
     Ok(sys::whereabouts()?)
 }
 
+/// Moves the file or folder at `path` to the Trash, as Finder's Move to
+/// Trash does, so it can be put back, and says where it went. The path is
+/// followed as given, links in it too.
+pub fn trash(path: &std::path::Path) -> Result<std::path::PathBuf, Error> {
+    Ok(sys::trash(path)?)
+}
+
 /// Every process the OS reports, with usage figures where readable.
 pub fn processes() -> Result<Vec<ProcessEntry>, Error> {
     Ok(sys::processes()?)

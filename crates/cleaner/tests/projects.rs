@@ -1,48 +1,11 @@
-use std::fs::{self, File};
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
+use common::{DAY, MIB, Machine, TAG, age, machine, node_project, write};
 use harbormaster_cleaner::{Finding, Group, Survey, scan};
-
-const MIB: usize = 1024 * 1024;
-const DAY: Duration = Duration::from_secs(86_400);
-const TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55\n# a cache\n";
-
-fn write(path: &Path, bytes: &[u8]) {
-    fs::create_dir_all(path.parent().expect("a file inside a folder")).expect("the folder");
-    fs::write(path, bytes).expect("the file");
-}
-
-/// Sets everything directly in `project`, then the project itself, to `age` ago.
-fn age(project: &Path, age: Duration) {
-    let when = SystemTime::now() - age;
-    for entry in fs::read_dir(project).expect("the project") {
-        let path = entry.expect("an entry").path();
-        File::open(&path)
-            .expect("open")
-            .set_modified(when)
-            .expect("touch");
-    }
-    File::open(project)
-        .expect("open")
-        .set_modified(when)
-        .expect("touch");
-}
-
-struct Machine {
-    _place: tempfile::TempDir,
-    home: PathBuf,
-}
-
-fn machine() -> Machine {
-    let place = tempfile::tempdir().expect("a temp folder");
-    let home = place.path().canonicalize().expect("its real path");
-    Machine {
-        _place: place,
-        home,
-    }
-}
 
 fn survey(
     machine: &Machine,
@@ -74,17 +37,6 @@ fn named<'a>(findings: &'a [Finding], name: &str) -> Option<&'a Finding> {
     findings.iter().find(|finding| finding.name == name)
 }
 
-fn node_project(machine: &Machine, name: &str) -> PathBuf {
-    let project = machine.home.join("code").join(name);
-    write(&project.join("package.json"), b"{}");
-    write(
-        &project.join("node_modules/left-pad/index.js"),
-        &vec![1; 2 * MIB],
-    );
-    write(&project.join(".next/cache/a"), &vec![1; 2 * MIB]);
-    project
-}
-
 #[test]
 fn picks_the_build_outputs_of_a_project_left_alone_for_a_month() {
     let machine = machine();
@@ -97,6 +49,7 @@ fn picks_the_build_outputs_of_a_project_left_alone_for_a_month() {
     assert_eq!((modules.group, modules.picked), (Group::Projects, true));
     assert_eq!(modules.path, project.join("node_modules"));
     assert!(modules.touched.is_some());
+    assert!(!modules.emptied);
     assert!(named(&findings, "old-shop · .next").unwrap().picked);
 }
 

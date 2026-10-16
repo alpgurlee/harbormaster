@@ -94,7 +94,7 @@ fn shown(path: &Path, home: &Path) -> String {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use harbormaster_cleaner::{Finding, Group, Kind};
+    use harbormaster_cleaner::{Finding, Group, Identity, Kind};
 
     use super::lines;
 
@@ -118,6 +118,9 @@ mod tests {
             picked,
             in_use: None,
             touched: None,
+            project: None,
+            emptied: false,
+            identity: Identity::default(),
         }
     }
 

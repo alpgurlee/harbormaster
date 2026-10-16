@@ -8,7 +8,7 @@ use std::io::{self, Read};
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 const OPEN_FOLDER: libc::c_int =
     libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
@@ -57,6 +57,30 @@ impl Dir {
         let mut start = Vec::new();
         File::from(file).take(most).read_to_end(&mut start)?;
         Ok(start)
+    }
+
+    /// Where this folder is now, as the disk spells it, wherever it has
+    /// moved since it was opened.
+    pub(crate) fn path(&self) -> io::Result<PathBuf> {
+        let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+        // SAFETY: `self.0` is open and `buffer` has the PATH_MAX bytes F_GETPATH writes at most.
+        if unsafe { libc::fcntl(self.0.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        let path = CStr::from_bytes_until_nul(&buffer).map_err(io::Error::other)?;
+        Ok(PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+    }
+
+    /// Removes `name` inside this folder: a file, a link itself, or an
+    /// empty folder.
+    pub(crate) fn unlink(&self, name: &OsStr, folder: bool) -> io::Result<()> {
+        let name = CString::new(name.as_bytes())?;
+        let flags = if folder { libc::AT_REMOVEDIR } else { 0 };
+        // SAFETY: `self.0` is an open folder and `name` a valid C string.
+        if unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), flags) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     fn open_at(&self, name: &OsStr, flags: libc::c_int) -> io::Result<OwnedFd> {

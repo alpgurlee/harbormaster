@@ -158,6 +158,7 @@ impl Walk<'_> {
             in_use: None,
             project: Some(root),
             touched,
+            emptied: false,
         }
     }
 

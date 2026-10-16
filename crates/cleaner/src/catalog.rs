@@ -117,7 +117,7 @@ const APP_CACHES: &str = "Library/Caches";
 /// folders only. `path` is where `home` is, for showing.
 pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Candidate> {
     let mut found = Vec::new();
-    let at = |relative: &Path, group, kind, name: String, picked| Candidate {
+    let at = |relative: &Path, group, kind, name: String, picked, emptied| Candidate {
         group,
         kind,
         name,
@@ -127,6 +127,7 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
         in_use: None,
         project: None,
         touched: None,
+        emptied,
     };
     for place in PLACES {
         if stop.load(Ordering::Relaxed) {
@@ -144,6 +145,7 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
                 place.kind,
                 place.name.into(),
                 rebuildable,
+                place.kind != Kind::Personal,
             ));
             continue;
         }
@@ -158,6 +160,7 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
                 place.kind,
                 name,
                 picked,
+                false,
             ));
         }
     }
@@ -166,7 +169,14 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
         for (name, _) in folders(&caches, stop) {
             if is_app_folder(&name) {
                 let relative = Path::new(APP_CACHES).join(&name);
-                found.push(at(&relative, Group::Apps, Kind::Rebuildable, name, true));
+                found.push(at(
+                    &relative,
+                    Group::Apps,
+                    Kind::Rebuildable,
+                    name,
+                    true,
+                    true,
+                ));
             }
         }
     }

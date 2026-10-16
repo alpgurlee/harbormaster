@@ -1,10 +1,11 @@
 //! What a developer's machine can do without: caches its tools rebuild, the
-//! build outputs of projects left alone, logs, and the Trash. Finding is
-//! read-only; nothing here removes anything.
+//! build outputs of projects left alone, logs, and the Trash. A scan only
+//! looks; removal takes what the user confirmed, checking each item again.
 
 mod catalog;
 mod measure;
 mod projects;
+mod remove;
 mod walk;
 
 use std::ffi::{CStr, OsStr};
@@ -78,6 +79,65 @@ pub struct Finding {
     /// For a project's build output: when the project was last worked on,
     /// in seconds since the Unix epoch.
     pub touched: Option<u64>,
+    /// For a project's build output: the project it belongs to.
+    pub project: Option<PathBuf>,
+    /// Only what is inside goes; the folder itself stays, as the system or
+    /// the app that owns it expects it to be there. Never so for personal
+    /// things, which go to the Trash whole.
+    pub emptied: bool,
+    /// Which folder the scan measured, so that removal takes only that one.
+    #[serde(skip)]
+    pub identity: Identity,
+}
+
+/// A folder as the disk knows it, whatever it is called: its disk and its
+/// inode. The default is no folder at all, which nothing on disk matches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Identity {
+    device: libc::dev_t,
+    inode: libc::ino_t,
+}
+
+impl Identity {
+    pub(crate) fn of(stat: &libc::stat) -> Self {
+        Self {
+            device: stat.st_dev,
+            inode: stat.st_ino,
+        }
+    }
+}
+
+/// How a finding went when its removal was asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum Outcome {
+    /// Gone for good.
+    Deleted,
+    /// In the Trash.
+    Trashed,
+    /// Left alone: it was in use, or no longer what the scan saw.
+    Refused { why: String },
+    /// Something went wrong partway; `why` says what.
+    Failed { why: String },
+    /// Not reached before the stop.
+    Stopped,
+}
+
+/// One finding's removal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Removal {
+    pub path: PathBuf,
+    pub outcome: Outcome,
+}
+
+/// What a removal did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cleaned {
+    pub removals: Vec<Removal>,
+    /// Room the disk got back, read from the disk before and after.
+    pub freed_bytes: u64,
 }
 
 /// What a scan looks through, and what it knows about the machine.
@@ -112,6 +172,7 @@ pub(crate) struct Candidate {
     /// The project this is a build output of, whose use is its use.
     pub(crate) project: Option<PathBuf>,
     pub(crate) touched: Option<u64>,
+    pub(crate) emptied: bool,
 }
 
 /// What could go on the machine `survey` describes, measured, by group and
@@ -121,7 +182,7 @@ pub fn scan(survey: &Survey, stop: &AtomicBool) -> io::Result<Vec<Finding>> {
     let mut candidates = catalog::candidates(&root, survey.home, stop);
     candidates.extend(projects::candidates(&root, survey, stop));
     for candidate in &mut candidates {
-        candidate.in_use = in_use(candidate, survey);
+        candidate.in_use = in_use(&candidate.path, candidate.project.as_deref(), survey);
         candidate.picked &= candidate.in_use.is_none();
     }
     let mut findings = measure::all(&root, candidates, stop);
@@ -130,17 +191,34 @@ pub fn scan(survey: &Survey, stop: &AtomicBool) -> io::Result<Vec<Finding>> {
     Ok(findings)
 }
 
-/// Who is using `candidate`: a dev server running in its project, above it
-/// or below it, or else a process holding a path inside it or its project.
-fn in_use(candidate: &Candidate, survey: &Survey) -> Option<String> {
-    let project = candidate.project.as_deref();
+/// Removes `findings`, which must come from `scan`, one by one, looking at
+/// each again right before: it must still be reached through real folders
+/// inside the survey's home, still be the folder the scan measured, and
+/// nothing the survey knows of may be using it. Rebuildable and discarded
+/// things are deleted, the Trash first so nothing moved into it goes too;
+/// personal things go to the Trash through `trash`, which moves the item at
+/// a path there and says where it went. `told` hears of each as it is done.
+/// One failing stops nothing else.
+pub fn remove(
+    survey: &Survey,
+    findings: &[Finding],
+    trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
+    stop: &AtomicBool,
+    told: &mut dyn FnMut(&Removal),
+) -> io::Result<Cleaned> {
+    remove::all(survey, findings, trash, stop, told)
+}
+
+/// Who is using the folder at `path`, a build output of `project` if any: a
+/// dev server running in the project, above it or below it, or else a
+/// process holding a path inside the folder or the project.
+pub(crate) fn in_use(path: &Path, project: Option<&Path>, survey: &Survey) -> Option<String> {
     let server = survey.running.iter().find(|(root, _)| {
         project.is_some_and(|project| root.starts_with(project) || project.starts_with(root))
     });
     let holder = || {
-        survey.busy.iter().find(|(path, _)| {
-            path.starts_with(&candidate.path)
-                || project.is_some_and(|project| path.starts_with(project))
+        survey.busy.iter().find(|(held, _)| {
+            held.starts_with(path) || project.is_some_and(|project| held.starts_with(project))
         })
     };
     server.or_else(holder).map(|(_, who)| who.clone())
@@ -192,21 +270,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
-    use super::{Candidate, Group, Kind, Survey, in_use};
-
-    fn output(project: &str) -> Candidate {
-        Candidate {
-            group: Group::Projects,
-            kind: Kind::Rebuildable,
-            name: "web · node_modules".into(),
-            relative: PathBuf::from("code/mono/apps/web/node_modules"),
-            path: PathBuf::from(project).join("node_modules"),
-            picked: true,
-            in_use: None,
-            project: Some(PathBuf::from(project)),
-            touched: None,
-        }
-    }
+    use super::{Survey, in_use};
 
     fn survey<'a>(running: &'a [(PathBuf, String)]) -> Survey<'a> {
         Survey {
@@ -221,12 +285,14 @@ mod tests {
 
     #[test]
     fn a_dev_server_above_or_below_a_project_is_using_it() {
+        let web = Path::new("/Users/dev/code/mono/apps/web");
+        let modules = web.join("node_modules");
         let server = |root: &str| vec![(PathBuf::from(root), "the server".to_string())];
-        let web = output("/Users/dev/code/mono/apps/web");
+        let using = |root: &str| in_use(&modules, Some(web), &survey(&server(root))).is_some();
 
-        assert!(in_use(&web, &survey(&server("/Users/dev/code/mono"))).is_some());
-        assert!(in_use(&web, &survey(&server("/Users/dev/code/mono/apps/web/src"))).is_some());
-        assert!(in_use(&web, &survey(&server("/Users/dev/code/mono/apps/api"))).is_none());
-        assert!(in_use(&web, &survey(&server("/Users/dev/code/mono/apps/webb"))).is_none());
+        assert!(using("/Users/dev/code/mono"));
+        assert!(using("/Users/dev/code/mono/apps/web/src"));
+        assert!(!using("/Users/dev/code/mono/apps/api"));
+        assert!(!using("/Users/dev/code/mono/apps/webb"));
     }
 }

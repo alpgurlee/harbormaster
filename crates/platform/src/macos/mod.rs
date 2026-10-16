@@ -3,6 +3,7 @@ mod memory;
 mod procargs;
 mod process;
 mod signal;
+mod trash;
 
 use std::collections::HashSet;
 use std::ffi::{CStr, OsStr, c_int};
@@ -20,6 +21,7 @@ use crate::{Listener, SocketId, Whereabouts};
 pub(crate) use memory::memory;
 pub(crate) use process::{details, executable_of, processes, tracks_exec};
 pub(crate) use signal::{presence, signal};
+pub(crate) use trash::trash;
 
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;

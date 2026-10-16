@@ -297,3 +297,26 @@ fn leaves_out_a_place_whose_entries_it_cannot_look_up() {
 
     assert!(named(&findings, "npm").is_none(), "{findings:?}");
 }
+
+#[test]
+fn says_whether_a_place_is_emptied_or_goes_whole() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join(".npm/_cacache/a"), 2 * MIB);
+    let support = home
+        .path()
+        .join("Library/Developer/Xcode/iOS DeviceSupport");
+    write(&support.join("16.4 (20E247)/Symbols/a"), 2 * MIB);
+    write(&support.join("17.5 (21F79)/Symbols/a"), 2 * MIB);
+    write(
+        &home
+            .path()
+            .join("Library/Caches/JetBrains/IntelliJIdea2025.1/a"),
+        2 * MIB,
+    );
+
+    let findings = scanned(home.path());
+
+    assert!(named(&findings, "npm").unwrap().emptied);
+    assert!(!named(&findings, "16.4 (20E247)").unwrap().emptied);
+    assert!(!named(&findings, "JetBrains IDEs").unwrap().emptied);
+}

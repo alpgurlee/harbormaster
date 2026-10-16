@@ -6,7 +6,7 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Candidate, Finding};
+use crate::{Candidate, Finding, Identity};
 
 /// The most places measured at once.
 const WORKERS: usize = 4;
@@ -20,7 +20,7 @@ const RESERVE: u64 = 64;
 /// couldn't be measured in full is left out rather than shown too small.
 pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> Vec<Finding> {
     let next = AtomicUsize::new(0);
-    let measured: Vec<(usize, u64)> = std::thread::scope(|scope| {
+    let measured: Vec<(usize, (Identity, u64))> = std::thread::scope(|scope| {
         let running: Vec<_> = (0..workers())
             .map(|_| {
                 scope.spawn(|| {
@@ -30,11 +30,11 @@ pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> 
                         let Some(candidate) = candidates.get(at) else {
                             break;
                         };
-                        let measured = home
-                            .descend(&candidate.relative)
-                            .and_then(|dir| size(&dir, stop));
-                        if let Ok(bytes) = measured {
-                            mine.push((at, bytes));
+                        let measured = home.descend(&candidate.relative).and_then(|dir| {
+                            Ok((Identity::of(&dir.metadata()?), size(&dir, stop)?))
+                        });
+                        if let Ok(measured) = measured {
+                            mine.push((at, measured));
                         }
                     }
                     mine
@@ -46,14 +46,14 @@ pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> 
             .flat_map(|worker| worker.join().unwrap_or_default())
             .collect()
     });
-    let mut sizes = vec![0; candidates.len()];
-    for (at, bytes) in measured {
-        sizes[at] = bytes;
+    let mut sizes = vec![(Identity::default(), 0); candidates.len()];
+    for (at, measured) in measured {
+        sizes[at] = measured;
     }
     candidates
         .into_iter()
         .zip(sizes)
-        .map(|(candidate, bytes)| Finding {
+        .map(|(candidate, (identity, bytes))| Finding {
             group: candidate.group,
             kind: candidate.kind,
             name: candidate.name,
@@ -62,6 +62,9 @@ pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> 
             picked: candidate.picked,
             in_use: candidate.in_use,
             touched: candidate.touched,
+            project: candidate.project,
+            emptied: candidate.emptied,
+            identity,
         })
         .collect()
 }
