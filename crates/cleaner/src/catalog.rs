@@ -76,6 +76,16 @@ const PLACES: &[Place] = &[
         "Carthage",
         "Library/Caches/org.carthage.CarthageKit",
     ),
+    // Jars `mvn install` put here can't be downloaded again; never .m2 itself, which holds settings.
+    Place {
+        kind: Kind::Personal,
+        ..whole(Group::Packages, "Maven", ".m2/repository")
+    },
+    // Local .NET tools live here too, and builds that skip restoring need what it holds.
+    Place {
+        kind: Kind::Personal,
+        ..whole(Group::Packages, "NuGet", ".nuget/packages")
+    },
     whole(Group::Packages, "Gradle", ".gradle/caches"),
     whole(
         Group::Packages,

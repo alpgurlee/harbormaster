@@ -300,6 +300,40 @@ fn keeps_jetbrains_local_history_as_the_users_own() {
 }
 
 #[test]
+fn offers_maven_and_nuget_downloads_as_the_users_own_and_never_their_settings() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home
+            .path()
+            .join(".m2/repository/org/acme/lib/1.0/lib-1.0.jar"),
+        2 * MIB,
+    );
+    write(&home.path().join(".m2/settings-security.xml"), 2 * MIB);
+    write(
+        &home
+            .path()
+            .join(".nuget/packages/newtonsoft.json/13.0.3/lib.dll"),
+        2 * MIB,
+    );
+
+    let findings = scanned(home.path());
+
+    for (name, place) in [("Maven", ".m2/repository"), ("NuGet", ".nuget/packages")] {
+        let found = named(&findings, name).unwrap_or_else(|| panic!("{name} in {findings:?}"));
+        assert_eq!(
+            (found.group, found.kind, found.picked),
+            (Group::Packages, Kind::Personal, false)
+        );
+        assert!(found.path.ends_with(place), "{found:?}");
+    }
+    assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.path.ends_with(".m2"))
+    );
+}
+
+#[test]
 fn measures_nothing_once_told_to_stop() {
     let home = tempfile::tempdir().unwrap();
     write(&home.path().join(".npm/_cacache/a"), 2 * MIB);
