@@ -1075,7 +1075,7 @@ mod tests {
         let name = home.file_name().unwrap().to_str().unwrap();
         assert_eq!(
             json(serde_json::to_value(charted)),
-            serde_json::json!({"kind": "done", "token": 6, "area": {"id": 0, "name": name, "bytes": 6, "folder": true, "short": null, "inside": [], "rest": 6}})
+            serde_json::json!({"kind": "done", "token": 6, "area": {"id": 0, "name": name, "bytes": 6, "folder": true, "short": null, "inside": [], "rest": 6, "folded": false}})
         );
         assert_eq!(
             json(serde_json::to_value(Refusal::Changed)),

@@ -170,6 +170,7 @@ impl Walker<'_> {
             short: None,
             inside: Vec::new(),
             rest: 0,
+            folded: false,
             path,
             identity: Identity::of(stat),
         }
@@ -256,6 +257,7 @@ fn tallied(area: &Area, depth: usize, levels: &mut Vec<usize>) {
 /// Counts together all that is shown below the level `last`.
 fn cut(area: &mut Area, depth: usize, last: usize) {
     if depth == last {
+        area.folded |= !area.inside.is_empty();
         area.rest += area.inside.drain(..).map(|each| each.bytes).sum::<u64>();
         return;
     }
@@ -325,6 +327,7 @@ mod tests {
             short: None,
             inside,
             rest: 0,
+            folded: false,
             path: PathBuf::from(name),
             identity: Identity::default(),
         }
@@ -339,10 +342,13 @@ mod tests {
 
         trimmed(&mut root, 5);
 
-        // The big folder stays in sight; what it holds is counted together.
+        // The big folder stays in sight; what it holds is counted together,
+        // and said to be for the map's sake rather than for being small.
         assert_eq!(root.inside.len(), 1);
         assert!(root.inside[0].inside.is_empty());
         assert_eq!(root.inside[0].rest, 100);
+        assert!(root.inside[0].folded);
+        assert!(!root.folded);
     }
 
     #[test]

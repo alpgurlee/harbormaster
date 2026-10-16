@@ -322,6 +322,9 @@ pub struct Area {
     pub inside: Vec<Area>,
     /// What else it holds, each too small to show on its own.
     pub rest: u64,
+    /// Whether all it holds is counted in `rest` to keep the map small,
+    /// whatever the size of each.
+    pub folded: bool,
     /// Where it is, and which folder or file it was, to show it in Finder.
     #[serde(skip)]
     pub path: PathBuf,
