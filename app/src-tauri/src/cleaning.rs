@@ -427,6 +427,9 @@ mod tests {
         let pip = finding("/Users/dev/Library/Caches/pip");
         let token = scanned(&cleaning, vec![npm.clone(), pip.clone()]);
         cleaning.looked_again(token, vec![pip.clone()]).unwrap();
+        // What went is no longer shown in Finder, only what is still there.
+        assert!(!cleaning.lists(&npm.path));
+        assert!(cleaning.lists(&pip.path));
 
         // The removal then finds it gone and says so, rather than nothing going at all.
         let chosen = cleaning.take(
@@ -435,7 +438,6 @@ mod tests {
         );
 
         assert_eq!(chosen, Ok(vec![npm, pip]));
-        assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
     }
 
     #[test]
