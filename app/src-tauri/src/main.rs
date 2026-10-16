@@ -32,6 +32,7 @@ fn main() {
             commands::open_cleaner,
             commands::clean_scan,
             commands::clean_hunt,
+            commands::clean_apps,
             commands::clean_map,
             commands::clean_run,
             commands::clean_recheck,

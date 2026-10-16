@@ -13,6 +13,7 @@ fn main() {
         "open_cleaner",
         "clean_scan",
         "clean_hunt",
+        "clean_apps",
         "clean_map",
         "clean_run",
         "clean_recheck",

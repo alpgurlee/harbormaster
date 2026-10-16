@@ -188,6 +188,26 @@ fn open(window: &WebviewWindow) -> bool {
     window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
 }
 
+/// Lists this user's own apps, telling the window as it goes; they come
+/// last with what else is shown, under the token removing some takes.
+#[tauri::command]
+pub(crate) async fn clean_apps(
+    channel: Channel<ScanEvent>,
+    window: WebviewWindow,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    let working = cleaning.begin(|| open(&window))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        working.apps(&|event| {
+            let _ = channel.send(event);
+        })
+    })
+    .await
+    .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
 /// Maps this user's home folder, telling the window as it goes; the map
 /// comes last, under the token showing its places in Finder takes.
 #[tauri::command]

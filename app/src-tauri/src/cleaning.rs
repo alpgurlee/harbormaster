@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use harbormaster_cleaner::{
-    Area, Chart, Charting, Cleaned, Finding, Hunt, Measured, Outcome, Reach, Removal, Survey,
-    Usage, Why,
+    Area, Chart, Charting, Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal,
+    Survey, Usage, Why,
 };
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
@@ -47,10 +47,12 @@ pub(crate) enum ScanEvent {
 pub(crate) struct Listed {
     token: u64,
     findings: Vec<Finding>,
-    /// Whether what tools and apps leave was scanned for, and whether the
-    /// large files were hunted for, so that none listed means none found.
+    /// Whether what tools and apps leave was scanned for, whether the large
+    /// files were hunted for, and whether the user's apps were listed, so
+    /// that none listed means none found.
     scanned: bool,
     hunted: bool,
+    apps_listed: bool,
 }
 
 impl From<Shown> for Listed {
@@ -60,6 +62,7 @@ impl From<Shown> for Listed {
             findings: shown.findings,
             scanned: shown.scanned,
             hunted: shown.hunted,
+            apps_listed: shown.apps_listed,
         }
     }
 }
@@ -163,6 +166,7 @@ struct Shown {
     gone: Vec<Finding>,
     scanned: bool,
     hunted: bool,
+    apps_listed: bool,
 }
 
 /// Findings taken to be removed, those of them that were shown, and the
@@ -176,12 +180,26 @@ struct Taken {
     rest: Shown,
 }
 
-/// What looked for the findings: a scan for what tools and apps leave, or
-/// a hunt for the user's large files.
+/// What looked for the findings: a scan for what tools and apps leave, a
+/// hunt for the user's large files, or a listing of the user's apps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Search {
     Scan,
     Hunt,
+    Apps,
+}
+
+impl Search {
+    /// The search that finds what is in `group`.
+    fn of(group: Group) -> Self {
+        if group == Group::Applications {
+            Self::Apps
+        } else if group.of_large_files() {
+            Self::Hunt
+        } else {
+            Self::Scan
+        }
+    }
 }
 
 /// The one scan or removal under way, taken before its work is queued so
@@ -226,22 +244,25 @@ impl Cleaning {
     fn show(&self, search: Search, findings: Vec<Finding>) -> Shown {
         let mut ledger = self.lock();
         ledger.last += 1;
-        let hunt = search == Search::Hunt;
         let mut shown = ledger.shown.take().unwrap_or(Shown {
             token: 0,
             findings: Vec::new(),
             gone: Vec::new(),
             scanned: false,
             hunted: false,
+            apps_listed: false,
         });
         shown.token = ledger.last;
         shown.gone.clear();
         shown
             .findings
-            .retain(|finding| finding.group.of_large_files() != hunt);
+            .retain(|finding| Search::of(finding.group) != search);
         shown.findings.extend(findings);
-        shown.scanned |= !hunt;
-        shown.hunted |= hunt;
+        match search {
+            Search::Scan => shown.scanned = true,
+            Search::Hunt => shown.hunted = true,
+            Search::Apps => shown.apps_listed = true,
+        }
         ledger.shown = Some(shown.clone());
         shown
     }
@@ -446,6 +467,22 @@ impl Working {
         .map_err(failed)?;
         let token = cleaning.keep_map(root.clone());
         told(MapEvent::Done { token, area: root });
+        Ok(())
+    }
+
+    /// Lists this user's own apps, telling `told` as it goes.
+    pub(crate) fn apps(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
+        let cleaning = &self.0;
+        let home = harbormaster_cleaner::account_home().map_err(failed)?;
+        let usage = usage_now().map_err(failed)?;
+        let mut findings =
+            harbormaster_cleaner::apps(&reach(&home), &usage.busy, &cleaning.stop, &|measured| {
+                told(ScanEvent::Measured(measured));
+            })
+            .map_err(failed)?;
+        findings.retain(showable);
+        let listed = cleaning.show(Search::Apps, findings).into();
+        told(ScanEvent::Done { home, listed });
         Ok(())
     }
 
@@ -917,6 +954,38 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_apps_beside_a_scan_and_a_hunt_in_place_of_their_own_last() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let film = Finding {
+            group: Group::Videos,
+            kind: Kind::Personal,
+            ..finding("/Users/dev/Movies/trip.mov")
+        };
+        let app = |path: &str| Finding {
+            group: Group::Applications,
+            kind: Kind::Personal,
+            ..finding(path)
+        };
+        cleaning.show(Search::Scan, vec![npm.clone()]);
+        cleaning.show(Search::Hunt, vec![film.clone()]);
+
+        let apps = cleaning.show(Search::Apps, vec![app("/Applications/Old.app")]);
+        assert_eq!(
+            (apps.scanned, apps.hunted, apps.apps_listed),
+            (true, true, true)
+        );
+        let again = cleaning.show(Search::Apps, vec![app("/Applications/New.app")]);
+
+        assert_eq!(
+            again.findings,
+            [npm.clone(), film.clone(), app("/Applications/New.app")]
+        );
+        let scan = cleaning.show(Search::Scan, Vec::new());
+        assert_eq!(scan.findings, [film, app("/Applications/New.app")]);
+    }
+
+    #[test]
     fn hands_out_what_a_scan_showed_once() {
         let cleaning = Cleaning::default();
         let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
@@ -1080,6 +1149,7 @@ mod tests {
                 findings: Vec::new(),
                 scanned: true,
                 hunted: false,
+                apps_listed: false,
             },
         };
         let removed = RunEvent::Removed(Removal {
@@ -1098,6 +1168,7 @@ mod tests {
                 findings: Vec::new(),
                 scanned: true,
                 hunted: false,
+                apps_listed: false,
             },
         };
         let failed = RunEvent::Failed {
@@ -1109,6 +1180,7 @@ mod tests {
                 findings: Vec::new(),
                 scanned: true,
                 hunted: true,
+                apps_listed: false,
             },
         };
         let charting = MapEvent::Charting(Charting {
@@ -1139,7 +1211,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(failed)),
-            serde_json::json!({"kind": "failed", "refusal": {"code": "failed", "message": "no disk"}, "token": 5, "findings": [], "scanned": true, "hunted": true})
+            serde_json::json!({"kind": "failed", "refusal": {"code": "failed", "message": "no disk"}, "token": 5, "findings": [], "scanned": true, "hunted": true, "appsListed": false})
         );
 
         assert_eq!(
@@ -1148,7 +1220,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(found)),
-            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": [], "scanned": true, "hunted": false})
+            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": [], "scanned": true, "hunted": false, "appsListed": false})
         );
         assert_eq!(
             json(serde_json::to_value(removed)),
@@ -1161,7 +1233,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(done)),
-            serde_json::json!({"kind": "done", "removals": [], "freedBytes": 7, "token": 4, "findings": [], "scanned": true, "hunted": false})
+            serde_json::json!({"kind": "done", "removals": [], "freedBytes": 7, "token": 4, "findings": [], "scanned": true, "hunted": false, "appsListed": false})
         );
         assert_eq!(
             json(serde_json::to_value(Refusal::Unlisted)),
