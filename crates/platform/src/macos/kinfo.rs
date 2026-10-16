@@ -131,7 +131,11 @@ fn entry(record: &[u8; RECORD]) -> Option<Entry> {
         .ok()?
         .checked_mul(1_000_000_000)?
         .checked_add(u64::try_from(micros).ok()?.checked_mul(1_000)?)?;
-    let sound = pid >= 0 && (1..=SZOMB).contains(&status) && start > 0 && start <= now;
+    let sound = pid >= 0
+        && (1..=SZOMB).contains(&status)
+        && (0..1_000_000).contains(&micros)
+        && start > 0
+        && start <= now;
     sound.then(|| Entry {
         pid,
         parent: libc::pid_t::from_ne_bytes(bytes(record, PARENT)),
@@ -150,7 +154,7 @@ fn bytes<const N: usize>(record: &[u8; RECORD], at: usize) -> [u8; N] {
 
 #[cfg(test)]
 mod tests {
-    use super::{COMMAND, PARENT, PID, RECORD, START_SECONDS, STATUS, USER, parse};
+    use super::{COMMAND, PARENT, PID, RECORD, START_MICROS, START_SECONDS, STATUS, USER, parse};
 
     fn record(pid: i32, status: u8, start: i64) -> Vec<u8> {
         let mut record = vec![0u8; RECORD];
@@ -180,5 +184,21 @@ mod tests {
         assert!(
             parse(&[record(42, 2, 1_700_000_000), record(42, 2, 1_700_000_001)].concat()).is_err()
         );
+    }
+
+    #[test]
+    fn accepts_microseconds_only_within_one_second() {
+        for (micros, valid) in [
+            (-1i32, false),
+            (0, true),
+            (999_999, true),
+            (1_000_000, false),
+            (i32::MAX, false),
+        ] {
+            let mut raw = record(42, 2, 1_700_000_000);
+            raw[START_MICROS..START_MICROS + 4].copy_from_slice(&micros.to_ne_bytes());
+
+            assert_eq!(parse(&raw).is_ok(), valid, "micros={micros}");
+        }
     }
 }

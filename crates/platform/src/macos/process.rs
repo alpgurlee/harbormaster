@@ -11,10 +11,22 @@ use crate::{Field, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, StartTi
 pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
     // SAFETY: getuid has no failure mode.
     let own_uid = unsafe { libc::getuid() };
-    let table = kinfo::all()?;
-    if !matches_our_own_record(&table) {
-        return processes_one_by_one(own_uid);
-    }
+    processes_from(kinfo::all(), own_uid)
+}
+
+fn processes_from(
+    table: io::Result<Vec<kinfo::Entry>>,
+    own_uid: libc::uid_t,
+) -> io::Result<Vec<ProcessEntry>> {
+    // A table that fails its checks is read the slow way instead.
+    let table = match table {
+        Ok(table) if matches_our_own_record(&table) => table,
+        Ok(_) => return processes_one_by_one(own_uid),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            return processes_one_by_one(own_uid);
+        }
+        Err(error) => return Err(error),
+    };
     let entries = table
         .into_iter()
         .filter(|entry| entry.pid > 0 && !entry.zombie)
@@ -331,6 +343,24 @@ mod tests {
     use std::io;
 
     use super::{c_string, verdict};
+
+    #[test]
+    fn reads_the_slow_way_only_when_the_table_is_unsound() {
+        // SAFETY: getuid has no failure mode.
+        let uid = unsafe { libc::getuid() };
+
+        let entries = super::processes_from(Err(io::ErrorKind::InvalidData.into()), uid).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.key.pid.0 == std::process::id())
+        );
+
+        let error = super::processes_from(Err(io::ErrorKind::PermissionDenied.into()), uid)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
 
     #[test]
     fn decides_about_exec_versions_only_on_a_clear_answer() {
