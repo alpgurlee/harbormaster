@@ -13,9 +13,35 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px 8px;
+  padding: 10px 10px 8px 14px;
   color: var(--muted);
   font-weight: 600;
+}
+
+.tools {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tool:hover {
+  background: var(--raised);
+  color: var(--text);
 }
 
 .mark {
@@ -24,7 +50,7 @@
 
 .meter {
   display: flex;
-  height: 3px;
+  height: 4px;
   margin: 0 14px;
   overflow: hidden;
   border-radius: 2px;
@@ -39,10 +65,6 @@
   background: var(--in-use);
 }
 
-.meter > .servers,
-.bar > .servers {
-  background: var(--brass);
-}
 
 .stats {
   display: flex;
@@ -144,9 +166,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 14px 6px;
-  padding: 0 10px;
-  height: 30px;
+  margin: 0 14px 4px;
+  padding: 0 9px;
+  height: 28px;
   border: 1px solid var(--field-edge);
   border-radius: 6px;
   background: var(--field);
@@ -189,28 +211,25 @@
 
 .group {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 6px;
   margin: 0;
-  padding: 12px 8px 5px;
-  font-size: 13px;
+  padding: 10px 8px 3px;
+  color: var(--muted);
+  font-size: 11.5px;
   font-weight: 600;
 }
 
 .chip {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--chip);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
+  font-weight: 400;
+  opacity: 0.8;
 }
 
 .row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 8px;
+  padding: 6px 8px;
   border-radius: 7px;
   cursor: default;
 }
@@ -226,20 +245,10 @@
 }
 
 .title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   overflow: hidden;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--green);
 }
 
 .details {
@@ -254,6 +263,7 @@
   display: grid;
   flex: none;
   justify-items: end;
+  min-width: 54px;
 }
 
 .side > * {
@@ -261,7 +271,8 @@
 }
 
 .memory {
-  font-size: 12.5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -367,10 +378,5 @@
   .bar > span {
     forced-color-adjust: none;
     background: GrayText;
-  }
-
-  .meter > .servers,
-  .bar > .servers {
-    background: Highlight;
   }
 }

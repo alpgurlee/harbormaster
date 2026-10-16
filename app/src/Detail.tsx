@@ -21,10 +21,12 @@ export interface DetailProps {
   onCopy: (url: string) => Promise<void>;
   onReveal: (service: Service) => void;
   onStop: (service: Service) => void;
+  /** Its project's color. */
+  tint?: number;
 }
 
 /** One server's page: what runs, where, from what, and what it uses. */
-export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop }: DetailProps) {
+export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop, tint = 0 }: DetailProps) {
   const i18n = useI18n();
   const first = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState<"copied" | "copyFailed" | null>(null);
@@ -103,7 +105,7 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop 
       </header>
 
       <div className={styles.hero}>
-        <Plate port={port?.port} large />
+        <Plate port={port?.port} tint={tint} large />
         <div className={styles.status}>
           <div>
             <span className={styles.dot} aria-hidden="true" />

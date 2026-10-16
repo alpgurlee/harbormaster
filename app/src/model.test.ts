@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { groupByProject, totals } from "./model";
+import { groupByProject, tintOf, TINTS, tintsOf, totals } from "./model";
 import type { Service } from "./types";
 
 function service(id: string, port: number, project: string | null, memory = 100): Service {
@@ -73,5 +73,28 @@ describe("totals", () => {
       memoryBytes: 150 * 1024 * 1024,
       cpuPercent: 3,
     });
+  });
+});
+
+describe("tintsOf", () => {
+  const at = (root: string) => ({ project: { root, repoRoot: root } }) as Service;
+
+  it("gives each project the same color every time, and the projectless brass", () => {
+    const tints = tintsOf([at("/work/acme-store"), { project: null } as Service]);
+
+    expect(tints.get("/work/acme-store")).toBe(tintOf("/work/acme-store"));
+    expect(tints.get("")).toBe(0);
+  });
+
+  it("gives two projects whose colors clash different ones while there are enough", () => {
+    const roots = Array.from({ length: 20 }, (_, index) => `/work/p${index}`);
+    const [first, second] = roots.flatMap((root, index) =>
+      roots.slice(index + 1).filter((other) => tintOf(other) === tintOf(root)).map((other) => [root, other]),
+    )[0];
+
+    const tints = tintsOf([at(first), at(second)]);
+
+    expect(tints.get(first)).not.toBe(tints.get(second));
+    expect([...tints.values()].every((tint) => tint >= 0 && tint < TINTS)).toBe(true);
   });
 });

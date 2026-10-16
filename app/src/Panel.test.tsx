@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "./i18n";
+import { tintsOf } from "./model";
 import { Panel } from "./Panel";
 import type { Service, Update } from "./types";
 
@@ -64,7 +65,7 @@ function show(props: Partial<Parameters<typeof Panel>[0]> = {}, locale: "en" | "
   const handlers = { onShow: vi.fn(), onOpen: vi.fn(), onStop: vi.fn(), onQuit: vi.fn() };
   render(
     <I18nProvider locale={locale}>
-      <Panel update={update} now={NOW} {...handlers} {...props} />
+      <Panel update={update} tints={tintsOf((props.update ?? update)?.services ?? [])} now={NOW} {...handlers} {...props} />
     </I18nProvider>,
   );
   return handlers;
@@ -92,9 +93,14 @@ describe("Panel", () => {
   it("marks the dev servers' share on the memory meter", () => {
     show();
 
-    const [servers, rest] = [...screen.getByRole("meter").children] as HTMLElement[];
-    expect(parseFloat(servers.style.width)).toBeCloseTo((998 / (32 * 1024)) * 100);
-    expect(parseFloat(rest.style.width)).toBeCloseTo(((16 * 1024 - 998) / (32 * 1024)) * 100);
+    const parts = [...screen.getByRole("meter").children] as HTMLElement[];
+    const widths = parts.map((part) => parseFloat(part.style.width));
+    // One part per project, in the list's order, then the rest of the memory in use.
+    expect(widths).toHaveLength(3);
+    expect(widths[0]).toBeCloseTo((812 / (32 * 1024)) * 100);
+    expect(widths[1]).toBeCloseTo((186 / (32 * 1024)) * 100);
+    expect(widths[2]).toBeCloseTo(((16 * 1024 - 998) / (32 * 1024)) * 100);
+    expect(parts[0].style.background).not.toBe(parts[2].style.background);
   });
 
   it("says what uses the memory when asked, and folds it away again", () => {
@@ -110,8 +116,9 @@ describe("Panel", () => {
     expect(parts(items)).toEqual(["Dev servers998 MB", "Google Chrome3.2 GB", "Slack640 MB"]);
     expect(screen.getByText("Figures as in Activity Monitor")).toBeTruthy();
     // Bars share the meter's scale, so the dev servers' bar lines up with their part of it.
-    const [servers] = [...screen.getByRole("meter").children] as HTMLElement[];
-    expect(items[0].querySelector<HTMLElement>("[aria-hidden] > span")?.style.width).toBe(servers.style.width);
+    const widths = (parent: Element) => [...parent.children].map((part) => (part as HTMLElement).style.width);
+    const meter = widths(screen.getByRole("meter"));
+    expect(widths(items[0].querySelector("[aria-hidden]") as Element)).toEqual(meter.slice(0, -1));
 
     fireEvent.click(toggle);
     expect(screen.queryByRole("list", { name: "Memory by app" })).toBeNull();

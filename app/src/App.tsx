@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { hidePanel, inApp, openInBrowser, resizePanel, revealFolder } from "./api";
 import { Detail } from "./Detail";
 import { I18nProvider, localeOf } from "./i18n";
+import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
 import { QuitSheet } from "./QuitSheet";
 import { StopSheet } from "./StopSheet";
@@ -73,6 +74,7 @@ export function App() {
   useWindowFit(frame);
   useEscapeHides();
   const service = shown === null ? null : (update?.services.find((each) => each.id === shown) ?? null);
+  const tints = tintsOf(update?.services ?? []);
 
   const keepFocus = () => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -106,6 +108,7 @@ export function App() {
         <div ref={content} className={styles.content} inert={asking}>
           <Panel
             hidden={shown !== null}
+            tints={tints}
             update={update}
             now={now}
             onShow={(chosen) => setShown(chosen.id)}
@@ -116,6 +119,7 @@ export function App() {
           {shown === null ? null : (
             <Detail
               service={service}
+              tint={service === null ? 0 : (tints.get(projectOf(service)) ?? 0)}
               now={now}
               onBack={() => setShown(null)}
               onOpen={open}

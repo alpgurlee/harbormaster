@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useI18n } from "./i18n";
-import { Chevron, Mark, OpenOut, Search, Square } from "./icons";
-import { groupByProject, totals } from "./model";
+import { Chevron, Gear, Mark, OpenOut, Search, Square, Sweep } from "./icons";
+import { groupByProject, projectOf, totals } from "./model";
 import { Plate } from "./Plate";
 import { platform } from "./platform";
 import { agentOf, displayName } from "./session";
+import { trendOf } from "./store";
+import { Trend } from "./Trend";
 import type { AppUsage, Memory, Service, Update } from "./types";
 import styles from "./Panel.module.css";
 
@@ -13,6 +15,8 @@ import styles from "./Panel.module.css";
 const FRESH_MS = 10_000;
 
 export interface PanelProps {
+  /** Each project's color, by its folder. */
+  tints: Map<string, number>;
   /** Kept, with its search and selection, while a server's page shows. */
   hidden?: boolean;
   update: Update | null;
@@ -24,7 +28,7 @@ export interface PanelProps {
   onQuit: (app: AppUsage) => void;
 }
 
-export function Panel({ hidden = false, update, now, onShow, onOpen, onStop, onQuit }: PanelProps) {
+export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit }: PanelProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -81,6 +85,7 @@ export function Panel({ hidden = false, update, now, onShow, onOpen, onStop, onQ
     <Row
       key={service.id}
       service={service}
+      tint={tints.get(projectOf(service)) ?? 0}
       selected={service === selected}
       now={now}
       onShow={() => {
@@ -100,7 +105,7 @@ export function Panel({ hidden = false, update, now, onShow, onOpen, onStop, onQ
   return (
     <div className={styles.panel} hidden={hidden}>
       <Header />
-      <Summary dev={dev} memory={update.memory} apps={update.apps} onQuit={onQuit} />
+      <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
         <input
@@ -164,28 +169,44 @@ export function Panel({ hidden = false, update, now, onShow, onOpen, onStop, onQ
 }
 
 function Header() {
+  const i18n = useI18n();
   return (
     <header className={styles.header}>
       <Mark className={styles.mark} />
       Harbormaster
+      <span className={styles.tools}>
+        <button type="button" className={styles.tool}>
+          <Sweep />
+          {i18n.t("clean")}
+        </button>
+        <button type="button" className={styles.tool} aria-label={i18n.t("settings")} title={i18n.t("settings")}>
+          <Gear />
+        </button>
+      </span>
     </header>
   );
 }
 
 interface SummaryProps {
   dev: Service[];
+  tints: Map<string, number>;
   memory: Memory | null;
   apps: AppUsage[] | null;
   onQuit: (app: AppUsage) => void;
 }
 
-function Summary({ dev, memory, apps, onQuit }: SummaryProps) {
+function Summary({ dev, tints, memory, apps, onQuit }: SummaryProps) {
   const i18n = useI18n();
   const [open, setOpen] = useState(false);
   const sum = totals(dev);
   const servers = sum.memoryBytes ?? 0;
+  const projects = groupByProject(dev).map((group) => ({
+    id: group.id,
+    tint: tints.get(group.id) ?? 0,
+    bytes: totals(group.services).memoryBytes ?? 0,
+  }));
   // Footprints can pass the memory in use; the meter can't show more than that.
-  const serversInUse = Math.min(servers, memory?.used ?? 0);
+  const fit = memory && servers > memory.used ? memory.used / servers : 1;
   const strong = (value: string): ReactNode => <strong>{value}</strong>;
   return (
     <>
@@ -199,8 +220,8 @@ function Summary({ dev, memory, apps, onQuit }: SummaryProps) {
           aria-valuetext={i18n.memoryOf(memory.used, memory.total)}
           className={styles.meter}
         >
-          <span className={styles.servers} style={{ width: share(serversInUse, memory.total) }} />
-          <span style={{ width: share(memory.used - serversInUse, memory.total) }} />
+          <Segments projects={projects} scale={fit} whole={memory.total} />
+          <span style={{ width: share(memory.used - servers * fit, memory.total) }} />
         </div>
       ) : null}
       <div className={styles.stats}>
@@ -224,7 +245,9 @@ function Summary({ dev, memory, apps, onQuit }: SummaryProps) {
           </button>
         ) : null}
       </div>
-      {memory && open ? <Breakdown servers={servers} apps={apps} total={memory.total} onQuit={onQuit} /> : null}
+      {memory && open ? (
+        <Breakdown servers={servers} projects={projects} apps={apps} total={memory.total} onQuit={onQuit} />
+      ) : null}
     </>
   );
 }
@@ -234,14 +257,29 @@ function Summary({ dev, memory, apps, onQuit }: SummaryProps) {
  * Nothing sums them up: each counts compressed memory at full size, as
  * Activity Monitor does, so together they can come to more than is in use.
  */
+/** A project's share of the dev servers' memory, in its color. */
+interface ProjectShare {
+  id: string;
+  tint: number;
+  bytes: number;
+}
+
+/** The dev servers' memory, project by project, `scale`d and out of `whole`. */
+function Segments({ projects, scale, whole }: { projects: ProjectShare[]; scale: number; whole: number }) {
+  return projects.map((project) => (
+    <span key={project.id} style={{ width: share(project.bytes * scale, whole), background: `var(--tint-${project.tint})` }} />
+  ));
+}
+
 interface BreakdownProps {
   servers: number;
+  projects: ProjectShare[];
   apps: AppUsage[] | null;
   total: number;
   onQuit: (app: AppUsage) => void;
 }
 
-function Breakdown({ servers, apps, total, onQuit }: BreakdownProps) {
+function Breakdown({ servers, projects, apps, total, onQuit }: BreakdownProps) {
   const i18n = useI18n();
   if (apps === null) {
     return (
@@ -275,7 +313,7 @@ function Breakdown({ servers, apps, total, onQuit }: BreakdownProps) {
               ) : null}
             </span>
             <span className={styles.bar} aria-hidden="true">
-              <span className={app === null ? styles.servers : undefined} style={{ width: share(bytes, total) }} />
+              {app === null ? <Segments projects={projects} scale={1} whole={total} /> : <span style={{ width: share(bytes, total) }} />}
             </span>
           </li>
         ))}
@@ -292,6 +330,7 @@ function share(bytes: number, whole: number): string {
 
 interface RowProps {
   service: Service;
+  tint: number;
   selected: boolean;
   now: number;
   onShow: () => void;
@@ -299,7 +338,7 @@ interface RowProps {
   onStop: () => void;
 }
 
-function Row({ service, selected, now, onShow, onOpen, onStop }: RowProps) {
+function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps) {
   const i18n = useI18n();
   const port = service.ports[0]?.port;
   const project = service.project;
@@ -332,14 +371,12 @@ function Row({ service, selected, now, onShow, onOpen, onStop }: RowProps) {
       className={styles.row}
       onClick={onShow}
     >
-      <Plate port={port} />
+      <Plate port={port} tint={tint} />
       <div className={styles.text}>
-        <div className={styles.title}>
-          <span className={styles.dot} aria-hidden="true" />
-          {title}
-        </div>
+        <div className={styles.title}>{title}</div>
         <div className={styles.details}>{details}</div>
       </div>
+      <Trend values={trendOf(service.id)} />
       <div className={styles.side}>
         <span className={styles.memory}>{memory}</span>
         {/* The mouse's shortcuts; the keyboard finds the same actions on the server's page. */}

@@ -5,6 +5,7 @@ export interface Plural {
 
 export interface Messages {
   settings: string;
+  clean: string;
   servers: Plural;
   memoryOf: string;
   memoryInUse: string;
@@ -97,6 +98,7 @@ export interface Messages {
 
 export const en: Messages = {
   settings: "Settings",
+  clean: "Clean up",
   servers: { one: "{count} server", other: "{count} servers" },
   memoryOf: "{used} of {total}",
   memoryInUse: "Memory in use",
@@ -190,6 +192,7 @@ export const en: Messages = {
 
 export const tr: Messages = {
   settings: "Ayarlar",
+  clean: "Temizle",
   servers: { one: "{count} sunucu", other: "{count} sunucu" },
   memoryOf: "{used} / {total}",
   memoryInUse: "Kullanılan bellek",

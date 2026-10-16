@@ -1,5 +1,8 @@
 import type { Service } from "./types";
 
+/** How many colors projects are told apart by. */
+export const TINTS = 6;
+
 export interface Group {
   /** The repository's folder, or the project's when it isn't in one. */
   id: string;
@@ -13,7 +16,7 @@ export interface Group {
 export function groupByProject(services: Service[]): Group[] {
   const byRepository = new Map<string, Service[]>();
   for (const service of services) {
-    const key = service.project?.repoRoot ?? service.project?.root ?? "";
+    const key = projectOf(service);
     byRepository.set(key, [...(byRepository.get(key) ?? []), service]);
   }
   const groups = [...byRepository].map(([key, members]): Group => {
@@ -31,6 +34,34 @@ export function groupByProject(services: Service[]): Group[] {
     if (a.name === null || b.name === null) return a.name === null ? 1 : -1;
     return a.name.localeCompare(b.name);
   });
+}
+
+/**
+ * A color for each project among `services`, by its folder: the same one every
+ * time where it can be, and its own while there are colors to go round.
+ */
+export function tintsOf(services: Service[]): Map<string, number> {
+  const tints = new Map<string, number>();
+  const taken = new Set<number>();
+  for (const id of [...new Set(services.map(projectOf))].sort()) {
+    let tint = tintOf(id);
+    for (let step = 0; step < TINTS && taken.has(tint); step += 1) tint = (tint + 1) % TINTS;
+    taken.add(tint);
+    tints.set(id, tint);
+  }
+  return tints;
+}
+
+/** A project's first choice of color; the projectless get the first, brass. */
+export function tintOf(id: string): number {
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash % TINTS;
+}
+
+/** The folder a service's project is grouped by, empty outside any project. */
+export function projectOf(service: Service): string {
+  return service.project?.repoRoot ?? service.project?.root ?? "";
 }
 
 function frameworkOf(service: Service): string | null {

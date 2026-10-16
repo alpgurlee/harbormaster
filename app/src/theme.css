@@ -20,8 +20,14 @@
   --text: #1c1c1f;
   --muted: #6c6c74;
   --brass: #a8761f;
-  --plate-text: #7d520b;
-  --plate-fill: rgb(168 118 31 / 0.1);
+  --trend: rgb(0 0 0 / 0.35);
+  /* Projects are told apart by these; dark enough to read on light glass. */
+  --tint-0: #7d520b;
+  --tint-1: #17615b;
+  --tint-2: #9a3f2b;
+  --tint-3: #2a4f96;
+  --tint-4: #3d6324;
+  --tint-5: #5a3fa0;
 
   color-scheme: light dark;
 }
@@ -47,8 +53,13 @@
     --text: #ececef;
     --muted: #9a9aa3;
     --brass: #e0b36a;
-    --plate-text: #ebc37f;
-    --plate-fill: rgb(224 179 106 / 0.1);
+    --trend: rgb(255 255 255 / 0.4);
+    --tint-0: #e0b36a;
+    --tint-1: #5cc8be;
+    --tint-2: #f08a72;
+    --tint-3: #7aa7f0;
+    --tint-4: #9ccb7d;
+    --tint-5: #b79af0;
   }
 }
 
@@ -68,8 +79,13 @@
   --text: #ececef;
   --muted: #9a9aa3;
   --brass: #e0b36a;
-  --plate-text: #ebc37f;
-  --plate-fill: rgb(224 179 106 / 0.1);
+  --trend: rgb(255 255 255 / 0.4);
+  --tint-0: #e0b36a;
+  --tint-1: #5cc8be;
+  --tint-2: #f08a72;
+  --tint-3: #7aa7f0;
+  --tint-4: #9ccb7d;
+  --tint-5: #b79af0;
 }
 
 /* Over the window's own frosted glass on a Mac. */
@@ -80,7 +96,13 @@
 @media (forced-colors: active) {
   :root {
     --brass: CanvasText;
-    --plate-text: CanvasText;
+    --trend: CanvasText;
+    --tint-0: CanvasText;
+    --tint-1: CanvasText;
+    --tint-2: CanvasText;
+    --tint-3: CanvasText;
+    --tint-4: CanvasText;
+    --tint-5: CanvasText;
     --green: CanvasText;
   }
 }
