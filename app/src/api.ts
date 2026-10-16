@@ -1,22 +1,32 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Update } from "./types";
+import type { Holder, Protection, Update } from "./types";
+
+/** Why the app turned a stop down. */
+export type Reason =
+  | { code: "notFound" | "runsHarbormaster" | "changed" | "expired" | "untrackedExec" | "unknownLineage" }
+  | { code: "protected"; protection: Protection }
+  | { code: "failed"; message: string };
 
 /** The panel only ever names a service by id; the backend resolves the rest. */
-export interface StopPreview {
-  kind: "ready";
-  token: number;
-  stops: { pid: number; name: string; command: string | null }[];
-  frees: number[];
-  staysOpen: { pid: number; name: string }[];
-}
+export type Preview =
+  | {
+      kind: "ready";
+      token: number;
+      stops: { pid: number; name: string; command: string | null }[];
+      frees: number[];
+      staysOpen: Holder[];
+    }
+  | { kind: "refused"; reason: Reason };
 
-export type Preview = StopPreview | { kind: "refused"; reason: string };
+export type Outcome = "stopped" | "alreadyGone" | "replaced" | "accessDenied" | "stillRunning" | { failed: string };
 
-export interface StopResult {
-  outcomes: { pid: number; name: string; outcome: string }[];
+export interface Stopped {
+  outcomes: { pid: number; name: string; outcome: Outcome }[];
   stillRunning: boolean;
 }
+
+export const inApp = "__TAURI_INTERNALS__" in window;
 
 export function subscribe(onUpdate: (update: Update) => void): Promise<void> {
   const channel = new Channel<Update>();
@@ -27,7 +37,8 @@ export function subscribe(onUpdate: (update: Update) => void): Promise<void> {
 export const openInBrowser = (id: string, port: number) => invoke<void>("open_in_browser", { id, port });
 export const revealFolder = (id: string) => invoke<void>("reveal_folder", { id });
 export const stopPreview = (id: string) => invoke<Preview>("stop_preview", { id });
-export const stopServer = (token: number) => invoke<StopResult>("stop", { token });
-export const forceStop = (token: number) => invoke<StopResult>("force_stop", { token });
+/** Rejects with a `Reason` when the server changed since it was approved. */
+export const stopServer = (token: number) => invoke<Stopped>("stop", { token });
+export const forceStop = (token: number) => invoke<Stopped>("force_stop", { token });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");

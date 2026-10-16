@@ -8,7 +8,7 @@ const catalogs: Record<Locale, Messages> = { en, tr };
 
 type Values = Record<string, string | number>;
 type PluralKey = { [K in keyof Messages]: Messages[K] extends Plural ? K : never }[keyof Messages];
-type TextKey = Exclude<keyof Messages, PluralKey>;
+export type TextKey = Exclude<keyof Messages, PluralKey>;
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -20,7 +20,9 @@ export function translator(locale: Locale) {
   const plurals = new Intl.PluralRules(locale);
   const tenths = new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const whole = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-  const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 });
+  const percent = (digits: number) =>
+    new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const conjunction = new Intl.ListFormat(locale, { type: "conjunction" });
   const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
 
   const template = (key: keyof Messages, values: Values): string => {
@@ -57,8 +59,12 @@ export function translator(locale: Locale) {
       const totalText = Number.isInteger(size) ? whole.format(size) : tenths.format(size);
       return t("memoryOf", { used: tenths.format(used / GIB), total: `${totalText} GB` });
     },
-    percent(value: number) {
-      return percent.format(value / 100);
+    percent(value: number, digits = 0) {
+      return percent(digits).format(value / 100);
+    },
+    /** `a, b and c`, the way the language joins them. */
+    list(items: string[]) {
+      return conjunction.format(items);
     },
     time(milliseconds: number) {
       return clock.format(milliseconds);

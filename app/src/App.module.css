@@ -1,0 +1,20 @@
+.frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-height: 600px;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: var(--panel-radius);
+  background: var(--surface);
+  color: var(--text);
+  font: 13px/1.35 var(--font);
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}

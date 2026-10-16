@@ -1,14 +1,12 @@
 .panel {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  width: 340px;
-  max-height: 600px;
-  overflow: hidden;
-  border: 1px solid var(--edge);
-  border-radius: var(--panel-radius);
-  background: var(--surface);
-  color: var(--text);
-  font: 13px/1.35 var(--font);
+  min-height: 0;
+}
+
+.panel[hidden] {
+  display: none;
 }
 
 .header {

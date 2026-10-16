@@ -6,7 +6,9 @@
   --red: #e5484d;
 
   --surface: #f6f6f7;
+  --glass: rgb(246 246 247 / 0.62);
   --raised: #e9e9ec;
+  --sheet: #ffffff;
   --field: #ffffff;
   --field-edge: rgb(0 0 0 / 0.12);
   --field-focus: rgb(0 0 0 / 0.3);
@@ -30,7 +32,9 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --surface: #242427;
+    --glass: rgb(32 32 35 / 0.58);
     --raised: #2f2f33;
+    --sheet: #2b2b2f;
     --field: #1b1b1e;
     --field-edge: rgb(255 255 255 / 0.1);
     --field-focus: rgb(255 255 255 / 0.26);
@@ -48,7 +52,9 @@
 
 :root[data-theme="dark"] {
   --surface: #242427;
+  --glass: rgb(32 32 35 / 0.58);
   --raised: #2f2f33;
+  --sheet: #2b2b2f;
   --field: #1b1b1e;
   --field-edge: rgb(255 255 255 / 0.1);
   --field-focus: rgb(255 255 255 / 0.26);
@@ -61,6 +67,11 @@
   --brass: #e0b36a;
   --plate-text: #ebc37f;
   --plate-fill: rgb(224 179 106 / 0.1);
+}
+
+/* Over the window's own frosted glass on a Mac. */
+:root[data-vibrancy] {
+  --surface: var(--glass);
 }
 
 @media (forced-colors: active) {

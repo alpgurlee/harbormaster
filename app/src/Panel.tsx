@@ -12,6 +12,8 @@ import styles from "./Panel.module.css";
 const FRESH_MS = 10_000;
 
 export interface PanelProps {
+  /** Kept, with its search and selection, while a server's page shows. */
+  hidden?: boolean;
   update: Update | null;
   /** Milliseconds since the Unix epoch. */
   now: number;
@@ -20,15 +22,21 @@ export interface PanelProps {
   onStop: (service: Service) => void;
 }
 
-export function Panel({ update, now, onShow, onOpen, onStop }: PanelProps) {
+export function Panel({ hidden = false, update, now, onShow, onOpen, onStop }: PanelProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const search = useRef<HTMLInputElement>(null);
+  const loading = update === null;
+  // Typing goes to the search whenever the list shows.
+  useEffect(() => {
+    if (!hidden) search.current?.focus();
+  }, [hidden, loading]);
 
   if (update === null) {
     return (
-      <div className={styles.panel}>
+      <div className={styles.panel} hidden={hidden}>
         <Header />
         <p className={styles.note}>{i18n.t("looking")}</p>
       </div>
@@ -61,6 +69,7 @@ export function Panel({ update, now, onShow, onOpen, onStop }: PanelProps) {
       event.preventDefault();
       onShow(selected);
     } else if (event.key === "Escape" && searching) {
+      event.preventDefault();
       event.stopPropagation();
       setQuery("");
     }
@@ -87,12 +96,13 @@ export function Panel({ update, now, onShow, onOpen, onStop }: PanelProps) {
   }
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} hidden={hidden}>
       <Header />
       <Summary dev={dev} memory={update.memory} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
         <input
+          ref={search}
           type="search"
           role="combobox"
           value={query}
@@ -103,7 +113,9 @@ export function Panel({ update, now, onShow, onOpen, onStop }: PanelProps) {
           aria-controls="servers"
           aria-activedescendant={selected ? `server-${selected.id}` : undefined}
           spellCheck={false}
-          autoFocus
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
         />

@@ -1,13 +1,15 @@
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
-import { subscribe } from "./api";
+import { inApp, subscribe } from "./api";
+import { platform } from "./platform";
 import { publish } from "./store";
 import "./theme.css";
 
-document.documentElement.dataset.platform = navigator.userAgent.includes("Windows") ? "windows" : "mac";
+document.documentElement.dataset.platform = platform;
+if (inApp && platform === "mac") document.documentElement.dataset.vibrancy = "";
 
-if ("__TAURI_INTERNALS__" in window) {
+if (inApp) {
   subscribe(publish).catch(console.error);
 } else if (import.meta.env.DEV) {
   void import("./demo").then(({ play }) => play(publish));
