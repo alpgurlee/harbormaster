@@ -169,4 +169,30 @@ export interface Disk {
 }
 
 /** Why the app turned the cleaner down. */
-export type CleanRefusal = { code: "busy" | "closed" | "expired" | "unlisted" } | { code: "failed"; message: string };
+export type CleanRefusal =
+  | { code: "busy" | "closed" | "expired" | "unlisted" | "changed" }
+  | { code: "failed"; message: string };
+
+/** Why a place in the map may hold more than it says, the weightiest last. */
+export type Short = "deep" | "changed" | "denied" | "skipped" | "stopped";
+
+/** A folder or file in a map of the home folder. */
+export interface Area {
+  /** Its number in the map, which showing it in Finder takes; the home folder's is 0. */
+  id: number;
+  name: string;
+  /** The room it takes on disk, with everything it holds. */
+  bytes: number;
+  folder: boolean;
+  short: Short | null;
+  /** What it holds that is large enough to show, largest first. */
+  inside: Area[];
+  /** What else it holds, each too small to show on its own. */
+  rest: number;
+  /** Whether all it holds is counted in `rest` to keep the map small, whatever the size of each. */
+  folded: boolean;
+}
+
+export type MapEvent =
+  | { kind: "charting"; bytes: number; items: number; folder: string }
+  | { kind: "done"; token: number; area: Area };

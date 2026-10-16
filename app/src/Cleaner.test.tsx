@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Cleaner, type CleanerBackend } from "./Cleaner";
 import { I18nProvider } from "./i18n";
-import type { Finding, RunEvent, ScanEvent } from "./types";
+import type { Area, Finding, MapEvent, RunEvent, ScanEvent } from "./types";
 
 afterEach(cleanup);
 
@@ -62,6 +62,8 @@ function fake() {
   let refusal: unknown = null;
   const revealed: string[] = [];
   const rechecks: { token: number; answer: (findings: Finding[]) => void }[] = [];
+  const maps: { others: boolean; onEvent: (event: MapEvent) => void }[] = [];
+  const shownAreas: { token: number; id: number }[] = [];
   const backend: CleanerBackend = {
     scan: (onEvent) => {
       scans.push(onEvent);
@@ -85,9 +87,19 @@ function fake() {
       return Promise.resolve();
     },
     recheck: (token) => new Promise((answer) => rechecks.push({ token, answer })),
+    map: (others, onEvent) => {
+      maps.push({ others, onEvent });
+      return refusal === null ? Promise.resolve() : Promise.reject(refusal);
+    },
+    revealArea: (token, id) => {
+      shownAreas.push({ token, id });
+      return Promise.resolve();
+    },
   };
   return {
     backend,
+    maps,
+    shownAreas,
     scans,
     hunts,
     runs,
@@ -637,5 +649,114 @@ describe("the cleaner window", () => {
 
     expect(hero()).toBe("3,0 GBtemizlemek için seçili; bulunan 10,0 GB");
     expect(screen.getByRole("button", { name: "Temizle…" })).toBeTruthy();
+  });
+});
+
+function mapped(id: number, name: string, bytes: number, inside: Area[] = []): Area {
+  return { id, name, bytes, folder: inside.length > 0, short: null, inside, rest: 0, folded: false };
+}
+
+const ROOT = mapped(0, "dev", 8 * GB, [mapped(1, "Movies", 5 * GB, [mapped(2, "trip.mov", 5 * GB)]), mapped(3, "disk.iso", 3 * GB)]);
+
+describe("the space map", () => {
+  // The tiles are laid out once their room is known; the list is what these tests read.
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const section = () => screen.getByRole("button", { name: /^Space map/ });
+  const mapButton = () => screen.getByRole<HTMLButtonElement>("button", { name: "Map" });
+
+  /** Opens the map section, and maps with other apps' data if `others`. */
+  function asked(others = false) {
+    fireEvent.click(section());
+    if (others) fireEvent.click(screen.getByRole("checkbox", { name: "Also look in other apps' data" }));
+    fireEvent.click(mapButton());
+  }
+
+  it("maps the home folder only when asked, other apps' data too if chosen, and lists what it holds", () => {
+    const driver = fake();
+    show(driver.backend);
+    fireEvent.click(section());
+    expect(driver.maps).toHaveLength(0);
+
+    asked(true);
+    act(() => driver.maps[0].onEvent({ kind: "charting", bytes: 2 * GB, items: 12_345, folder: "Library/Caches" }));
+
+    expect(driver.maps.map((map) => map.others)).toEqual([true]);
+    expect(screen.getByRole("status").textContent).toContain("12,345 items looked at");
+
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: ROOT }));
+
+    screen.getByRole("list", { name: "What Home holds" });
+    expect(section().textContent).toContain("8.0 GB");
+  });
+
+  it("shows a mapped place in Finder through the map it came from", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked();
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: ROOT }));
+
+    fireEvent.click(screen.getByRole("button", { name: /disk\.iso/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
+
+    expect(driver.shownAreas).toEqual([{ token: 4, id: 3 }]);
+  });
+
+  it("keeps mapping while another section is looked at, and starts no scan meanwhile", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Scan" }).disabled).toBe(true);
+    screen.getByText("The space map is being made. A scan can start once it is done or stopped.");
+
+    fireEvent.click(section());
+    expect(screen.getByRole("status").textContent).toContain("Mapping your home folder…");
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(driver.stops()).toBe(1);
+  });
+
+  it("starts no map while a scan runs", () => {
+    const driver = fake();
+    show(driver.backend);
+    fireEvent.click(scanButton());
+
+    fireEvent.click(section());
+
+    expect(mapButton().disabled).toBe(true);
+    screen.getByText("A scan or clean-up is running. The map can start once it is done.");
+  });
+
+  it("says why a map was turned down, ready to map again", async () => {
+    const driver = fake();
+    driver.refuse({ code: "busy" });
+    show(driver.backend);
+
+    asked();
+
+    await screen.findByText("A scan or clean-up is running already.");
+    expect(mapButton().disabled).toBe(false);
+  });
+
+  it("maps again as it was asked the first time", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked(true);
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: ROOT }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Map again" }));
+
+    expect(driver.maps.map((map) => map.others)).toEqual([true, true]);
+    expect(screen.getByRole("status").textContent).toContain("Mapping your home folder…");
   });
 });

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { cleanDisk, cleanHunt, cleanRecheck, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
+import { cleanDisk, cleanHunt, cleanMap, cleanRecheck, cleanReveal, cleanRevealArea, cleanRun, cleanScan, cleanStop } from "./api";
 import { MODULES, groupsOf, largeFile, plan, rechosen, stillChosen, type CleanModule, type Plan } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { useI18n, type Translator } from "./i18n";
 import { Review } from "./Review";
 import { keepFocusInside } from "./sheet";
-import type { CleanRefusal, Cleaned, Disk, Finding, Removal, RunEvent, ScanEvent } from "./types";
+import { SpaceMap } from "./SpaceMap";
+import type { Area, CleanRefusal, Cleaned, Disk, Finding, MapEvent, Removal, RunEvent, ScanEvent } from "./types";
 import styles from "./Cleaner.module.css";
 import sheet from "./Sheet.module.css";
 
@@ -19,6 +20,8 @@ export interface CleanerBackend {
   disk: () => Promise<Disk>;
   reveal: (path: string) => Promise<void>;
   recheck: (token: number) => Promise<Finding[]>;
+  map: (others: boolean, onEvent: (event: MapEvent) => void) => Promise<void>;
+  revealArea: (token: number, id: number) => Promise<void>;
 }
 
 const BACKEND: CleanerBackend = {
@@ -29,6 +32,8 @@ const BACKEND: CleanerBackend = {
   disk: cleanDisk,
   reveal: cleanReveal,
   recheck: cleanRecheck,
+  map: cleanMap,
+  revealArea: cleanRevealArea,
 };
 
 /** Coming back to the window more often than this doesn't look at the list again. */
@@ -37,7 +42,7 @@ const RECHECK_EVERY_MS = 3_000;
 const SECTIONS: CleanModule[] = ["developer", "system", "large"];
 const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem", large: "moduleLarge" } as const;
 
-type View = "overview" | CleanModule;
+type View = "overview" | CleanModule | "map";
 
 type Step =
   | { kind: "ready" }
@@ -55,6 +60,12 @@ type Step =
 
 type Found = Extract<Step, { kind: "found" }>;
 
+/** Where the space map stands: it is made apart from scans, though never at the same time as one. */
+type Mapping =
+  | { kind: "ready"; refusal?: CleanRefusal }
+  | { kind: "mapping"; bytes: number; items: number; folder: string }
+  | { kind: "mapped"; token: number; root: Area };
+
 export interface CleanerProps {
   backend?: CleanerBackend;
   /** Milliseconds since the Unix epoch, for how long projects have sat. */
@@ -69,6 +80,9 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [disk, setDisk] = useState<Disk | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [mapping, setMapping] = useState<Mapping>({ kind: "ready" });
+  // Whether the map looks in other apps' data too, which macOS asks about.
+  const [others, setOthers] = useState(false);
   // What had the focus before the sheet, to give it back when the sheet goes.
   const returnFocus = useRef<HTMLElement | null>(null);
   // Where a clean-up began, to go back to once it is done.
@@ -165,6 +179,20 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
     };
   }, [backend, token]);
 
+  const chart = () => {
+    setMapping({ kind: "mapping", bytes: 0, items: 0, folder: "" });
+    backend
+      .map(others, (event) => {
+        if (event.kind === "charting") {
+          const { kind: _, ...charting } = event;
+          setMapping((current) => (current.kind === "mapping" ? { kind: "mapping", ...charting } : current));
+        } else {
+          setMapping({ kind: "mapped", token: event.token, root: event.area });
+        }
+      })
+      .catch((error: unknown) => setMapping({ kind: "ready", refusal: asRefusal(error) }));
+  };
+
   const run = (found: Found) => {
     const going = found.findings.filter((finding) => chosen.has(finding.path));
     setConfirming(false);
@@ -222,6 +250,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   };
 
   const working = step.kind === "scanning" || step.kind === "removing";
+  // A map takes the same turn as a scan or a removal, so neither starts while the other runs.
+  const charting = mapping.kind === "mapping";
   const found = step.kind === "found" ? step : null;
   // What a clean-up left, to go back to.
   const next = step.kind === "cleaned" || step.kind === "refused" ? (step.next ?? null) : null;
@@ -233,7 +263,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   };
   const sectionBytes = (section: CleanModule) =>
     list?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
-  const title = view === "overview" ? i18n.t("overview") : i18n.t(SECTION_NAMES[view]);
+  const title = i18n.t(view === "overview" ? "overview" : view === "map" ? "moduleMap" : SECTION_NAMES[view]);
   // A section shows what was looked for: the scan's, or the hunt's for large files.
   const list = found ?? next;
   const listed = (section: CleanModule) => list !== null && (section === "large" ? list.hunted : list.scanned);
@@ -269,6 +299,15 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             {listed(section) ? <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span> : null}
           </button>
         ))}
+        <button
+          type="button"
+          className={styles.section}
+          aria-current={view === "map" ? "page" : undefined}
+          onClick={() => setView("map")}
+        >
+          {i18n.t("moduleMap")}
+          {mapping.kind === "mapped" ? <span className={styles.sectionSize}>{i18n.bytes(mapping.root.bytes)}</span> : null}
+        </button>
         {disk === null ? null : (
           <p className={styles.diskNote}>
             {i18n.t("diskFree", { free: i18n.bytes(disk.free), total: i18n.bytes(disk.total) })}
@@ -278,19 +317,45 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       <div className={styles.main} inert={confirming}>
         <header className={styles.bar} data-tauri-drag-region>
           <h1 className={styles.title}>{title}</h1>
-          {working ? (
+          {view === "map" ? (
+            charting ? (
+              <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
+                {i18n.t("stop")}
+              </button>
+            ) : mapping.kind === "mapped" ? (
+              <button type="button" className={styles.action} disabled={working} onClick={chart}>
+                {i18n.t("mapAgain")}
+              </button>
+            ) : null
+          ) : working ? (
             <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
               {i18n.t("stop")}
             </button>
           ) : step.kind === "ready" || huntFirst || scanFirst ? null : (
-            <button type="button" className={styles.action} onClick={() => search(view === "large")}>
+            <button type="button" className={styles.action} disabled={charting} onClick={() => search(view === "large")}>
               {i18n.t("cleanScanAgain")}
             </button>
           )}
         </header>
         <div className={styles.page}>
-          {huntFirst || scanFirst ? (
-            <Start disk={disk} hint={i18n.t(huntFirst ? "huntHint" : "scanHint")} onScan={() => search(huntFirst)} />
+          {view === "map" ? (
+            mapPage(mapping, {
+              disk,
+              others,
+              working,
+              i18n,
+              onOthers: setOthers,
+              onMap: chart,
+              onReveal: (token, id) => backend.revealArea(token, id),
+            })
+          ) : huntFirst || scanFirst ? (
+            <Start
+              disk={disk}
+              hint={i18n.t(charting ? "waitForMap" : huntFirst ? "huntHint" : "scanHint")}
+              start={i18n.t("scan")}
+              disabled={charting}
+              onStart={() => search(huntFirst)}
+            />
           ) : view === "large" && found !== null && !found.findings.some(largeFile) ? (
             <p className={styles.empty}>{i18n.t("noLargeFiles")}</p>
           ) : view !== "overview" && found !== null ? (
@@ -304,13 +369,14 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
             />
           ) : (
-            overview(step, { disk, chosen, i18n, onScan: () => search(false), onReview: setView, onBack: back })
+            overview(step, { disk, chosen, charting, i18n, onScan: () => search(false), onReview: setView, onBack: back })
           )}
         </div>
-        {found !== null && found.findings.length > 0 ? (
+        {view !== "map" && found !== null && found.findings.length > 0 ? (
           <Footer
             plan={plan(found.findings, chosen)}
             muted={confirming}
+            disabled={charting}
             onClean={() => {
               returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
               setConfirming(true);
@@ -328,16 +394,26 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
 interface Overview {
   disk: Disk | null;
   chosen: Set<string>;
+  /** Whether a map is being made, which no scan may start beside. */
+  charting: boolean;
   i18n: Translator;
   onScan: () => void;
   onReview: (section: CleanModule) => void;
   onBack: () => void;
 }
 
-function overview(step: Step, { disk, chosen, i18n, onScan, onReview, onBack }: Overview) {
+function overview(step: Step, { disk, chosen, charting, i18n, onScan, onReview, onBack }: Overview) {
   switch (step.kind) {
     case "ready":
-      return <Start disk={disk} hint={i18n.t("scanHint")} onScan={onScan} />;
+      return (
+        <Start
+          disk={disk}
+          hint={i18n.t(charting ? "waitForMap" : "scanHint")}
+          start={i18n.t("scan")}
+          disabled={charting}
+          onStart={onScan}
+        />
+      );
     case "scanning":
       return (
         <div className={styles.start} role="status">
@@ -390,8 +466,71 @@ function overview(step: Step, { disk, chosen, i18n, onScan, onReview, onBack }: 
   }
 }
 
-/** How full the disk is, and a button to look for what could go. */
-function Start({ disk, hint, onScan }: { disk: Disk | null; hint: string; onScan: () => void }) {
+interface MapPage {
+  disk: Disk | null;
+  others: boolean;
+  /** Whether a scan or a removal runs, which no map may start beside. */
+  working: boolean;
+  i18n: Translator;
+  onOthers: (others: boolean) => void;
+  onMap: () => void;
+  onReveal: (token: number, id: number) => Promise<void>;
+}
+
+function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMap, onReveal }: MapPage) {
+  switch (mapping.kind) {
+    case "ready":
+      return (
+        <>
+          {mapping.refusal === undefined ? null : <p className={styles.refused}>{refusalText(mapping.refusal, i18n)}</p>}
+          <Start
+            disk={disk}
+            hint={i18n.t(working ? "waitForCleaning" : "mapHint")}
+            start={i18n.t("mapStart")}
+            disabled={working}
+            onStart={onMap}
+          >
+            <label className={styles.others}>
+              <input type="checkbox" checked={others} onChange={(event) => onOthers(event.target.checked)} />
+              {i18n.t("mapOthers")}
+            </label>
+            {others ? <p className={styles.hint}>{i18n.t("mapOthersHint")}</p> : null}
+          </Start>
+        </>
+      );
+    case "mapping":
+      return (
+        <div className={styles.start} role="status">
+          <Ring fraction={0} waiting>
+            <strong>{i18n.bytes(mapping.bytes)}</strong>
+          </Ring>
+          <p className={styles.phase}>{i18n.t("mapLooking")}</p>
+          {mapping.items === 0 ? null : (
+            <p className={styles.hint}>{i18n.plural("mapCounted", mapping.items, { items: i18n.number(mapping.items) })}</p>
+          )}
+          <p className={styles.where} aria-hidden="true">
+            {mapping.folder}
+          </p>
+        </div>
+      );
+    case "mapped":
+      return <SpaceMap key={mapping.token} root={mapping.root} onReveal={(id) => onReveal(mapping.token, id)} />;
+  }
+}
+
+interface StartProps {
+  disk: Disk | null;
+  hint: string;
+  /** What the button that starts says. */
+  start: string;
+  disabled?: boolean;
+  onStart: () => void;
+  /** What may be asked before starting. */
+  children?: ReactNode;
+}
+
+/** How full the disk is, and a button to look into it. */
+function Start({ disk, hint, start, disabled = false, onStart, children }: StartProps) {
   const i18n = useI18n();
   return (
     <div className={styles.start}>
@@ -403,9 +542,10 @@ function Start({ disk, hint, onScan }: { disk: Disk | null; hint: string; onScan
           </>
         )}
       </Ring>
-      <button type="button" className={styles.scan} onClick={onScan}>
-        {i18n.t("scan")}
+      <button type="button" className={styles.scan} disabled={disabled} onClick={onStart}>
+        {start}
       </button>
+      {children}
       <p className={styles.hint}>{hint}</p>
     </div>
   );
@@ -488,14 +628,14 @@ function Summary({
   );
 }
 
-function Footer({ plan, muted, onClean }: { plan: Plan; muted: boolean; onClean: () => void }) {
+function Footer({ plan, muted, disabled, onClean }: { plan: Plan; muted: boolean; disabled: boolean; onClean: () => void }) {
   const i18n = useI18n();
   return (
     <footer className={styles.foot} inert={muted}>
       <span className={styles.total}>
         <strong>{i18n.plural("items", plan.count)}</strong> · {i18n.bytes(plan.bytes)}
       </span>
-      <button type="button" className={styles.primary} disabled={plan.count === 0} onClick={onClean}>
+      <button type="button" className={styles.primary} disabled={plan.count === 0 || disabled} onClick={onClean}>
         {i18n.t("cleanEllipsis")}
       </button>
     </footer>

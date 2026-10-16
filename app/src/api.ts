@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Disk, Finding, Holder, Protection, RunEvent, ScanEvent, Update } from "./types";
+import type { Disk, Finding, Holder, MapEvent, Protection, RunEvent, ScanEvent, Update } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -74,9 +74,18 @@ export function cleanRun(token: number, paths: string[], onEvent: (event: RunEve
   return invoke("clean_run", { token, paths, channel });
 }
 
+/** Maps the home folder, and other apps' data in it if `others`; rejects with a `CleanRefusal`. */
+export function cleanMap(others: boolean, onEvent: (event: MapEvent) => void): Promise<void> {
+  const channel = new Channel<MapEvent>();
+  channel.onmessage = onEvent;
+  return invoke("clean_map", { others, channel });
+}
+
 /** The findings the scan under `token` listed, as they stand now: what went since is left out. */
 export const cleanRecheck = (token: number) => invoke<Finding[]>("clean_recheck", { token });
 export const cleanStop = () => invoke<void>("clean_stop");
 export const cleanDisk = () => invoke<Disk>("clean_disk");
 /** Shows a finding in Finder; only one the last scan listed. */
 export const cleanReveal = (path: string) => invoke<void>("clean_reveal", { path });
+/** Shows the place numbered `id` of the map under `token` in Finder, if it is still as mapped. */
+export const cleanRevealArea = (token: number, id: number) => invoke<void>("clean_reveal_area", { token, id });

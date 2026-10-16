@@ -120,6 +120,8 @@ export function refusalText(refusal: CleanRefusal, i18n: Translator): string {
       return i18n.t("cleanExpired");
     case "unlisted":
       return i18n.t("cleanUnlisted");
+    case "changed":
+      return i18n.t("mapChanged");
     case "failed":
       return i18n.t("reasonFailed", { message: refusal.message });
   }

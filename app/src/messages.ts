@@ -186,6 +186,30 @@ export interface Messages {
   heldHint: string;
   revealInFinder: string;
   noItemsMatch: string;
+  moduleMap: string;
+  mapStart: string;
+  mapHint: string;
+  mapOthers: string;
+  mapOthersHint: string;
+  mapLooking: string;
+  mapCounted: Plural;
+  mapAgain: string;
+  mapHome: string;
+  mapRest: string;
+  mapFolded: string;
+  mapFolder: string;
+  mapFile: string;
+  mapNothing: string;
+  mapHolds: string;
+  mapTrail: string;
+  waitForMap: string;
+  waitForCleaning: string;
+  mapChanged: string;
+  shortDeep: string;
+  shortChanged: string;
+  shortDenied: string;
+  shortSkipped: string;
+  shortStopped: string;
 }
 
 export const en: Messages = {
@@ -373,6 +397,31 @@ export const en: Messages = {
   heldHint: "Quit what is using an item, then come back here: the list looks again.",
   revealInFinder: "Show in Finder",
   noItemsMatch: "Nothing here matches “{query}”.",
+  moduleMap: "Space map",
+  mapStart: "Map",
+  mapHint:
+    "Shows where the room in your home folder goes, the Library and hidden folders too. Nothing is moved or deleted. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
+  mapOthers: "Also look in other apps' data",
+  mapOthersHint: "macOS asks before Harbormaster can look there.",
+  mapLooking: "Mapping your home folder…",
+  mapCounted: { one: "{items} item looked at", other: "{items} items looked at" },
+  mapAgain: "Map again",
+  mapHome: "Home",
+  mapRest: "Smaller items",
+  mapFolded: "Not shown one by one, to keep the map small.",
+  mapFolder: "Folder",
+  mapFile: "File",
+  mapNothing: "Nothing here is large enough to show.",
+  mapHolds: "What {name} holds",
+  mapTrail: "Where you are",
+  waitForMap: "The space map is being made. A scan can start once it is done or stopped.",
+  waitForCleaning: "A scan or clean-up is running. The map can start once it is done.",
+  mapChanged: "It has changed since the map was made. Map again to see it as it is.",
+  shortDeep: "Goes deeper than the map looks",
+  shortChanged: "Something in it changed while it was mapped",
+  shortDenied: "Some of it couldn't be read",
+  shortSkipped: "Holds other apps' data, not looked in",
+  shortStopped: "Not all of it was mapped before the stop",
 };
 
 export const tr: Messages = {
@@ -560,4 +609,29 @@ export const tr: Messages = {
   heldHint: "Bir öğeyi kullananı kapat, sonra buraya dön; liste yeniden bakar.",
   revealInFinder: "Finder'da göster",
   noItemsMatch: "“{query}” ile eşleşen bir şey yok.",
+  moduleMap: "Alan haritası",
+  mapStart: "Haritala",
+  mapHint:
+    "Ana klasöründeki alanın nereye gittiğini, Library ve gizli klasörler dahil gösterir. Hiçbir şey taşınmaz ya da silinmez. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
+  mapOthers: "Diğer uygulamaların verilerine de bak",
+  mapOthersHint: "macOS oraya bakılmadan önce izin ister.",
+  mapLooking: "Ana klasörün haritalanıyor…",
+  mapCounted: { one: "{items} öğeye bakıldı", other: "{items} öğeye bakıldı" },
+  mapAgain: "Yeniden haritala",
+  mapHome: "Ana klasör",
+  mapRest: "Daha küçük öğeler",
+  mapFolded: "Haritayı küçük tutmak için tek tek gösterilmiyor.",
+  mapFolder: "Klasör",
+  mapFile: "Dosya",
+  mapNothing: "Burada gösterilecek kadar büyük bir şey yok.",
+  mapHolds: "{name} içinde olanlar",
+  mapTrail: "Bulunduğun yer",
+  waitForMap: "Alan haritası çıkarılıyor. Tarama, harita bitince ya da durdurulunca başlayabilir.",
+  waitForCleaning: "Bir tarama ya da temizlik sürüyor. Harita, o bitince başlayabilir.",
+  mapChanged: "Harita çıkarıldıktan sonra değişmiş. Güncel halini görmek için yeniden haritala.",
+  shortDeep: "Haritanın baktığından daha derine iniyor",
+  shortChanged: "Haritalanırken içinde bir şey değişti",
+  shortDenied: "Bir kısmı okunamadı",
+  shortSkipped: "Diğer uygulamaların verisini içeriyor; bakılmadı",
+  shortStopped: "Durdurulmadan önce tamamı haritalanamadı",
 };

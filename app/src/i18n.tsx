@@ -60,6 +60,10 @@ export function translator(locale: Locale) {
       const totalText = Number.isInteger(size) ? whole.format(size) : tenths.format(size);
       return t("memoryOf", { used: tenths.format(used / GIB), total: `${totalText} GB` });
     },
+    /** A count with its digits grouped as the language does: `312,000`. */
+    number(value: number) {
+      return whole.format(value);
+    },
     percent(value: number, digits = 0) {
       return percent(digits).format(value / 100);
     },

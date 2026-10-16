@@ -1,5 +1,5 @@
 import type { CleanerBackend } from "./Cleaner";
-import type { Finding, RunEvent, ScanEvent } from "./types";
+import type { Area, Finding, MapEvent, RunEvent, ScanEvent } from "./types";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -76,6 +76,61 @@ const LARGE: Finding[] = [
   file("documents", "Documents/scans/contracts.pdf", 0.12, 400),
 ];
 
+/** A folder of the pretend map, holding `inside` and as much again in smaller items as `gib` leaves. */
+function held(name: string, gib: number, inside: Area[], extra: Partial<Area> = {}): Area {
+  const shown = inside.reduce((total, each) => total + each.bytes, 0);
+  const bytes = Math.max(Math.round(gib * GIB), shown);
+  return { id: 0, name, bytes, folder: true, short: null, inside, rest: bytes - shown, folded: false, ...extra };
+}
+
+function kept(name: string, gib: number): Area {
+  return { id: 0, name, bytes: Math.round(gib * GIB), folder: false, short: null, inside: [], rest: 0, folded: false };
+}
+
+/** Numbers `area` and what it holds in the order they are shown, as the app does. */
+function numbered(area: Area, next = { id: 0 }): Area {
+  const id = next.id++;
+  return { ...area, id, inside: area.inside.map((each) => numbered(each, next)) };
+}
+
+/** What a developer's home folder might hold, for looking at the map without one. */
+const MAP: Area = numbered(
+  held(
+    "you",
+    161,
+    [
+      held(
+        "Library",
+        72,
+        [
+          held("Developer", 31, [
+            held("Xcode", 24, [held("iOS DeviceSupport", 13, []), held("DerivedData", 9, []), held("Archives", 1.6, [])]),
+            held("CoreSimulator", 6.8, [held("Devices", 6.5, [])]),
+          ]),
+          held("Application Support", 18, [held("Code", 3.1, []), held("Slack", 2.2, []), held("Google", 1.9, [])]),
+          held("Caches", 14, [held("Google", 4.2, []), held("Homebrew", 3.1, []), held("com.spotify.client", 1.8, [])]),
+          held("Containers", 0, [], { short: "skipped" }),
+          held("Group Containers", 0, [], { short: "skipped" }),
+          held("Mail", 0.4, [], { short: "denied" }),
+        ],
+        { short: "skipped" },
+      ),
+      held("code", 38, [
+        held("acme-store", 12, [held("node_modules", 6.2, []), held(".next", 2.9, [])]),
+        held("gateway", 9.4, [held("target", 8.1, [])]),
+        held("billing-api", 5.2, [held("node_modules", 1.4, [])]),
+      ]),
+      held("Movies", 18, [held("Trip.fcpbundle", 14, []), kept("Screen Recording 2026-03-02.mov", 3.2)]),
+      held("Downloads", 12, [kept("Xcode_26.xip", 7.9), kept("ubuntu-24.04-arm64.iso", 2.6)]),
+      held("Pictures", 9, [held("Photos Library.photoslibrary", 8.8, [])]),
+      held(".gradle", 4.5, [held("caches", 4.3, [])]),
+      held("Documents", 3, [kept("contracts.pdf", 0.12)]),
+      held(".npm", 1.7, [held("_cacache", 1.7, [])]),
+    ],
+    { short: "skipped" },
+  ),
+);
+
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 /** What the pretend app shows: the last scan's and the last hunt's findings, less what it removed. */
@@ -125,4 +180,14 @@ export const demo: CleanerBackend = {
   disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),
   reveal: () => Promise.resolve(),
   recheck: () => Promise.resolve(shown()),
+  async map(_others: boolean, onEvent: (event: MapEvent) => void) {
+    const folders = ["Library/Developer/Xcode", "Library/Caches/Google", "code/acme-store/node_modules", "Movies", "Downloads"];
+    for (const [index, folder] of folders.entries()) {
+      await wait(500);
+      const share = (index + 1) / folders.length;
+      onEvent({ kind: "charting", bytes: Math.round(MAP.bytes * share), items: Math.round(480_000 * share), folder });
+    }
+    onEvent({ kind: "done", token: 9, area: MAP });
+  },
+  revealArea: () => Promise.resolve(),
 };

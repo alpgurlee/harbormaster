@@ -193,6 +193,41 @@
   outline-color: var(--text);
 }
 
+.scan:disabled,
+.action:disabled {
+  opacity: 0.45;
+}
+
+.others {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.others input {
+  margin: 0;
+  accent-color: var(--brass);
+}
+
+.where {
+  max-width: 420px;
+  min-height: 1.4em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refused {
+  margin: 0 auto;
+  color: var(--muted);
+  text-align: center;
+}
+
 .hint {
   max-width: 380px;
   margin: 0;

@@ -1,0 +1,274 @@
+.map {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.trail ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.trail li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trail li + li::before {
+  content: "›";
+  color: var(--muted);
+}
+
+.trail li[aria-current] {
+  padding: 2px 6px;
+  font-weight: 600;
+}
+
+.crumb {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+}
+
+.crumb:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.list {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.row:hover,
+.row[aria-current] {
+  background: var(--chip);
+}
+
+.swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--tint);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSize {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.share {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  left: 25px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--track);
+}
+
+.share > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tint);
+}
+
+.flag {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brass);
+}
+
+.chevron {
+  flex: none;
+  width: 8px;
+  color: var(--muted);
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tiles {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tile {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--tint) 30%, transparent);
+}
+
+.tile:hover {
+  background: color-mix(in srgb, var(--tint) 42%, transparent);
+}
+
+.tile[data-chosen] {
+  outline: 2px solid var(--tint);
+  outline-offset: -2px;
+}
+
+.tile[data-rest] {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--tint) 16%, transparent) 0 5px,
+    color-mix(in srgb, var(--tint) 7%, transparent) 5px 10px
+  );
+}
+
+.tileName,
+.tileSize {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileName {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tileSize {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-rest] {
+  --tint: var(--muted);
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.about {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+  margin: 0;
+}
+
+.detailName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facts {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.note,
+.refusal {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
+.note {
+  color: var(--muted);
+}
+
+.refusal {
+  color: var(--red);
+}
+
+.reveal {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.nothing {
+  margin: 72px auto 0;
+  color: var(--muted);
+  text-align: center;
+}
