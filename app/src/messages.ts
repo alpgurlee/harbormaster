@@ -213,6 +213,7 @@ export interface Messages {
   noApps: string;
   appsStart: string;
   appsAgain: string;
+  mapWithOthers: string;
   mapChanged: string;
   shortDeep: string;
   shortChanged: string;
@@ -435,6 +436,7 @@ export const en: Messages = {
   noApps: "No apps of yours were found in Applications.",
   appsStart: "List apps",
   appsAgain: "Refresh list",
+  mapWithOthers: "Map with other apps' data",
   mapChanged: "It has changed since the map was made. Map again to see it as it is.",
   shortDeep: "Goes deeper than the map looks",
   shortChanged: "Something in it changed while it was mapped",
@@ -657,6 +659,7 @@ export const tr: Messages = {
   noApps: "Uygulamalar klasöründe sana ait bir uygulama bulunamadı.",
   appsStart: "Uygulamaları listele",
   appsAgain: "Listeyi yenile",
+  mapWithOthers: "Uygulama verileriyle haritala",
   mapChanged: "Harita çıkarıldıktan sonra değişmiş. Güncel halini görmek için yeniden haritala.",
   shortDeep: "Haritanın baktığından daha derine iniyor",
   shortChanged: "Haritalanırken içinde bir şey değişti",

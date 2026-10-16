@@ -19,10 +19,12 @@ export interface SpaceMapProps {
   root: Area;
   /** Shows the place numbered `id` in Finder; rejects with a `CleanRefusal`. */
   onReveal: (id: number) => Promise<void>;
+  /** Maps again with other apps' data too, when that can start now. */
+  onMapOthers?: () => void;
 }
 
 /** A map of the home folder to go through: what each folder holds, as a list and as tiles sized by their room. */
-export function SpaceMap({ root, onReveal }: SpaceMapProps) {
+export function SpaceMap({ root, onReveal, onMapOthers }: SpaceMapProps) {
   const i18n = useI18n();
   const [trail, setTrail] = useState<Area[]>([root]);
   const [chosen, setChosen] = useState<Area | null>(null);
@@ -116,6 +118,11 @@ export function SpaceMap({ root, onReveal }: SpaceMapProps) {
             </span>
           ) : null}
         </p>
+        {focus.short === "skipped" && onMapOthers !== undefined ? (
+          <button type="button" className={styles.reveal} onClick={onMapOthers}>
+            {i18n.t("mapWithOthers")}
+          </button>
+        ) : null}
         {focus === root ? null : (
           <button type="button" className={styles.reveal} onClick={reveal}>
             {i18n.t("revealInFinder")}

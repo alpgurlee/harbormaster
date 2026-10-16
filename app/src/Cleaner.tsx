@@ -214,10 +214,10 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
     };
   }, [backend, token]);
 
-  const chart = () => {
+  const chart = (withOthers: boolean) => {
     setMapping({ kind: "mapping", bytes: 0, items: 0, folder: "" });
     backend
-      .map(others, (event) => {
+      .map(withOthers, (event) => {
         if (event.kind === "charting") {
           const { kind: _, ...charting } = event;
           setMapping((current) => (current.kind === "mapping" ? { kind: "mapping", ...charting } : current));
@@ -369,7 +369,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
                 {i18n.t("stop")}
               </button>
             ) : mapping.kind === "mapped" ? (
-              <button type="button" className={styles.action} disabled={working} onClick={chart}>
+              <button type="button" className={styles.action} disabled={working} onClick={() => chart(others)}>
                 {i18n.t("mapAgain")}
               </button>
             ) : null
@@ -396,7 +396,11 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               working,
               i18n,
               onOthers: setOthers,
-              onMap: chart,
+              onMap: () => chart(others),
+              onMapOthers: () => {
+                setOthers(true);
+                chart(true);
+              },
               onReveal: (token, id) => backend.revealArea(token, id),
             })
           ) : first !== null ? (
@@ -530,10 +534,12 @@ interface MapPage {
   i18n: Translator;
   onOthers: (others: boolean) => void;
   onMap: () => void;
+  /** Maps again with other apps' data too. */
+  onMapOthers: () => void;
   onReveal: (token: number, id: number) => Promise<void>;
 }
 
-function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMap, onReveal }: MapPage) {
+function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMap, onMapOthers, onReveal }: MapPage) {
   switch (mapping.kind) {
     case "ready":
       return (
@@ -570,7 +576,14 @@ function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMa
         </div>
       );
     case "mapped":
-      return <SpaceMap key={mapping.token} root={mapping.root} onReveal={(id) => onReveal(mapping.token, id)} />;
+      return (
+        <SpaceMap
+          key={mapping.token}
+          root={mapping.root}
+          onReveal={(id) => onReveal(mapping.token, id)}
+          onMapOthers={others || working ? undefined : onMapOthers}
+        />
+      );
   }
 }
 

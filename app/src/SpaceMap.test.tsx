@@ -93,6 +93,20 @@ describe("the space map", () => {
     expect(screen.getByRole("region", { name: "Containers" }).textContent).toContain("Holds other apps' data, not looked in");
   });
 
+  it("offers to map other apps' data too where it was left out, when it can", () => {
+    const onMapOthers = vi.fn();
+    const { rerender } = render(<SpaceMap root={root} onReveal={vi.fn()} onMapOthers={onMapOthers} />);
+    fireEvent.click(screen.getByRole("button", { name: /Library/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Containers/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Map with other apps' data" }));
+
+    expect(onMapOthers).toHaveBeenCalledTimes(1);
+    // A place left out for another reason, or a map that can't start, offers nothing.
+    rerender(<SpaceMap root={root} onReveal={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Map with other apps' data" })).toBeNull();
+  });
+
   it("gives no size for a place it never looked in", () => {
     render(<SpaceMap root={root} onReveal={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Library/ }));

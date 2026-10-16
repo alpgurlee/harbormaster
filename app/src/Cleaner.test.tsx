@@ -859,6 +859,20 @@ describe("the space map", () => {
     expect(mapButton().disabled).toBe(false);
   });
 
+  it("maps other apps' data too from a place the last map left out", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked();
+    const containers = { ...mapped(4, "Containers", 0), folder: true, short: "skipped" as const };
+    const root = { ...ROOT, short: "skipped" as const, inside: [...ROOT.inside, containers] };
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: root }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Containers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Map with other apps' data" }));
+
+    expect(driver.maps.map((map) => map.others)).toEqual([false, true]);
+  });
+
   it("maps again as it was asked the first time", () => {
     const driver = fake();
     show(driver.backend);
