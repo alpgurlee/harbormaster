@@ -102,6 +102,65 @@ fn counts_a_hard_linked_file_once() {
 }
 
 #[test]
+fn names_more_tools_caches_and_leaves_their_owners_own_things_alone() {
+    let home = tempfile::tempdir().unwrap();
+    let listed = [
+        ("Go build cache", "Library/Caches/go-build/aa/b"),
+        ("Composer", "Library/Caches/composer/files/c"),
+        ("pnpm metadata", "Library/Caches/pnpm/metadata/d"),
+        ("Dart packages", ".pub-cache/hosted/pub.dev/e"),
+        ("Dart git packages", ".pub-cache/git/f"),
+        ("Deno modules", "Library/Caches/deno/remote/https/g"),
+        (
+            "Deno npm packages",
+            "Library/Caches/deno/npm/registry.npmjs.org/h",
+        ),
+        ("Deno compiled code", "Library/Caches/deno/gen/file/i"),
+        ("SwiftPM", "Library/Caches/org.swift.swiftpm/repositories/j"),
+        (
+            "Carthage",
+            "Library/Caches/org.carthage.CarthageKit/dependencies/k",
+        ),
+    ];
+    // Tools the user installed, and data an app keeps beside its cache.
+    let kept = [
+        ".pub-cache/bin/tool",
+        ".pub-cache/global_packages/tool/l",
+        "Library/Caches/deno/location_data/m/kv.sqlite3",
+        "Library/Caches/deno/deno_history.txt",
+    ];
+    for (_, inside) in listed {
+        write(&home.path().join(inside), 3 * MIB / 2);
+    }
+    for inside in kept {
+        write(&home.path().join(inside), 3 * MIB / 2);
+    }
+
+    let findings = scanned(home.path());
+
+    for (name, _) in listed {
+        let finding = named(&findings, name).unwrap_or_else(|| panic!("{name}: {findings:?}"));
+        assert_eq!(
+            (finding.group, finding.kind),
+            (Group::Packages, Kind::Rebuildable),
+            "{name}"
+        );
+    }
+    // Each is listed once, as what it is, and not again as an app's cache.
+    assert!(named(&findings, "org.swift.swiftpm").is_none());
+    assert!(named(&findings, "org.carthage.CarthageKit").is_none());
+    let real = home.path().canonicalize().unwrap();
+    for inside in kept {
+        assert!(
+            findings
+                .iter()
+                .all(|finding| !real.join(inside).starts_with(&finding.path)),
+            "{inside}: {findings:?}"
+        );
+    }
+}
+
+#[test]
 fn offers_the_caches_of_apps_but_never_apples() {
     let home = tempfile::tempdir().unwrap();
     for name in ["com.spotify.client", "com.apple.Safari", "CloudKit"] {

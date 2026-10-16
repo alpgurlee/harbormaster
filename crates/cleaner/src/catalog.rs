@@ -36,6 +36,7 @@ const PLACES: &[Place] = &[
     whole(Group::Packages, "npm", ".npm/_cacache"),
     whole(Group::Packages, "npx", ".npm/_npx"),
     whole(Group::Packages, "pnpm", "Library/pnpm/store"),
+    whole(Group::Packages, "pnpm metadata", "Library/Caches/pnpm"),
     whole(Group::Packages, "Yarn", "Library/Caches/Yarn"),
     whole(Group::Packages, "Bun", ".bun/install/cache"),
     whole(Group::Packages, "pip", "Library/Caches/pip"),
@@ -44,6 +45,37 @@ const PLACES: &[Place] = &[
     whole(Group::Packages, "Cargo", ".cargo/registry/cache"),
     whole(Group::Packages, "Cargo sources", ".cargo/registry/src"),
     whole(Group::Packages, "Cargo git", ".cargo/git/checkouts"),
+    whole(Group::Packages, "Go build cache", "Library/Caches/go-build"),
+    whole(Group::Packages, "Composer", "Library/Caches/composer"),
+    // Only what pub downloaded: its bin and global_packages are tools the user activated.
+    whole(Group::Packages, "Dart packages", ".pub-cache/hosted"),
+    whole(Group::Packages, "Dart git packages", ".pub-cache/git"),
+    // Only what Deno downloaded or compiled: location_data holds what programs stored.
+    whole(
+        Group::Packages,
+        "Deno modules",
+        "Library/Caches/deno/remote",
+    ),
+    whole(
+        Group::Packages,
+        "Deno npm packages",
+        "Library/Caches/deno/npm",
+    ),
+    whole(
+        Group::Packages,
+        "Deno compiled code",
+        "Library/Caches/deno/gen",
+    ),
+    whole(
+        Group::Packages,
+        "SwiftPM",
+        "Library/Caches/org.swift.swiftpm",
+    ),
+    whole(
+        Group::Packages,
+        "Carthage",
+        "Library/Caches/org.carthage.CarthageKit",
+    ),
     whole(Group::Packages, "Gradle", ".gradle/caches"),
     whole(
         Group::Packages,
@@ -167,8 +199,10 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
     #[cfg(target_os = "macos")]
     if let Ok(caches) = home.descend(Path::new(APP_CACHES)) {
         for (name, _) in folders(&caches, stop) {
-            if is_app_folder(&name) {
-                let relative = Path::new(APP_CACHES).join(&name);
+            let relative = Path::new(APP_CACHES).join(&name);
+            // A tool's cache the catalog names is listed as what it is, once.
+            let named = PLACES.iter().any(|place| Path::new(place.path) == relative);
+            if is_app_folder(&name) && !named {
                 found.push(at(
                     &relative,
                     Group::Apps,
