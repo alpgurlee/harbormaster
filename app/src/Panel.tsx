@@ -175,11 +175,12 @@ function Header() {
       <Mark className={styles.mark} />
       Harbormaster
       <span className={styles.tools}>
-        <button type="button" className={styles.tool}>
+        {/* Off until the cleaner and settings windows arrive. */}
+        <button type="button" className={styles.tool} disabled>
           <Sweep />
           {i18n.t("clean")}
         </button>
-        <button type="button" className={styles.tool} aria-label={i18n.t("settings")} title={i18n.t("settings")}>
+        <button type="button" className={styles.tool} aria-label={i18n.t("settings")} title={i18n.t("settings")} disabled>
           <Gear />
         </button>
       </span>

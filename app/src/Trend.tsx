@@ -2,14 +2,16 @@ import styles from "./Trend.module.css";
 
 const WIDTH = 34;
 const HEIGHT = 14;
-/** Changes smaller than this share of the peak draw almost flat. */
+/** A change smaller than this share of the peak draws almost flat; a bigger one fills the height. */
 const CALM = 0.1;
 
 /** A server's memory over the last minutes, as a line. */
 export function Trend({ values }: { values: readonly number[] }) {
   if (values.length < 2) return <span className={styles.trend} aria-hidden="true" />;
   const low = Math.min(...values);
-  const span = Math.max(Math.max(...values) - low, Math.max(...values) * CALM) || 1;
+  const peak = Math.max(...values);
+  const range = peak - low;
+  const span = (range < peak * CALM ? peak : range) || 1;
   const points = values
     .map((value, index) => {
       const x = (index / (values.length - 1)) * WIDTH;

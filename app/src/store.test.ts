@@ -28,3 +28,15 @@ it("remembers each server's memory for ten minutes, and forgets a server that st
   at(12, []);
   expect(trendOf("20-1")).toEqual([]);
 });
+
+it("lets a trend lapse while the server's memory can't be read", () => {
+  const server = (memoryBytes: number | null) => ({ id: "30-1", memoryBytes }) as Service;
+  const at = (minutes: number, services: Service[]) =>
+    act(() => publish({ services, memory: null, apps: null, scannedAt: minutes * 60_000 }));
+
+  at(0, [server(100)]);
+  at(1, [server(110)]);
+  at(12, [server(null)]);
+
+  expect(trendOf("30-1")).toEqual([]);
+});

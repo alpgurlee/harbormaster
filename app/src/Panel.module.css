@@ -39,9 +39,13 @@
   font-weight: 500;
 }
 
-.tool:hover {
+.tool:hover:not(:disabled) {
   background: var(--raised);
   color: var(--text);
+}
+
+.tool:disabled {
+  opacity: 0.5;
 }
 
 .mark {
@@ -151,6 +155,7 @@
 }
 
 .bar {
+  display: flex;
   grid-column: 1 / -1;
   height: 2px;
   overflow: hidden;

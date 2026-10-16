@@ -18,10 +18,17 @@ it("draws memory as a line that climbs when it grows", () => {
   expect(line?.[2][1]).toBeLessThan(line?.[0][1] ?? 0);
 });
 
-it("keeps a small wobble from looking like a climb", () => {
-  const line = points([1000, 1001]);
+it("keeps a change under a tenth of the peak from looking like a climb", () => {
+  const line = points([1000, 1090]);
 
-  expect(Math.abs((line?.[1][1] ?? 0) - (line?.[0][1] ?? 0))).toBeLessThan(1);
+  expect(line).toHaveLength(2);
+  expect(Math.abs((line?.[1][1] ?? 0) - (line?.[0][1] ?? 0))).toBeLessThan(1.2);
+});
+
+it("draws a real climb across the whole height", () => {
+  const line = points([1000, 2000]);
+
+  expect((line?.[0][1] ?? 0) - (line?.[1][1] ?? 0)).toBeGreaterThan(10);
 });
 
 it("draws nothing until there are two samples", () => {

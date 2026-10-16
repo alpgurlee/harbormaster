@@ -273,6 +273,13 @@ describe("Panel", () => {
     expect(screen.getByText(/^Updated /)).toBeTruthy();
   });
 
+  it("keeps the cleaner and settings buttons off until their windows exist", () => {
+    show();
+
+    expect((screen.getByRole("button", { name: "Clean up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Settings" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("waits for the first scan before saying nothing listens", () => {
     show({ update: null });
 

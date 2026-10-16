@@ -23,10 +23,10 @@ function remember(update: Update) {
     if (!running.has(id)) trends.delete(id);
   }
   for (const service of update.services) {
-    if (service.memoryBytes === null) continue;
     const samples = (trends.get(service.id) ?? []).filter((sample) => sample.at >= since);
-    samples.push({ at: update.scannedAt, bytes: service.memoryBytes });
-    trends.set(service.id, samples);
+    if (service.memoryBytes !== null) samples.push({ at: update.scannedAt, bytes: service.memoryBytes });
+    if (samples.length > 0) trends.set(service.id, samples);
+    else trends.delete(service.id);
   }
 }
 
