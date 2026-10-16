@@ -5,14 +5,15 @@ use std::sync::Arc;
 use harbormaster_cleaner::Finding;
 use harbormaster_engine::Port;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning, Update};
+use crate::settings::{Invalid, Settings, Store};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
-use crate::{cleaner, panel};
+use crate::{cleaner, panel, settings};
 
 #[tauri::command]
 pub(crate) fn subscribe(channel: Channel<Update>, scanning: State<'_, Arc<Scanning>>) {
@@ -117,6 +118,33 @@ pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reas
 #[tauri::command]
 pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
     cleaner::show(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn open_settings(app: AppHandle) -> Result<(), String> {
+    settings::show(&app).map_err(|error| error.to_string())
+}
+
+/// What the user has set.
+#[tauri::command]
+pub(crate) fn settings_get(store: State<'_, Store>) -> Settings {
+    store.get()
+}
+
+/// Checks and keeps `settings`, then tells every window what is in force.
+#[tauri::command]
+pub(crate) fn settings_set(
+    settings: Settings,
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<Settings, Invalid> {
+    let home = harbormaster_cleaner::account_home().map_err(|error| Invalid::Unsaved {
+        message: error.to_string(),
+    })?;
+    let kept = store.set(settings, &home)?;
+    // A window that misses it reads the settings again when it opens.
+    let _ = app.emit("settings", &kept);
+    Ok(kept)
 }
 
 /// Looks through this user's home for what could go; the findings come

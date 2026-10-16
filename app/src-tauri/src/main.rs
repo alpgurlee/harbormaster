@@ -6,6 +6,7 @@ mod commands;
 mod panel;
 mod quitting;
 mod scanning;
+mod settings;
 mod stopping;
 mod tray;
 
@@ -30,6 +31,9 @@ fn main() {
             commands::quit_app_preview,
             commands::quit_app,
             commands::open_cleaner,
+            commands::open_settings,
+            commands::settings_get,
+            commands::settings_set,
             commands::clean_scan,
             commands::clean_hunt,
             commands::clean_apps,
@@ -52,6 +56,9 @@ fn main() {
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
             app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
+            app.manage(settings::Store::open(
+                app.path().app_config_dir()?.join("settings.json"),
+            ));
             panel::create(app.handle())?;
             tray::create(app.handle())?;
             app.manage(scanning::start(app.handle().clone()));
