@@ -199,7 +199,6 @@ button.row:hover,
 }
 
 .tileSize {
-  color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }

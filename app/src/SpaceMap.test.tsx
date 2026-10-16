@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpaceMap } from "./SpaceMap";
@@ -105,6 +105,58 @@ describe("the space map", () => {
     // What was looked in keeps its size, even when something in it wasn't.
     expect(screen.getByRole("navigation", { name: "Where you are" }).textContent).toContain("Library");
     expect(screen.getByRole("button", { name: /Caches/ }).textContent).toContain("3.0 GB");
+  });
+
+  it("keeps the keyboard where it went: on the folder opened, and on the one gone back to", () => {
+    render(<SpaceMap root={root} onReveal={vi.fn()} />);
+    const library = screen.getByRole("button", { name: /Library/ });
+    library.focus();
+
+    fireEvent.click(library);
+
+    expect(document.activeElement?.getAttribute("aria-current")).toBe("location");
+    expect(document.activeElement?.textContent).toBe("Library");
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(document.activeElement?.getAttribute("aria-current")).toBe("location");
+    expect(document.activeElement?.textContent).toBe("Home");
+  });
+
+  /** A reveal the test answers when it likes. */
+  function pending() {
+    const answers: { resolve: () => void; reject: (reason: unknown) => void }[] = [];
+    const onReveal = vi.fn(() => new Promise<void>((resolve, reject) => answers.push({ resolve, reject })));
+    return { answers, onReveal };
+  }
+
+  it("says only what the latest showing in Finder met, of the same place", async () => {
+    const { answers, onReveal } = pending();
+    render(<SpaceMap root={root} onReveal={onReveal} />);
+    fireEvent.click(screen.getByRole("button", { name: /notes\.txt/ }));
+    const show = screen.getByRole("button", { name: "Show in Finder" });
+
+    fireEvent.click(show);
+    fireEvent.click(show);
+    await act(async () => answers[1].resolve());
+    await act(async () => answers[0].reject({ code: "changed" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says only what the latest showing in Finder met, of another place", async () => {
+    const { answers, onReveal } = pending();
+    render(<SpaceMap root={root} onReveal={onReveal} />);
+    fireEvent.click(screen.getByRole("button", { name: /notes\.txt/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
+    fireEvent.click(screen.getByRole("button", { name: /Library/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Containers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in Finder" }));
+
+    await act(async () => answers[1].reject({ code: "failed", message: "no Finder" }));
+    await act(async () => answers[0].reject({ code: "changed" }));
+
+    expect(screen.getByRole("alert").textContent).toContain("no Finder");
   });
 
   it("says when a place changed since it was mapped", async () => {

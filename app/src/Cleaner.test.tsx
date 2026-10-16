@@ -726,6 +726,18 @@ describe("the space map", () => {
     expect(driver.stops()).toBe(1);
   });
 
+  it("starts no clean-up or scan while mapping, even with a scan's findings shown", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+
+    asked();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Scan again" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Clean up…" }).disabled).toBe(true);
+  });
+
   it("starts no map while a scan runs", () => {
     const driver = fake();
     show(driver.backend);

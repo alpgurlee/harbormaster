@@ -28,7 +28,17 @@ export function SpaceMap({ root, onReveal }: SpaceMapProps) {
   const [chosen, setChosen] = useState<Area | null>(null);
   // Why Finder wasn't shown a place, kept with the place it was for.
   const [refused, setRefused] = useState<{ id: number; refusal: CleanRefusal } | null>(null);
+  // Only the latest request to show a place in Finder may say how it went.
+  const reveals = useRef(0);
   const here = trail[trail.length - 1];
+  // Going into a folder or back up takes away what had the keyboard, so it goes to where the trail ends.
+  const crumb = useRef<HTMLLIElement>(null);
+  const lastHere = useRef(here);
+  useEffect(() => {
+    if (lastHere.current === here) return;
+    lastHere.current = here;
+    crumb.current?.focus();
+  }, [here]);
   const shown = pieces(here);
   const focus = chosen ?? here;
   const nameOf = (area: Area) => (area === root ? i18n.t("mapHome") : area.name);
@@ -43,9 +53,12 @@ export function SpaceMap({ root, onReveal }: SpaceMapProps) {
     }
   };
   const reveal = () => {
+    const request = ++reveals.current;
     const { id } = focus;
     setRefused(null);
-    onReveal(id).catch((error: unknown) => setRefused({ id, refusal: asRefusal(error) }));
+    onReveal(id).catch((error: unknown) => {
+      if (request === reveals.current) setRefused({ id, refusal: asRefusal(error) });
+    });
   };
 
   return (
@@ -54,7 +67,7 @@ export function SpaceMap({ root, onReveal }: SpaceMapProps) {
         <ol>
           {trail.map((area, depth) =>
             depth === trail.length - 1 ? (
-              <li key={area.id} aria-current="location">
+              <li key={area.id} ref={crumb} tabIndex={-1} aria-current="location">
                 {nameOf(area)}
               </li>
             ) : (
