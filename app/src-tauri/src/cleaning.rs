@@ -157,6 +157,16 @@ impl Cleaning {
         Ok(chosen)
     }
 
+    /// Whether the findings shown now list `path`, byte for byte.
+    pub(crate) fn lists(&self, path: &Path) -> bool {
+        self.lock().shown.as_ref().is_some_and(|shown| {
+            shown
+                .findings
+                .iter()
+                .any(|finding| finding.path.as_os_str() == path.as_os_str())
+        })
+    }
+
     fn lock(&self) -> MutexGuard<'_, Ledger> {
         self.ledger.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -335,6 +345,18 @@ mod tests {
 
         assert_eq!(odd, Err(Refusal::Unlisted));
         assert_eq!(twice.unwrap(), [finding("/Users/dev/.npm/_cacache")]);
+    }
+
+    #[test]
+    fn shows_in_finder_only_what_the_scan_listed() {
+        let cleaning = Cleaning::default();
+        assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
+
+        cleaning.show(vec![finding("/Users/dev/.npm/_cacache")]);
+
+        assert!(cleaning.lists(std::path::Path::new("/Users/dev/.npm/_cacache")));
+        assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm")));
+        assert!(!cleaning.lists(std::path::Path::new("/Users/dev/.npm/./_cacache")));
     }
 
     #[test]

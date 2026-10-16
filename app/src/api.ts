@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Holder, Protection, RunEvent, ScanEvent, Update } from "./types";
+import type { Disk, Holder, Protection, RunEvent, ScanEvent, Update } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -68,3 +68,6 @@ export function cleanRun(token: number, paths: string[], onEvent: (event: RunEve
 }
 
 export const cleanStop = () => invoke<void>("clean_stop");
+export const cleanDisk = () => invoke<Disk>("clean_disk");
+/** Shows a finding in Finder; only one the last scan listed. */
+export const cleanReveal = (path: string) => invoke<void>("clean_reveal", { path });

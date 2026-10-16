@@ -345,3 +345,12 @@ fn tells_how_far_measuring_has_come() {
     let found: u64 = told.iter().map(|measured| measured.bytes).sum();
     assert_eq!(found, listed);
 }
+
+#[test]
+fn tells_how_large_the_disk_is_and_how_much_is_free() {
+    let home = tempfile::tempdir().unwrap();
+
+    let disk = harbormaster_cleaner::disk(home.path()).unwrap();
+
+    assert!(disk.total > 0 && disk.free <= disk.total, "{disk:?}");
+}

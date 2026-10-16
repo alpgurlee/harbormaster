@@ -59,6 +59,7 @@ function fake() {
   const runs: { token: number; paths: string[]; onEvent: (event: RunEvent) => void }[] = [];
   let stops = 0;
   let refusal: unknown = null;
+  const revealed: string[] = [];
   const backend: CleanerBackend = {
     scan: (onEvent) => {
       scans.push(onEvent);
@@ -72,11 +73,17 @@ function fake() {
       stops += 1;
       return Promise.resolve();
     },
+    disk: () => Promise.resolve({ total: 500 * GB, free: 100 * GB }),
+    reveal: (path) => {
+      revealed.push(path);
+      return Promise.resolve();
+    },
   };
   return {
     backend,
     scans,
     runs,
+    revealed,
     stops: () => stops,
     refuse: (next: unknown) => {
       refusal = next;
@@ -92,57 +99,105 @@ function show(backend: CleanerBackend, locale: "en" | "tr" = "en") {
   );
 }
 
-/** Scans and lists `findings`. */
+const scanButton = () => screen.getByRole("button", { name: "Scan" });
+
+/** Asks for a scan, and lists `findings` as it ends. */
 function found(driver: ReturnType<typeof fake>, findings = FINDINGS) {
+  if (driver.scans.length === 0) fireEvent.click(scanButton());
   act(() => driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings }));
 }
+
+/** Opens a section of the window from its side. */
+const section = (name: string) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }));
 
 const hero = () => screen.getByTestId("hero").textContent;
 
 describe("the cleaner window", () => {
-  it("shows how far the scan has come, then what the scan chose", () => {
+  it("shows the disk, and scans only when asked", async () => {
     const driver = fake();
     show(driver.backend);
+
+    expect(await screen.findByText("100.0 GB")).toBeTruthy();
+    expect(screen.getByText("free of 500.0 GB")).toBeTruthy();
+    expect(driver.scans).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /^Developer/ })).toHaveProperty("disabled", true);
+
+    fireEvent.click(scanButton());
+
+    expect(driver.scans).toHaveLength(1);
     expect(screen.getByText("Looking for projects and caches…")).toBeTruthy();
+  });
+
+  it("shows how far the scan has come, then what it chose, section by section", () => {
+    const driver = fake();
+    show(driver.backend);
+    fireEvent.click(scanButton());
 
     act(() => driver.scans[0]({ kind: "measured", done: 2, total: 5, bytes: 2 * GB }));
     act(() => driver.scans[0]({ kind: "measured", done: 1, total: 5, bytes: GB }));
     expect(screen.getByText("Measured 2 of 5 places")).toBeTruthy();
-    expect(screen.getByText("3.0 GB found so far")).toBeTruthy();
+    expect(screen.getByText("3.0 GB")).toBeTruthy();
 
     found(driver);
     expect(hero()).toBe("3.0 GBchosen to clean up, of 10.0 GB found");
-    // All that can go of it is chosen; what is in use can't be.
-    expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", true);
-    expect(screen.getByRole("checkbox", { name: "Package caches" })).toHaveProperty("indeterminate", true);
-    expect(screen.getByRole("checkbox", { name: "Xcode" })).toHaveProperty("checked", false);
+    expect(screen.getByText("9.0 GB found · 3.0 GB chosen")).toBeTruthy();
+    expect(screen.getByText("1.0 GB found · 0 MB chosen")).toBeTruthy();
   });
 
-  it("opens a group to its items and keeps what is in use out of reach", () => {
+  it("reviews a section: its groups on one side, the items of one on the other", () => {
     const driver = fake();
     show(driver.backend);
     found(driver);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Projects/ }));
+    section("Developer");
 
+    // All that can go of a group is chosen; what is in use can't be.
+    expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("checkbox", { name: "Package caches" })).toHaveProperty("indeterminate", true);
     const items = within(screen.getByRole("list", { name: "Projects" }));
+    expect(items.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"))).toEqual([
+      "tool · target",
+      "shop · node_modules",
+    ]);
     expect(items.getByText("~/code/shop · last touched 2 months ago")).toBeTruthy();
     expect(items.getByText("In use by localhost:3000")).toBeTruthy();
     expect(items.getByRole("checkbox", { name: "tool · target" })).toHaveProperty("disabled", true);
+
     fireEvent.click(items.getByRole("checkbox", { name: "shop · node_modules" }));
-    expect(hero()).toBe("2.0 GBchosen to clean up, of 10.0 GB found");
     expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", false);
+    fireEvent.click(screen.getByRole("button", { name: "Choose all" }));
+    expect(screen.getByRole("checkbox", { name: "Projects" })).toHaveProperty("checked", true);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "TOOL" } });
+    expect(within(screen.getByRole("list", { name: "Projects" })).getAllByRole("checkbox")).toHaveLength(1);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
+    expect(screen.getByRole("list", { name: "Package caches" })).toBeTruthy();
+  });
+
+  it("shows an item in Finder through the app, by its path", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    section("Developer");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show in Finder: shop · node_modules" }));
+
+    expect(driver.revealed).toEqual([shop.path]);
   });
 
   it("says what removing will do before anything goes, and sends just the choice", () => {
     const driver = fake();
     show(driver.backend);
     found(driver);
+    section("Developer");
     // Some of it was chosen, so the first click chooses all of it, the second none.
     fireEvent.click(screen.getByRole("checkbox", { name: "Package caches" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Package caches" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Xcode" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Trash" }));
+    section("System junk");
+    // The Trash's group comes first, its one item after.
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Trash" })[0]);
 
     fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
 
@@ -258,6 +313,7 @@ describe("the cleaner window", () => {
     const driver = fake();
     driver.refuse({ code: "busy" });
     show(driver.backend);
+    fireEvent.click(scanButton());
 
     expect(await screen.findByText("A scan or clean-up is running already.")).toBeTruthy();
     driver.refuse(null);
@@ -269,6 +325,7 @@ describe("the cleaner window", () => {
   it("stops a scan when told", () => {
     const driver = fake();
     show(driver.backend);
+    fireEvent.click(scanButton());
 
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
@@ -278,6 +335,7 @@ describe("the cleaner window", () => {
   it("speaks Turkish", () => {
     const driver = fake();
     show(driver.backend, "tr");
+    fireEvent.click(screen.getByRole("button", { name: "Tara" }));
     found(driver);
 
     expect(hero()).toBe("3,0 GBtemizlemek için seçili; bulunan 10,0 GB");

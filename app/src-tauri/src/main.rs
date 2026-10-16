@@ -33,6 +33,8 @@ fn main() {
             commands::clean_scan,
             commands::clean_run,
             commands::clean_stop,
+            commands::clean_disk,
+            commands::clean_reveal,
             commands::resize_panel,
             commands::hide_panel,
             commands::quit,

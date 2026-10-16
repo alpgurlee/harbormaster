@@ -1,15 +1,13 @@
 //! Taking away what the user confirmed, one finding at a time, through
 //! opened folders only, with every safety rule checked again right before.
 
-use std::ffi::{CString, OsStr};
+use std::ffi::OsStr;
 use std::io;
-use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Usage, Why, in_use};
+use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Usage, Why, in_use, space};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
@@ -23,7 +21,7 @@ pub(crate) fn all(
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
     let root = Dir::open(home)?;
-    let before = free_space(home)?;
+    let before = space::disk(home)?.free;
     // Emptying the Trash comes first, so what goes into it now stays there.
     let mut order: Vec<&Finding> = findings.iter().collect();
     order.sort_by_key(|finding| finding.kind != Kind::Discarded);
@@ -48,7 +46,7 @@ pub(crate) fn all(
         told(&removal);
         removals.push(removal);
     }
-    let after = free_space(home)?;
+    let after = space::disk(home)?.free;
     Ok(Cleaned {
         removals,
         freed_bytes: after.saturating_sub(before),
@@ -188,19 +186,6 @@ fn trashed(
         });
     }
     Ok(Outcome::Trashed)
-}
-
-/// The room free on the disk holding `path`, as the disk reports it.
-fn free_space(path: &Path) -> io::Result<u64> {
-    let path = CString::new(path.as_os_str().as_bytes())?;
-    let mut stats = MaybeUninit::<libc::statfs>::uninit();
-    // SAFETY: `path` is a valid C string and `stats` has room for one statfs.
-    if unsafe { libc::statfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: statfs succeeded, so it filled `stats`.
-    let stats = unsafe { stats.assume_init() };
-    Ok(stats.f_bavail * u64::from(stats.f_bsize))
 }
 
 #[cfg(test)]

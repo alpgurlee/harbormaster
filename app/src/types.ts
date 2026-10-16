@@ -128,5 +128,11 @@ export type ScanEvent =
 
 export type RunEvent = ({ kind: "removed" } & Removal) | ({ kind: "done" } & Cleaned);
 
+/** The home folder's disk. */
+export interface Disk {
+  total: number;
+  free: number;
+}
+
 /** Why the app turned the cleaner down. */
 export type CleanRefusal = { code: "busy" | "closed" | "expired" | "unlisted" } | { code: "failed"; message: string };

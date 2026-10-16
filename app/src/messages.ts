@@ -144,6 +144,24 @@ export interface Messages {
   cleanClosed: string;
   cleanExpired: string;
   cleanUnlisted: string;
+  overview: string;
+  moduleDeveloper: string;
+  moduleSystem: string;
+  diskFree: string;
+  diskOf: string;
+  scan: string;
+  scanHint: string;
+  review: string;
+  moduleSummary: string;
+  searchItems: string;
+  orderBy: string;
+  orderSize: string;
+  orderName: string;
+  orderAge: string;
+  chooseAll: string;
+  chooseNone: string;
+  revealInFinder: string;
+  noItemsMatch: string;
 }
 
 export const en: Messages = {
@@ -288,6 +306,24 @@ export const en: Messages = {
   cleanClosed: "The window was closed before the work could start.",
   cleanExpired: "This list is out of date. Scan again to clean up.",
   cleanUnlisted: "Something chosen wasn't in the list. Scan again to clean up.",
+  overview: "Overview",
+  moduleDeveloper: "Developer",
+  moduleSystem: "System junk",
+  diskFree: "{free} free of {total}",
+  diskOf: "free of {total}",
+  scan: "Scan",
+  scanHint: "Looks for build outputs, package caches, Xcode data, app caches, logs and the Trash. Nothing goes without your say.",
+  review: "Review",
+  moduleSummary: "{found} found · {chosen} chosen",
+  searchItems: "Search",
+  orderBy: "Order",
+  orderSize: "Largest first",
+  orderName: "By name",
+  orderAge: "Oldest first",
+  chooseAll: "Choose all",
+  chooseNone: "Choose none",
+  revealInFinder: "Show in Finder",
+  noItemsMatch: "Nothing here matches “{query}”.",
 };
 
 export const tr: Messages = {
@@ -432,4 +468,22 @@ export const tr: Messages = {
   cleanClosed: "İş başlamadan pencere kapandı.",
   cleanExpired: "Bu liste eskidi. Temizlemek için yeniden tara.",
   cleanUnlisted: "Seçilenlerden biri listede yoktu. Temizlemek için yeniden tara.",
+  overview: "Genel Bakış",
+  moduleDeveloper: "Geliştirici",
+  moduleSystem: "Sistem çöpü",
+  diskFree: "{total} içinde {free} boş",
+  diskOf: "boş · toplam {total}",
+  scan: "Tara",
+  scanHint: "Derleme çıktıları, paket önbellekleri, Xcode verileri, uygulama önbellekleri, kayıtlar ve Çöp Sepeti aranır. Sen onaylamadan hiçbir şey silinmez.",
+  review: "İncele",
+  moduleSummary: "{found} bulundu · {chosen} seçili",
+  searchItems: "Ara",
+  orderBy: "Sırala",
+  orderSize: "En büyük önce",
+  orderName: "Ada göre",
+  orderAge: "En eski önce",
+  chooseAll: "Tümünü seç",
+  chooseNone: "Hiçbirini seçme",
+  revealInFinder: "Finder'da göster",
+  noItemsMatch: "“{query}” ile eşleşen bir şey yok.",
 };

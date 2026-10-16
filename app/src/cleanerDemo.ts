@@ -81,4 +81,6 @@ export const demo: CleanerBackend = {
     onEvent({ kind: "done", removals: [], freedBytes: freed });
   },
   stop: () => Promise.resolve(),
+  disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),
+  reveal: () => Promise.resolve(),
 };

@@ -14,6 +14,8 @@ fn main() {
         "clean_scan",
         "clean_run",
         "clean_stop",
+        "clean_disk",
+        "clean_reveal",
         "resize_panel",
         "hide_panel",
         "quit",

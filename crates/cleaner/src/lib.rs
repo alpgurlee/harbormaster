@@ -6,6 +6,7 @@ mod catalog;
 mod measure;
 mod projects;
 mod remove;
+mod space;
 mod walk;
 
 use std::ffi::{CStr, OsStr};
@@ -193,6 +194,18 @@ pub struct Measured {
     /// What this place adds to the list: none when it is too small or
     /// couldn't be measured in full.
     pub bytes: u64,
+}
+
+/// How large a disk is, and how much of it is free to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Disk {
+    pub total: u64,
+    pub free: u64,
+}
+
+/// The disk holding `path`, as the disk reports it.
+pub fn disk(path: &Path) -> io::Result<Disk> {
+    space::disk(path)
 }
 
 /// What is using what on the machine, as removal reads it before each item.

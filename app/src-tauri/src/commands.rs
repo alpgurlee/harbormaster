@@ -173,6 +173,34 @@ pub(crate) fn clean_stop(cleaning: State<'_, Arc<Cleaning>>) {
     cleaning.stop();
 }
 
+/// The home folder's disk: how large it is and how much is free.
+#[tauri::command]
+pub(crate) fn clean_disk() -> Result<harbormaster_cleaner::Disk, Refusal> {
+    let home = harbormaster_cleaner::account_home().map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?;
+    harbormaster_cleaner::disk(&home).map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })
+}
+
+/// Shows a finding in Finder; only one the scan listed.
+#[tauri::command]
+pub(crate) fn clean_reveal(
+    path: PathBuf,
+    app: AppHandle,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    if !cleaning.lists(&path) {
+        return Err(Refusal::Unlisted);
+    }
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })
+}
+
 /// Scans and waits for processes to exit run off the thread that draws.
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, Reason> + Send + 'static,

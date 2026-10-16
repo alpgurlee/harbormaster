@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { cleanRun, cleanScan, cleanStop } from "./api";
-import { groupsOf, picked, plan, selectable, toggled, type GroupView, type Plan } from "./cleanup";
-import { useI18n, type TextKey, type Translator } from "./i18n";
-import { Chevron } from "./icons";
+import { cleanDisk, cleanReveal, cleanRun, cleanScan, cleanStop } from "./api";
+import { MODULES, groupsOf, picked, plan, type CleanModule, type Plan } from "./cleanup";
+import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
+import { useI18n, type Translator } from "./i18n";
+import { Review } from "./Review";
 import { keepFocusInside } from "./sheet";
-import type { CleanGroup, CleanRefusal, Cleaned, Finding, Removal, Why } from "./types";
-import type { RunEvent, ScanEvent } from "./types";
+import type { CleanRefusal, Cleaned, Disk, Finding, Removal, RunEvent, ScanEvent } from "./types";
 import styles from "./Cleaner.module.css";
 import sheet from "./Sheet.module.css";
 
@@ -15,32 +15,19 @@ export interface CleanerBackend {
   scan: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   run: (token: number, paths: string[], onEvent: (event: RunEvent) => void) => Promise<void>;
   stop: () => Promise<void>;
+  disk: () => Promise<Disk>;
+  reveal: (path: string) => Promise<void>;
 }
 
-const BACKEND: CleanerBackend = { scan: cleanScan, run: cleanRun, stop: cleanStop };
+const BACKEND: CleanerBackend = { scan: cleanScan, run: cleanRun, stop: cleanStop, disk: cleanDisk, reveal: cleanReveal };
 
-const NAMES: Record<CleanGroup, TextKey> = {
-  projects: "groupProjects",
-  packages: "groupPackages",
-  xcode: "groupXcode",
-  apps: "groupApps",
-  logs: "groupLogs",
-  trash: "groupTrash",
-};
+const SECTIONS: CleanModule[] = ["developer", "system"];
+const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem" } as const;
 
-const ABOUT: Record<CleanGroup, TextKey> = {
-  projects: "aboutProjects",
-  packages: "aboutPackages",
-  xcode: "aboutXcode",
-  apps: "aboutApps",
-  logs: "aboutLogs",
-  trash: "aboutTrash",
-};
-
-/** Each group's color, from the panel's project tints. */
-const TINTS: Record<CleanGroup, number> = { projects: 0, packages: 3, xcode: 1, apps: 5, logs: 4, trash: 2 };
+type View = "overview" | CleanModule;
 
 type Step =
+  | { kind: "ready" }
   | { kind: "scanning"; done: number; total: number; found: number }
   | { kind: "found"; token: number; home: string; findings: Finding[] }
   | { kind: "removing"; home: string; chosen: Finding[]; removals: Removal[] }
@@ -48,8 +35,6 @@ type Step =
   | { kind: "refused"; refusal: CleanRefusal; partial?: { chosen: Finding[]; removals: Removal[] } };
 
 type Found = Extract<Step, { kind: "found" }>;
-
-const SCANNING: Step = { kind: "scanning", done: 0, total: 0, found: 0 };
 
 export interface CleanerProps {
   backend?: CleanerBackend;
@@ -60,9 +45,10 @@ export interface CleanerProps {
 /** Finds what this Mac can do without, says what removing it would do, and removes only what the user chose. */
 export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const i18n = useI18n();
-  const [step, setStep] = useState<Step>(SCANNING);
+  const [step, setStep] = useState<Step>({ kind: "ready" });
+  const [view, setView] = useState<View>("overview");
   const [chosen, setChosen] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState<Set<CleanGroup>>(new Set());
+  const [disk, setDisk] = useState<Disk | null>(null);
   const [confirming, setConfirming] = useState(false);
   // What had the focus before the sheet, to give it back when the sheet goes.
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -72,8 +58,17 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
     returnFocus.current = null;
   }, [confirming]);
 
+  const measureDisk = useCallback(() => {
+    backend
+      .disk()
+      .then(setDisk)
+      .catch(() => setDisk(null));
+  }, [backend]);
+  useEffect(measureDisk, [measureDisk]);
+
   const scan = useCallback(() => {
-    setStep(SCANNING);
+    setStep({ kind: "scanning", done: 0, total: 0, found: 0 });
+    setView("overview");
     setConfirming(false);
     backend
       .scan((event) => {
@@ -90,30 +85,23 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
           );
         } else {
           setChosen(picked(event.findings));
-          setOpen(new Set());
           setStep({ kind: "found", token: event.token, home: event.home, findings: event.findings });
         }
       })
       .catch((error: unknown) => setStep({ kind: "refused", refusal: asRefusal(error) }));
   }, [backend]);
 
-  // One scan as the window opens, however often it renders.
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    scan();
-  }, [scan]);
-
   const run = (found: Found) => {
     const going = found.findings.filter((finding) => chosen.has(finding.path));
     setConfirming(false);
+    setView("overview");
     setStep({ kind: "removing", home: found.home, chosen: going, removals: [] });
     backend
       .run(
         found.token,
         going.map((finding) => finding.path),
         (event) => {
+          if (event.kind === "done") measureDisk();
           setStep((current) => {
             // Events may still come after the app turned the rest down.
             if (event.kind === "removed" && current.kind === "refused" && current.partial !== undefined) {
@@ -146,76 +134,141 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   };
 
   const working = step.kind === "scanning" || step.kind === "removing";
+  const found = step.kind === "found" ? step : null;
+  const sectionBytes = (section: CleanModule) =>
+    found?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
+  const title = view === "overview" ? i18n.t("overview") : i18n.t(SECTION_NAMES[view]);
+
   return (
     <div className={styles.window}>
-      <header className={styles.bar} data-tauri-drag-region>
-        <h1 className={styles.title}>{i18n.t("clean")}</h1>
-        {working ? (
-          <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
-            {i18n.t("stop")}
+      <nav className={styles.side} aria-label={i18n.t("clean")} inert={confirming}>
+        <div className={styles.sideTop} data-tauri-drag-region />
+        <button
+          type="button"
+          className={styles.section}
+          aria-current={view === "overview" ? "page" : undefined}
+          onClick={() => setView("overview")}
+        >
+          {i18n.t("overview")}
+        </button>
+        {SECTIONS.map((section) => (
+          <button
+            key={section}
+            type="button"
+            className={styles.section}
+            aria-current={view === section ? "page" : undefined}
+            disabled={found === null}
+            onClick={() => setView(section)}
+          >
+            {i18n.t(SECTION_NAMES[section])}
+            {found === null ? null : <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span>}
           </button>
-        ) : (
-          <button type="button" className={styles.action} onClick={scan}>
-            {i18n.t("cleanScanAgain")}
-          </button>
+        ))}
+        {disk === null ? null : (
+          <p className={styles.diskNote}>
+            {i18n.t("diskFree", { free: i18n.bytes(disk.free), total: i18n.bytes(disk.total) })}
+          </p>
         )}
-      </header>
-      <div className={styles.page} inert={confirming}>
-        {page(step, { chosen, open, now, i18n, setChosen, setOpen })}
+      </nav>
+      <div className={styles.main} inert={confirming}>
+        <header className={styles.bar} data-tauri-drag-region>
+          <h1 className={styles.title}>{title}</h1>
+          {working ? (
+            <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
+              {i18n.t("stop")}
+            </button>
+          ) : step.kind === "ready" ? null : (
+            <button type="button" className={styles.action} onClick={scan}>
+              {i18n.t("cleanScanAgain")}
+            </button>
+          )}
+        </header>
+        <div className={styles.page}>
+          {view !== "overview" && found !== null ? (
+            <Review
+              key={view}
+              findings={found.findings.filter((finding) => MODULES[view].includes(finding.group))}
+              home={found.home}
+              chosen={chosen}
+              now={now}
+              onChoose={setChosen}
+              onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
+            />
+          ) : (
+            overview(step, { disk, chosen, i18n, onScan: scan, onReview: setView })
+          )}
+        </div>
+        {found !== null && found.findings.length > 0 ? (
+          <Footer
+            plan={plan(found.findings, chosen)}
+            muted={confirming}
+            onClean={() => {
+              returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              setConfirming(true);
+            }}
+          />
+        ) : null}
       </div>
-      {step.kind === "found" && step.findings.length > 0 ? (
-        <Footer
-          plan={plan(step.findings, chosen)}
-          muted={confirming}
-          onClean={() => {
-            returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-            setConfirming(true);
-          }}
-        />
-      ) : null}
-      {confirming && step.kind === "found" ? (
-        <Confirm plan={plan(step.findings, chosen)} onCancel={() => setConfirming(false)} onConfirm={() => run(step)} />
+      {confirming && found !== null ? (
+        <Confirm plan={plan(found.findings, chosen)} onCancel={() => setConfirming(false)} onConfirm={() => run(found)} />
       ) : null}
     </div>
   );
 }
 
-interface Choice {
+interface Overview {
+  disk: Disk | null;
   chosen: Set<string>;
-  open: Set<CleanGroup>;
-  now: number;
   i18n: Translator;
-  setChosen: (next: Set<string>) => void;
-  setOpen: (next: Set<CleanGroup>) => void;
+  onScan: () => void;
+  onReview: (section: CleanModule) => void;
 }
 
-function page(step: Step, choice: Choice) {
-  const { i18n } = choice;
+function overview(step: Step, { disk, chosen, i18n, onScan, onReview }: Overview) {
   switch (step.kind) {
+    case "ready":
+      return (
+        <div className={styles.start}>
+          <Ring fraction={disk === null ? 0 : 1 - disk.free / disk.total}>
+            {disk === null ? null : (
+              <>
+                <strong>{i18n.bytes(disk.free)}</strong>
+                <span>{i18n.t("diskOf", { total: i18n.bytes(disk.total) })}</span>
+              </>
+            )}
+          </Ring>
+          <button type="button" className={styles.scan} onClick={onScan}>
+            {i18n.t("scan")}
+          </button>
+          <p className={styles.hint}>{i18n.t("scanHint")}</p>
+        </div>
+      );
     case "scanning":
       return (
-        <Progress
-          label={step.total === 0 ? i18n.t("cleanLooking") : i18n.t("cleanMeasured", step)}
-          detail={step.total === 0 ? null : i18n.t("cleanFoundSoFar", { bytes: i18n.bytes(step.found) })}
-          done={step.done}
-          total={step.total}
-        />
+        <div className={styles.start} role="status">
+          <Ring fraction={step.total === 0 ? 0 : step.done / step.total} waiting={step.total === 0}>
+            <strong>{i18n.bytes(step.found)}</strong>
+          </Ring>
+          <p className={styles.phase}>{step.total === 0 ? i18n.t("cleanLooking") : i18n.t("cleanMeasured", step)}</p>
+        </div>
       );
     case "found":
       return step.findings.length === 0 ? (
         <p className={styles.empty}>{i18n.t("cleanNothing")}</p>
       ) : (
-        <Found step={step} choice={choice} />
+        <Summary step={step} chosen={chosen} i18n={i18n} onReview={onReview} />
       );
     case "removing":
       return (
         <>
-          <Progress
-            label={i18n.t("removing", { done: step.removals.length, total: step.chosen.length })}
-            detail={null}
-            done={step.removals.length}
-            total={step.chosen.length}
-          />
+          <div className={styles.start} role="status">
+            <Ring fraction={step.chosen.length === 0 ? 0 : step.removals.length / step.chosen.length}>
+              <strong>
+                {step.removals.length}/{step.chosen.length}
+              </strong>
+            </Ring>
+            <p className={styles.phase}>{i18n.t("removing", { done: step.removals.length, total: step.chosen.length })}</p>
+          </div>
           <Outcomes removals={step.removals} chosen={step.chosen} i18n={i18n} />
         </>
       );
@@ -233,20 +286,39 @@ function page(step: Step, choice: Choice) {
   }
 }
 
-function Progress({ label, detail, done, total }: { label: string; detail: string | null; done: number; total: number }) {
+/** A share of a whole, drawn as a ring with something to say in its middle. */
+function Ring({ fraction, waiting = false, children }: { fraction: number; waiting?: boolean; children: ReactNode }) {
+  const circumference = 2 * Math.PI * 52;
   return (
-    <div className={styles.progress} role="status">
-      <p className={styles.phase}>{label}</p>
-      <div className={styles.track} data-waiting={total === 0 ? "" : undefined}>
-        <div className={styles.fill} style={{ width: total === 0 ? undefined : `${(100 * done) / total}%` }} />
-      </div>
-      {detail === null ? null : <p className={styles.detail}>{detail}</p>}
+    <div className={styles.ring} data-waiting={waiting ? "" : undefined}>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle className={styles.ringTrack} cx="60" cy="60" r="52" />
+        <circle
+          className={styles.ringFill}
+          cx="60"
+          cy="60"
+          r="52"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - Math.min(1, Math.max(0, fraction)))}
+          transform="rotate(-90 60 60)"
+        />
+      </svg>
+      <div className={styles.ringText}>{children}</div>
     </div>
   );
 }
 
-function Found({ step, choice }: { step: Found; choice: Choice }) {
-  const { chosen, open, i18n } = choice;
+function Summary({
+  step,
+  chosen,
+  i18n,
+  onReview,
+}: {
+  step: Found;
+  chosen: Set<string>;
+  i18n: Translator;
+  onReview: (section: CleanModule) => void;
+}) {
   const groups = groupsOf(step.findings, chosen);
   const all = groups.reduce((total, group) => total + group.bytes, 0);
   const chosenBytes = groups.reduce((total, group) => total + group.chosenBytes, 0);
@@ -267,103 +339,27 @@ function Found({ step, choice }: { step: Found; choice: Choice }) {
           </span>
         ))}
       </div>
-      <ul className={styles.groups}>
-        {groups.map((group) => (
-          <Group
-            key={group.group}
-            view={group}
-            home={step.home}
-            expanded={open.has(group.group)}
-            choice={choice}
-          />
-        ))}
+      <ul className={styles.cards}>
+        {SECTIONS.map((section) => {
+          const members = groups.filter((group) => MODULES[section].includes(group.group));
+          if (members.length === 0) return null;
+          const found = members.reduce((total, group) => total + group.bytes, 0);
+          const picks = members.reduce((total, group) => total + group.chosenBytes, 0);
+          return (
+            <li key={section} className={styles.card}>
+              <span className={styles.cardName}>{i18n.t(SECTION_NAMES[section])}</span>
+              <span className={styles.cardFigure}>{i18n.bytes(found)}</span>
+              <span className={styles.cardNote}>
+                {i18n.t("moduleSummary", { found: i18n.bytes(found), chosen: i18n.bytes(picks) })}
+              </span>
+              <button type="button" className={styles.cardButton} onClick={() => onReview(section)}>
+                {i18n.t("review")}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </>
-  );
-}
-
-function Group({ view, home, expanded, choice }: { view: GroupView; home: string; expanded: boolean; choice: Choice }) {
-  const { chosen, open, now, i18n, setChosen, setOpen } = choice;
-  const name = i18n.t(NAMES[view.group]);
-  const list = `items-${view.group}`;
-  const flip = () => {
-    const next = new Set(open);
-    if (expanded) next.delete(view.group);
-    else next.add(view.group);
-    setOpen(next);
-  };
-  return (
-    <li className={styles.group} style={{ ["--tint" as string]: `var(--tint-${TINTS[view.group]})` }}>
-      <div className={styles.groupRow}>
-        <Check
-          state={view.state}
-          label={name}
-          disabled={!view.selectable}
-          onChange={() => setChosen(toggled(chosen, view.findings))}
-        />
-        <button type="button" className={styles.opener} aria-expanded={expanded} aria-controls={list} onClick={flip}>
-          <span className={styles.groupText}>
-            <span className={styles.groupName}>
-              <span className={styles.dot} />
-              {name}
-            </span>
-            <span className={styles.about}>{i18n.t(ABOUT[view.group])}</span>
-          </span>
-          <span className={styles.size}>
-            {i18n.bytes(view.bytes)}
-            <span className={styles.count}>{i18n.t("groupChosen", { chosen: view.chosen, count: view.findings.length })}</span>
-          </span>
-          <Chevron className={styles.chevron} />
-        </button>
-      </div>
-      {expanded ? (
-        <ul id={list} className={styles.items} aria-label={name}>
-          {view.findings.map((finding) => (
-            <li key={finding.path} className={styles.item} data-held={finding.inUse === null ? undefined : ""}>
-              <Check
-                state={chosen.has(finding.path) ? "all" : "none"}
-                label={finding.name}
-                disabled={!selectable(finding)}
-                onChange={() => setChosen(toggled(chosen, [finding]))}
-              />
-              <span className={styles.itemText}>
-                <span className={styles.itemName}>{finding.name}</span>
-                <span className={styles.itemNote}>{note(finding, home, now, i18n)}</span>
-              </span>
-              <span className={styles.itemSize}>{i18n.bytes(finding.bytes)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
-}
-
-function Check({
-  state,
-  label,
-  disabled,
-  onChange,
-}: {
-  state: GroupView["state"];
-  label: string;
-  disabled: boolean;
-  onChange: () => void;
-}) {
-  const box = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (box.current) box.current.indeterminate = state === "some";
-  }, [state]);
-  return (
-    <input
-      ref={box}
-      type="checkbox"
-      className={styles.check}
-      aria-label={label}
-      checked={state === "all"}
-      disabled={disabled}
-      onChange={onChange}
-    />
   );
 }
 
@@ -461,81 +457,4 @@ function Outcomes({ removals, chosen, i18n }: { removals: Removal[]; chosen: Fin
       ))}
     </ul>
   );
-}
-
-/** Where it is, then why it is or isn't chosen. */
-function note(finding: Finding, home: string, now: number, i18n: Translator): string {
-  if (finding.inUse !== null) return i18n.t("inUseBy", { who: finding.inUse });
-  const where = shown(finding.project ?? finding.path, home);
-  const why =
-    finding.touched !== null
-      ? i18n.t("lastTouched", { ago: i18n.ago(now - finding.touched * 1000) })
-      : finding.kind === "personal"
-        ? i18n.t("goesToTrash")
-        : finding.kind === "discarded"
-          ? i18n.t("emptiedForGood")
-          : finding.picked
-            ? null
-            : i18n.t("usedLast");
-  return why === null ? where : `${where} · ${why}`;
-}
-
-/** `~/code/shop` for a path in the home folder. */
-function shown(path: string, home: string): string {
-  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
-}
-
-function outcomeText(removal: Removal, i18n: Translator): string {
-  switch (removal.outcome) {
-    case "deleted":
-      return i18n.t("outcomeDeleted");
-    case "trashed":
-      return i18n.t("outcomeTrashed");
-    case "stopped":
-      return i18n.t("outcomeNotReached");
-    case "interrupted":
-      return i18n.t("outcomeInterrupted");
-    case "failed":
-      return i18n.t("outcomeFailedWith", { why: removal.why });
-    case "refused":
-      return i18n.t("outcomeLeft", { why: whyText(removal.why, i18n) });
-  }
-}
-
-function whyText(why: Why, i18n: Translator): string {
-  switch (why.code) {
-    case "outsideHome":
-      return i18n.t("whyOutsideHome");
-    case "changed":
-      return i18n.t("whyChanged");
-    case "notReached":
-      return i18n.t("whyNotReached");
-    case "inUse":
-      return i18n.t("whyInUse", { who: why.by });
-    case "unchecked":
-      return i18n.t("whyUnchecked");
-  }
-}
-
-function refusalText(refusal: CleanRefusal, i18n: Translator): string {
-  switch (refusal.code) {
-    case "busy":
-      return i18n.t("cleanBusy");
-    case "closed":
-      return i18n.t("cleanClosed");
-    case "expired":
-      return i18n.t("cleanExpired");
-    case "unlisted":
-      return i18n.t("cleanUnlisted");
-    case "failed":
-      return i18n.t("reasonFailed", { message: refusal.message });
-  }
-}
-
-/** A rejected call carries the backend's refusal; anything else is a failure. */
-function asRefusal(error: unknown): CleanRefusal {
-  if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") {
-    return error as CleanRefusal;
-  }
-  return { code: "failed", message: String(error) };
 }
