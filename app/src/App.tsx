@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
-import { hidePanel, inApp, openCleaner, openInBrowser, resizePanel, revealFolder } from "./api";
+import { hidePanel, inApp, openCleaner, openInBrowser, openSettings, resizePanel, revealFolder } from "./api";
 import { Detail } from "./Detail";
-import { I18nProvider, localeOf } from "./i18n";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
 import { QuitSheet } from "./QuitSheet";
+import { Settled } from "./Settled";
 import { StopSheet } from "./StopSheet";
 import { useUpdate } from "./store";
 import type { AppUsage, Service } from "./types";
@@ -65,6 +65,10 @@ function clean() {
   openCleaner().catch(console.error);
 }
 
+function settle() {
+  openSettings().catch(console.error);
+}
+
 function reveal(service: Service) {
   revealFolder(service.id).catch(console.error);
 }
@@ -113,7 +117,7 @@ export function App() {
   }, [asking]);
 
   return (
-    <I18nProvider locale={localeOf(navigator.language)}>
+    <Settled>
       <div ref={frame} className={styles.frame}>
         <div ref={content} className={styles.content} inert={asking}>
           <Panel
@@ -126,6 +130,7 @@ export function App() {
             onStop={askStop}
             onQuit={askQuit}
             onClean={inApp ? clean : undefined}
+            onSettings={inApp ? settle : undefined}
           />
           {shown === null ? null : (
             <Detail
@@ -162,6 +167,6 @@ export function App() {
           />
         )}
       </div>
-    </I18nProvider>
+    </Settled>
   );
 }

@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
-import type { Disk, Finding, Holder, MapEvent, Protection, RunEvent, ScanEvent, Update } from "./types";
+import type { Disk, Finding, Holder, MapEvent, Protection, RunEvent, ScanEvent, Settings, Update } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -52,6 +53,12 @@ export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token })
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");
 export const openCleaner = () => invoke<void>("open_cleaner");
+export const openSettings = () => invoke<void>("open_settings");
+export const settingsGet = () => invoke<Settings>("settings_get");
+/** Keeps `settings`, handing back what is in force; rejects with a `SettingsRefusal`. */
+export const settingsSet = (settings: Settings) => invoke<Settings>("settings_set", { settings });
+/** Calls `told` with the settings each time they change; resolves to what stops it. */
+export const onSettings = (told: (settings: Settings) => void) => listen<Settings>("settings", (event) => told(event.payload));
 
 /** Rejects with a `CleanRefusal`; the findings come as the last event. */
 export function cleanScan(onEvent: (event: ScanEvent) => void): Promise<void> {

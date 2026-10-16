@@ -214,6 +214,32 @@ export interface Messages {
   appsStart: string;
   appsAgain: string;
   mapWithOthers: string;
+  settingsGeneral: string;
+  settingsServers: string;
+  settingsCleanup: string;
+  settingsAbout: string;
+  language: string;
+  sameAsSystem: string;
+  appearance: string;
+  appearanceLight: string;
+  appearanceDark: string;
+  hiddenTitle: string;
+  hiddenHint: string;
+  programName: string;
+  add: string;
+  removeEntry: string;
+  rootsTitle: string;
+  rootsHint: string;
+  folderPath: string;
+  idleTitle: string;
+  aboutText: string;
+  aboutLicense: string;
+  version: string;
+  invalidIdleDays: string;
+  invalidRoot: string;
+  invalidTooMany: string;
+  invalidName: string;
+  invalidUnsaved: string;
   mapChanged: string;
   shortDeep: string;
   shortChanged: string;
@@ -437,6 +463,32 @@ export const en: Messages = {
   appsStart: "List apps",
   appsAgain: "Refresh list",
   mapWithOthers: "Map with other apps' data",
+  settingsGeneral: "General",
+  settingsServers: "Servers",
+  settingsCleanup: "Clean up",
+  settingsAbout: "About",
+  language: "Language",
+  sameAsSystem: "Same as the system",
+  appearance: "Appearance",
+  appearanceLight: "Light",
+  appearanceDark: "Dark",
+  hiddenTitle: "Never listed as dev servers",
+  hiddenHint: "Programs by the name the panel shows, such as node or python3. What they listen on is listed with the other listeners.",
+  programName: "Program name",
+  add: "Add",
+  removeEntry: "Remove {name}",
+  rootsTitle: "Folders with projects",
+  rootsHint: "Where the cleaner looks for build outputs. With none, it looks in the usual folders, such as ~/code and ~/Developer. Each must be inside your home folder.",
+  folderPath: "Folder, such as ~/code",
+  idleTitle: "Days a project sits untouched before its build outputs are chosen",
+  aboutText: "A menu bar app for the dev servers on your Mac, and a cleaner for what your tools leave behind.",
+  aboutLicense: "Free and open source, under the MIT License.",
+  version: "Version {version}",
+  invalidIdleDays: "Days must be from 1 to 365.",
+  invalidRoot: "{path} isn't a folder inside your home folder.",
+  invalidTooMany: "That is more than 64.",
+  invalidName: "“{name}” can't be a program's name.",
+  invalidUnsaved: "The settings couldn't be saved: {message}",
   mapChanged: "It has changed since the map was made. Map again to see it as it is.",
   shortDeep: "Goes deeper than the map looks",
   shortChanged: "Something in it changed while it was mapped",
@@ -660,6 +712,32 @@ export const tr: Messages = {
   appsStart: "Uygulamaları listele",
   appsAgain: "Listeyi yenile",
   mapWithOthers: "Uygulama verileriyle haritala",
+  settingsGeneral: "Genel",
+  settingsServers: "Sunucular",
+  settingsCleanup: "Temizlik",
+  settingsAbout: "Hakkında",
+  language: "Dil",
+  sameAsSystem: "Sistemle aynı",
+  appearance: "Görünüm",
+  appearanceLight: "Açık",
+  appearanceDark: "Koyu",
+  hiddenTitle: "Dev sunucusu sayılmayanlar",
+  hiddenHint: "Panelin gösterdiği adıyla programlar, örneğin node ya da python3. Dinledikleri portlar diğer dinleyicilerle birlikte listelenir.",
+  programName: "Program adı",
+  add: "Ekle",
+  removeEntry: "{name} kaldır",
+  rootsTitle: "Projelerin olduğu klasörler",
+  rootsHint: "Temizleyicinin derleme çıktılarını aradığı yerler. Hiç yoksa ~/code ve ~/Developer gibi alışılmış klasörlere bakar. Her biri ana klasörünün içinde olmalı.",
+  folderPath: "Klasör, örneğin ~/code",
+  idleTitle: "Derleme çıktıları seçilmeden önce bir projenin dokunulmadan kalacağı gün",
+  aboutText: "Mac'indeki dev sunucuları için bir menü çubuğu uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",
+  aboutLicense: "Ücretsiz ve açık kaynak; MIT Lisansı ile.",
+  version: "Sürüm {version}",
+  invalidIdleDays: "Gün sayısı 1 ile 365 arasında olmalı.",
+  invalidRoot: "{path}, ana klasörünün içinde bir klasör değil.",
+  invalidTooMany: "Bu, 64'ten fazla.",
+  invalidName: "“{name}” bir program adı olamaz.",
+  invalidUnsaved: "Ayarlar kaydedilemedi: {message}",
   mapChanged: "Harita çıkarıldıktan sonra değişmiş. Güncel halini görmek için yeniden haritala.",
   shortDeep: "Haritanın baktığından daha derine iniyor",
   shortChanged: "Haritalanırken içinde bir şey değişti",

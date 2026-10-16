@@ -199,3 +199,25 @@ export interface Area {
 export type MapEvent =
   | { kind: "charting"; bytes: number; items: number; folder: string }
   | { kind: "done"; token: number; area: Area };
+
+export type Language = "system" | "en" | "tr";
+export type Appearance = "system" | "light" | "dark";
+
+/** What the user has set. */
+export interface Settings {
+  language: Language;
+  appearance: Appearance;
+  /** Programs never listed as dev servers, by process name. */
+  hidden: string[];
+  /** Where the cleaner looks for projects; none means the usual folders. */
+  roots: string[];
+  /** How long a project sits untouched before its build outputs are chosen. */
+  idleDays: number;
+}
+
+/** Why settings were turned down. */
+export type SettingsRefusal =
+  | { code: "idleDays" | "tooMany" }
+  | { code: "root"; path: string }
+  | { code: "name"; name: string }
+  | { code: "unsaved"; message: string };

@@ -5,8 +5,9 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { inApp, subscribe } from "./api";
 import { Cleaner, type CleanerBackend } from "./Cleaner";
-import { I18nProvider, localeOf } from "./i18n";
 import { platform } from "./platform";
+import { Settled } from "./Settled";
+import { SettingsWindow, type SettingsBackend } from "./SettingsWindow";
 import { publish } from "./store";
 import "./theme.css";
 
@@ -23,12 +24,24 @@ document.documentElement.dataset.platform = platform;
 if (view === "cleaner") {
   const show = (backend?: CleanerBackend) =>
     mount(
-      <I18nProvider locale={localeOf(navigator.language)}>
+      <Settled>
         <Cleaner backend={backend} />
-      </I18nProvider>,
+      </Settled>,
     );
   if (!inApp && import.meta.env.DEV) {
     void import("./cleanerDemo").then(({ demo }) => show(demo));
+  } else {
+    show();
+  }
+} else if (view === "settings") {
+  const show = (backend?: SettingsBackend) =>
+    mount(
+      <Settled>
+        <SettingsWindow backend={backend} />
+      </Settled>,
+    );
+  if (!inApp && import.meta.env.DEV) {
+    void import("./settingsDemo").then(({ demo }) => show(demo));
   } else {
     show();
   }
