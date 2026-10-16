@@ -54,7 +54,7 @@ pub(crate) fn preview(service: &Service) -> Vec<String> {
 pub(crate) fn refusal(refusal: &Refusal<'_>, target: &Target) -> (Vec<String>, u8) {
     match refusal {
         Refusal::NotFound => {
-            let line = match *target {
+            let line = match target {
                 Target::Port { port, address } => format!(
                     "{}:{port}: nothing Harbormaster can see listens there.",
                     address.map(bracketed).unwrap_or_default()
@@ -62,13 +62,14 @@ pub(crate) fn refusal(refusal: &Refusal<'_>, target: &Target) -> (Vec<String>, u
                 Target::Pid(pid) => {
                     format!("pid {pid} is not part of a server Harbormaster can see.")
                 }
+                Target::Service(_) => "That server is no longer running.".to_string(),
             };
             (vec![line], NOT_FOUND)
         }
         Refusal::Ambiguous(services) => {
-            let port = match *target {
-                Target::Port { port, .. } => port,
-                Target::Pid(_) => 0,
+            let port = match target {
+                Target::Port { port, .. } => *port,
+                Target::Pid(_) | Target::Service(_) => 0,
             };
             let rows: Vec<Vec<String>> = services
                 .iter()

@@ -10,12 +10,14 @@ use crate::{Protection, Service, Snapshot};
 /// How often to look whether stopped processes have exited.
 const POLL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     /// `address` picks one when several services use the port on different addresses.
     Port { port: u16, address: Option<IpAddr> },
     /// The service this process belongs to.
     Pid(u32),
+    /// A service by its id, as the app refers to one.
+    Service(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,11 +42,13 @@ pub fn choose<'a>(
     let candidates: Vec<&Service> = snapshot
         .services
         .iter()
-        .filter(|service| match *target {
+        .filter(|service| match target {
             Target::Port { port, address } => service.ports.iter().any(|candidate| {
-                candidate.port == port && address.is_none_or(|address| candidate.address == address)
+                candidate.port == *port
+                    && address.is_none_or(|address| candidate.address == address)
             }),
-            Target::Pid(pid) => service.processes.iter().any(|member| member.pid == pid),
+            Target::Pid(pid) => service.processes.iter().any(|member| member.pid == *pid),
+            Target::Service(id) => service.id == *id,
         })
         .collect();
     let service = match candidates.as_slice() {
@@ -276,6 +280,18 @@ mod tests {
             choose(&snapshot, &Target::Pid(99), &[]),
             Err(Refusal::NotFound)
         ));
+    }
+
+    #[test]
+    fn finds_a_service_by_its_id() {
+        let snapshot = snapshot(vec![
+            service(20, &[20, 30], 5173, LOOPBACK),
+            service(40, &[40], 8080, LOOPBACK),
+        ]);
+
+        let chosen = choose(&snapshot, &Target::Service("40-40".into()), &[]).unwrap();
+
+        assert_eq!(chosen.ports[0].port, 8080);
     }
 
     #[test]
