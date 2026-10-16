@@ -44,8 +44,14 @@ type Step =
   | { kind: "scanning"; hunt: boolean; done: number; total: number; found: number }
   | { kind: "found"; token: number; home: string; findings: Finding[]; scanned: boolean; hunted: boolean }
   | { kind: "removing"; home: string; chosen: Finding[]; removals: Removal[] }
-  | { kind: "cleaned"; home: string; chosen: Finding[]; cleaned: Cleaned; removals: Removal[] }
-  | { kind: "refused"; refusal: CleanRefusal; partial?: { chosen: Finding[]; removals: Removal[] } };
+  | { kind: "cleaned"; home: string; chosen: Finding[]; cleaned: Cleaned; removals: Removal[]; next: Found }
+  | {
+      kind: "refused";
+      refusal: CleanRefusal;
+      partial?: { chosen: Finding[]; removals: Removal[] };
+      /** What is left to go back to, when the app could say. */
+      next?: Found;
+    };
 
 type Found = Extract<Step, { kind: "found" }>;
 
@@ -65,6 +71,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const [confirming, setConfirming] = useState(false);
   // What had the focus before the sheet, to give it back when the sheet goes.
   const returnFocus = useRef<HTMLElement | null>(null);
+  // Where a clean-up began, to go back to once it is done.
+  const cleanedFrom = useRef<View>("overview");
   useEffect(() => {
     if (confirming) return;
     returnFocus.current?.focus();
@@ -162,6 +170,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
     setConfirming(false);
     // Looking again may have left nothing chosen; the scan stays for later.
     if (going.length === 0) return;
+    cleanedFrom.current = view;
     setView("overview");
     setStep({ kind: "removing", home: found.home, chosen: going, removals: [] });
     backend
@@ -169,7 +178,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
         found.token,
         going.map((finding) => finding.path),
         (event) => {
-          if (event.kind === "done") measureDisk();
+          if (event.kind !== "removed") measureDisk();
           setStep((current) => {
             // Events may still come after the app turned the rest down.
             if (event.kind === "removed" && current.kind === "refused" && current.partial !== undefined) {
@@ -181,12 +190,23 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               const { kind: _, ...removal } = event;
               return { ...current, removals: [...current.removals, removal] };
             }
+            if (event.kind === "failed") {
+              const { kind: _, refusal, ...next } = event;
+              return {
+                kind: "refused",
+                refusal,
+                partial: { chosen: current.chosen, removals: current.removals },
+                next: { kind: "found", home: current.home, ...next },
+              };
+            }
+            const { removals, freedBytes, kind: _, ...next } = event;
             return {
               kind: "cleaned",
               home: current.home,
               chosen: current.chosen,
-              cleaned: { removals: event.removals, freedBytes: event.freedBytes },
+              cleaned: { removals, freedBytes },
               removals: current.removals,
+              next: { kind: "found", home: current.home, ...next },
             };
           });
         },
@@ -203,11 +223,20 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
 
   const working = step.kind === "scanning" || step.kind === "removing";
   const found = step.kind === "found" ? step : null;
+  // What a clean-up left, to go back to.
+  const next = step.kind === "cleaned" || step.kind === "refused" ? (step.next ?? null) : null;
+  const back = () => {
+    if (next === null) return;
+    setChosen(new Set());
+    setStep(next);
+    setView(cleanedFrom.current);
+  };
   const sectionBytes = (section: CleanModule) =>
-    found?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
+    list?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
   const title = view === "overview" ? i18n.t("overview") : i18n.t(SECTION_NAMES[view]);
   // A section shows what was looked for: the scan's, or the hunt's for large files.
-  const listed = (section: CleanModule) => found !== null && (section === "large" ? found.hunted : found.scanned);
+  const list = found ?? next;
+  const listed = (section: CleanModule) => list !== null && (section === "large" ? list.hunted : list.scanned);
   // Each is started from where it shows, whether or not the other came first.
   const huntFirst = view === "large" && (step.kind === "ready" || (found !== null && !found.hunted));
   const scanFirst = view === "overview" && found !== null && !found.scanned;
@@ -231,7 +260,10 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             className={styles.section}
             aria-current={view === section ? "page" : undefined}
             disabled={section !== "large" && !listed(section)}
-            onClick={() => setView(section)}
+            onClick={() => {
+              back();
+              setView(section);
+            }}
           >
             {i18n.t(SECTION_NAMES[section])}
             {listed(section) ? <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span> : null}
@@ -272,7 +304,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
             />
           ) : (
-            overview(step, { disk, chosen, i18n, onScan: () => search(false), onReview: setView })
+            overview(step, { disk, chosen, i18n, onScan: () => search(false), onReview: setView, onBack: back })
           )}
         </div>
         {found !== null && found.findings.length > 0 ? (
@@ -299,9 +331,10 @@ interface Overview {
   i18n: Translator;
   onScan: () => void;
   onReview: (section: CleanModule) => void;
+  onBack: () => void;
 }
 
-function overview(step: Step, { disk, chosen, i18n, onScan, onReview }: Overview) {
+function overview(step: Step, { disk, chosen, i18n, onScan, onReview, onBack }: Overview) {
   switch (step.kind) {
     case "ready":
       return <Start disk={disk} hint={i18n.t("scanHint")} onScan={onScan} />;
@@ -339,11 +372,16 @@ function overview(step: Step, { disk, chosen, i18n, onScan, onReview }: Overview
         </>
       );
     case "cleaned":
-      return <Done step={step} i18n={i18n} />;
+      return <Done step={step} i18n={i18n} onBack={onBack} />;
     case "refused":
       return (
         <>
           <p className={styles.empty}>{refusalText(step.refusal, i18n)}</p>
+          {step.next === undefined ? null : (
+            <button type="button" className={styles.cardButton} onClick={onBack}>
+              {i18n.t("backToList")}
+            </button>
+          )}
           {step.partial === undefined ? null : (
             <Outcomes removals={step.partial.removals} chosen={step.partial.chosen} i18n={i18n} />
           )}
@@ -512,19 +550,40 @@ function Confirm({ plan, onCancel, onConfirm }: { plan: Plan; onCancel: () => vo
   );
 }
 
-function Done({ step, i18n }: { step: Extract<Step, { kind: "cleaned" }>; i18n: Translator }) {
+function Done({
+  step,
+  i18n,
+  onBack,
+}: {
+  step: Extract<Step, { kind: "cleaned" }>;
+  i18n: Translator;
+  onBack: () => void;
+}) {
   const removals = step.cleaned.removals.length > 0 ? step.cleaned.removals : step.removals;
   const cleaned = removals.filter(({ outcome }) => outcome === "deleted" || outcome === "trashed").length;
   const left = removals.length - cleaned;
+  // What went to the Trash is still on the disk; its room comes once the Trash is emptied.
+  const trashed = removals
+    .filter(({ outcome }) => outcome === "trashed")
+    .reduce((total, { path }) => total + (step.chosen.find((finding) => finding.path === path)?.bytes ?? 0), 0);
+  const freed = i18n.bytes(step.cleaned.freedBytes);
+  const caption = [
+    i18n.plural("cleanedItems", cleaned),
+    left > 0 ? i18n.plural("leftItems", left) : null,
+    trashed > 0 ? i18n.t("freedSoFar", { bytes: freed }) : null,
+  ];
   return (
     <>
       <section className={styles.hero} data-testid="hero">
-        <p className={styles.figure}>{i18n.t("freed", { bytes: i18n.bytes(step.cleaned.freedBytes) })}</p>
-        <p className={styles.caption}>
-          {i18n.plural("cleanedItems", cleaned)}
-          {left > 0 ? ` · ${i18n.plural("leftItems", left)}` : ""}
+        <p className={styles.figure}>
+          {trashed > 0 ? i18n.t("movedToTrash", { bytes: i18n.bytes(trashed) }) : i18n.t("freed", { bytes: freed })}
         </p>
+        <p className={styles.caption}>{caption.filter((part) => part !== null).join(" · ")}</p>
       </section>
+      {trashed > 0 ? <p className={styles.hint}>{i18n.t("trashHint")}</p> : null}
+      <button type="button" className={styles.cardButton} onClick={onBack}>
+        {i18n.t("backToList")}
+      </button>
       <Outcomes removals={removals} chosen={step.chosen} i18n={i18n} />
     </>
   );

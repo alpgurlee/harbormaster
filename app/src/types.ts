@@ -148,7 +148,19 @@ export type ScanEvent =
       hunted: boolean;
     };
 
-export type RunEvent = ({ kind: "removed" } & Removal) | ({ kind: "done" } & Cleaned);
+/** What is shown once a removal is over: what wasn't chosen, and what was left as it was. */
+export interface Listed {
+  token: number;
+  findings: Finding[];
+  scanned: boolean;
+  hunted: boolean;
+}
+
+export type RunEvent =
+  | ({ kind: "removed" } & Removal)
+  | ({ kind: "done" } & Cleaned & Listed)
+  /** The removal began but couldn't finish. */
+  | ({ kind: "failed"; refusal: CleanRefusal } & Listed);
 
 /** The home folder's disk. */
 export interface Disk {

@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use harbormaster_cleaner::{Cleaned, Finding, Hunt, Measured, Removal, Survey, Usage};
+use harbormaster_cleaner::{
+    Cleaned, Finding, Hunt, Measured, Outcome, Removal, Survey, Usage, Why,
+};
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
 
@@ -29,24 +31,31 @@ const LARGE_FROM: u64 = 50 * 1024 * 1024;
 )]
 pub(crate) enum ScanEvent {
     Measured(Measured),
-    /// Everything found, by this scan or hunt and the last of the other,
-    /// under the token that removing some of it needs.
+    /// Everything found, by this scan or hunt and the last of the other.
     Done {
-        token: u64,
         home: PathBuf,
-        findings: Vec<Finding>,
-        /// Whether what tools and apps leave was scanned for, and whether the
-        /// large files were hunted for, so that none listed means none found.
-        scanned: bool,
-        hunted: bool,
+        #[serde(flatten)]
+        listed: Listed,
     },
 }
 
-impl ScanEvent {
-    fn done(home: PathBuf, shown: Shown) -> Self {
-        Self::Done {
+/// What the window shows from then on, under the token that removing some
+/// of it needs.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Listed {
+    token: u64,
+    findings: Vec<Finding>,
+    /// Whether what tools and apps leave was scanned for, and whether the
+    /// large files were hunted for, so that none listed means none found.
+    scanned: bool,
+    hunted: bool,
+}
+
+impl From<Shown> for Listed {
+    fn from(shown: Shown) -> Self {
+        Self {
             token: shown.token,
-            home,
             findings: shown.findings,
             scanned: shown.scanned,
             hunted: shown.hunted,
@@ -56,10 +65,27 @@ impl ScanEvent {
 
 /// What a removal tells the window as it goes.
 #[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub(crate) enum RunEvent {
     Removed(Removal),
-    Done(Cleaned),
+    /// What the removal did, and what is shown from then on: what wasn't
+    /// chosen and what was left as it was.
+    Done {
+        #[serde(flatten)]
+        cleaned: Cleaned,
+        #[serde(flatten)]
+        listed: Listed,
+    },
+    /// The removal began but couldn't finish: why, and what is shown from then on.
+    Failed {
+        refusal: Refusal,
+        #[serde(flatten)]
+        listed: Listed,
+    },
 }
 
 /// Why the cleaner turned the window down.
@@ -108,6 +134,17 @@ struct Shown {
     gone: Vec<Finding>,
     scanned: bool,
     hunted: bool,
+}
+
+/// Findings taken to be removed, those of them that were shown, and the
+/// rest of what was shown, which is shown again once the removal is over.
+#[derive(Debug)]
+struct Taken {
+    chosen: Vec<Finding>,
+    /// The chosen that were shown, rather than gone already: only they may
+    /// be shown again.
+    shown: Vec<Finding>,
+    rest: Shown,
 }
 
 /// What looked for the findings: a scan for what tools and apps leave, or
@@ -181,30 +218,56 @@ impl Cleaning {
     }
 
     /// The findings at `paths` among those shown under `token`, each once,
-    /// which can be taken from once. A path must be one listed, byte for byte.
-    fn take(&self, token: u64, paths: &[PathBuf]) -> Result<Vec<Finding>, Refusal> {
+    /// with the rest of what was shown. A path must be one listed, byte for
+    /// byte. Once taken, nothing is shown, so the token is spent and no look
+    /// again can change the list while the removal goes on; turned down,
+    /// what is shown stays as it was.
+    fn take(&self, token: u64, paths: &[PathBuf]) -> Result<Taken, Refusal> {
         let mut ledger = self.lock();
-        let shown = ledger
-            .shown
-            .as_ref()
-            .filter(|shown| shown.token == token)
-            .ok_or(Refusal::Expired)?;
+        let Some(mut rest) = ledger.shown.take_if(|shown| shown.token == token) else {
+            return Err(Refusal::Expired);
+        };
         let mut seen = HashSet::new();
         let chosen = paths
             .iter()
             .filter(|path| seen.insert(path.as_os_str()))
             .map(|path| {
-                shown
-                    .findings
+                rest.findings
                     .iter()
-                    .chain(&shown.gone)
+                    .chain(&rest.gone)
                     .find(|finding| finding.path.as_os_str() == path.as_os_str())
                     .cloned()
                     .ok_or(Refusal::Unlisted)
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        ledger.shown = None;
-        Ok(chosen)
+            .collect::<Result<Vec<_>, _>>();
+        let chosen = match chosen {
+            Ok(chosen) => chosen,
+            Err(refusal) => {
+                ledger.shown = Some(rest);
+                return Err(refusal);
+            }
+        };
+        let (shown, kept) = std::mem::take(&mut rest.findings)
+            .into_iter()
+            .partition(|finding| chosen.iter().any(|taken| taken.path == finding.path));
+        rest.findings = kept;
+        rest.gone.clear();
+        Ok(Taken {
+            chosen,
+            shown,
+            rest,
+        })
+    }
+
+    /// Shows `rest`, what a removal didn't take, with `stayed`, what it
+    /// left as it was, under a new token, and hands it all back.
+    fn put_back(&self, mut rest: Shown, stayed: Vec<Finding>) -> Shown {
+        let mut ledger = self.lock();
+        ledger.last += 1;
+        rest.token = ledger.last;
+        rest.findings.extend(stayed);
+        ledger.shown = Some(rest.clone());
+        rest
     }
 
     /// The findings shown under `token`, as they stand now: what was removed
@@ -274,8 +337,8 @@ impl Working {
         })
         .map_err(failed)?;
         findings.retain(showable);
-        let shown = cleaning.show(Search::Scan, findings);
-        told(ScanEvent::done(home, shown));
+        let listed = cleaning.show(Search::Scan, findings).into();
+        told(ScanEvent::Done { home, listed });
         Ok(())
     }
 
@@ -294,8 +357,8 @@ impl Working {
         })
         .map_err(failed)?;
         findings.retain(showable);
-        let shown = cleaning.show(Search::Hunt, findings);
-        told(ScanEvent::done(home, shown));
+        let listed = cleaning.show(Search::Hunt, findings).into();
+        told(ScanEvent::Done { home, listed });
         Ok(())
     }
 
@@ -308,20 +371,59 @@ impl Working {
         told: &mut dyn FnMut(RunEvent),
     ) -> Result<(), Refusal> {
         let cleaning = &self.0;
-        let chosen = cleaning.take(token, paths)?;
-        let home = harbormaster_cleaner::account_home().map_err(failed)?;
-        let cleaned = harbormaster_cleaner::remove(
-            &home,
-            &chosen,
-            &usage_now,
-            &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
-            &cleaning.stop,
-            &mut |removal| told(RunEvent::Removed(removal.clone())),
-        )
-        .map_err(failed)?;
-        told(RunEvent::Done(cleaned));
+        let Taken {
+            chosen,
+            shown,
+            rest,
+        } = cleaning.take(token, paths)?;
+        let mut removals = Vec::new();
+        let cleaned = harbormaster_cleaner::account_home().and_then(|home| {
+            harbormaster_cleaner::remove(
+                &home,
+                &chosen,
+                &usage_now,
+                &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
+                &cleaning.stop,
+                &mut |removal| {
+                    removals.push(removal.clone());
+                    told(RunEvent::Removed(removal.clone()));
+                },
+            )
+        });
+        // However it ended, the list is shown again before the window hears.
+        let listed = cleaning.put_back(rest, stayed(shown, &removals)).into();
+        told(match cleaned {
+            Ok(cleaned) => RunEvent::Done { cleaned, listed },
+            Err(error) => RunEvent::Failed {
+                refusal: failed(error),
+                listed,
+            },
+        });
         Ok(())
     }
+}
+
+/// Of the findings chosen, those a removal left just as they were, or
+/// never came to, each in use by what it found using it; the rest may be
+/// gone or partly gone.
+fn stayed(chosen: Vec<Finding>, removals: &[Removal]) -> Vec<Finding> {
+    chosen
+        .into_iter()
+        .filter_map(|mut finding| {
+            let outcome = removals
+                .iter()
+                .find(|removal| removal.path == finding.path)
+                .map(|removal| &removal.outcome);
+            match outcome {
+                Some(Outcome::Refused {
+                    why: Why::InUse { by },
+                }) => finding.in_use = Some(by.clone()),
+                Some(outcome) if !outcome.left_as_it_was() => return None,
+                _ => {}
+            }
+            Some(finding)
+        })
+        .collect()
 }
 
 /// Whether the window can be told of `finding`: its paths must be text.
@@ -376,7 +478,7 @@ mod tests {
         Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal, Why,
     };
 
-    use super::{Cleaning, Refusal, RunEvent, ScanEvent, Search};
+    use super::{Cleaning, Listed, Refusal, RunEvent, ScanEvent, Search, stayed};
 
     fn finding(path: &str) -> Finding {
         Finding {
@@ -401,6 +503,121 @@ mod tests {
     /// Shows `findings` as a scan found them, handing back their token.
     fn scanned(cleaning: &Cleaning, findings: Vec<Finding>) -> u64 {
         cleaning.show(Search::Scan, findings).token
+    }
+
+    /// What a removal under `token` would take of `paths`.
+    fn chosen(cleaning: &Cleaning, token: u64, paths: &[PathBuf]) -> Result<Vec<Finding>, Refusal> {
+        cleaning.take(token, paths).map(|taken| taken.chosen)
+    }
+
+    #[test]
+    fn takes_the_chosen_out_at_once_and_shows_nothing_while_they_go() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let token = scanned(&cleaning, vec![npm.clone(), pip.clone()]);
+
+        let taken = cleaning
+            .take(token, &paths(&["/Users/dev/.npm/_cacache"]))
+            .unwrap();
+
+        assert_eq!(
+            (taken.chosen, taken.rest.findings),
+            (vec![npm], vec![pip.clone()])
+        );
+        // Nothing is shown meanwhile, so no look again can write it back.
+        assert!(!cleaning.lists(&pip.path));
+        assert_eq!(
+            cleaning.looked_again(token, Vec::new()),
+            Err(Refusal::Expired)
+        );
+    }
+
+    #[test]
+    fn turns_a_request_down_without_changing_what_is_shown() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let token = scanned(&cleaning, vec![npm.clone()]);
+
+        assert_eq!(
+            chosen(&cleaning, token, &paths(&["/Users/dev"])),
+            Err(Refusal::Unlisted)
+        );
+        assert!(cleaning.lists(&npm.path));
+        assert!(chosen(&cleaning, token, &paths(&["/Users/dev/.npm/_cacache"])).is_ok());
+    }
+
+    #[test]
+    fn shows_what_stayed_beside_the_rest_under_a_new_token() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let token = scanned(&cleaning, vec![npm.clone(), pip.clone()]);
+        let taken = cleaning
+            .take(token, &paths(&["/Users/dev/.npm/_cacache"]))
+            .unwrap();
+
+        let shown = cleaning.put_back(taken.rest, vec![npm.clone()]);
+
+        assert_ne!(shown.token, token);
+        assert_eq!(shown.findings, [pip, npm]);
+        assert!(
+            chosen(
+                &cleaning,
+                shown.token,
+                &paths(&["/Users/dev/.npm/_cacache"])
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn never_shows_again_what_went_before_the_removal_began() {
+        let cleaning = Cleaning::default();
+        let npm = finding("/Users/dev/.npm/_cacache");
+        let pip = finding("/Users/dev/Library/Caches/pip");
+        let token = scanned(&cleaning, vec![npm, pip.clone()]);
+        cleaning.looked_again(token, vec![pip.clone()]).unwrap();
+
+        let taken = cleaning
+            .take(
+                token,
+                &paths(&["/Users/dev/.npm/_cacache", "/Users/dev/Library/Caches/pip"]),
+            )
+            .unwrap();
+        assert_eq!(taken.chosen.len(), 2);
+        // Whatever becomes of it, say stopped before its turn, npm isn't shown again.
+        let shown = cleaning.put_back(taken.rest, stayed(taken.shown, &[]));
+
+        assert_eq!(shown.findings, [pip]);
+    }
+
+    #[test]
+    fn puts_back_only_what_was_left_just_as_it_was() {
+        let at = |path: &str, outcome| Removal {
+            path: PathBuf::from(path),
+            outcome,
+        };
+        let removals = [
+            at("/a", Outcome::Deleted),
+            at(
+                "/b",
+                Outcome::Refused {
+                    why: Why::InUse { by: "java".into() },
+                },
+            ),
+            at("/c", Outcome::Interrupted),
+        ];
+
+        // `/d` was never come to before something went wrong.
+        let chosen = ["/a", "/b", "/c", "/d"].map(finding).to_vec();
+
+        // What was found in use is shown as such.
+        let held = Finding {
+            in_use: Some("java".into()),
+            ..finding("/b")
+        };
+        assert_eq!(stayed(chosen, &removals), [held, finding("/d")]);
     }
 
     #[test]
@@ -432,7 +649,8 @@ mod tests {
         assert!(cleaning.lists(&pip.path));
 
         // The removal then finds it gone and says so, rather than nothing going at all.
-        let chosen = cleaning.take(
+        let chosen = chosen(
+            &cleaning,
             token,
             &paths(&["/Users/dev/.npm/_cacache", "/Users/dev/Library/Caches/pip"]),
         );
@@ -469,12 +687,12 @@ mod tests {
         let scan = cleaning.show(Search::Scan, vec![npm.clone()]);
         assert_eq!(scan.findings, [film.clone(), npm.clone()]);
         assert_eq!((scan.scanned, scan.hunted), (true, true));
-        assert_eq!(cleaning.take(hunt.token, &[]), Err(Refusal::Expired));
+        assert_eq!(chosen(&cleaning, hunt.token, &[]), Err(Refusal::Expired));
         let again = cleaning.show(Search::Scan, vec![pip.clone()]);
         assert_eq!(again.findings, [film, pip.clone()]);
         let none = cleaning.show(Search::Hunt, Vec::new());
         assert_eq!(none.findings, [pip]);
-        assert_eq!(cleaning.take(scan.token, &[]), Err(Refusal::Expired));
+        assert_eq!(chosen(&cleaning, scan.token, &[]), Err(Refusal::Expired));
     }
 
     #[test]
@@ -482,11 +700,11 @@ mod tests {
         let cleaning = Cleaning::default();
         let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
-        let chosen = cleaning.take(token, &paths(&["/Users/dev/.npm/_cacache"]));
+        let taken = chosen(&cleaning, token, &paths(&["/Users/dev/.npm/_cacache"]));
 
-        assert_eq!(chosen.unwrap(), [finding("/Users/dev/.npm/_cacache")]);
+        assert_eq!(taken.unwrap(), [finding("/Users/dev/.npm/_cacache")]);
         assert_eq!(
-            cleaning.take(token, &paths(&["/Users/dev/.npm/_cacache"])),
+            chosen(&cleaning, token, &paths(&["/Users/dev/.npm/_cacache"])),
             Err(Refusal::Expired)
         );
     }
@@ -496,7 +714,11 @@ mod tests {
         let cleaning = Cleaning::default();
         let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
-        let made_up = cleaning.take(token, &paths(&["/Users/dev/.npm/_cacache", "/Users/dev"]));
+        let made_up = chosen(
+            &cleaning,
+            token,
+            &paths(&["/Users/dev/.npm/_cacache", "/Users/dev"]),
+        );
 
         assert_eq!(made_up, Err(Refusal::Unlisted));
         assert!(
@@ -512,8 +734,8 @@ mod tests {
         let older = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
         let newer = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
-        assert_eq!(cleaning.take(older, &[]), Err(Refusal::Expired));
-        assert!(cleaning.take(newer, &[]).is_ok());
+        assert_eq!(chosen(&cleaning, older, &[]), Err(Refusal::Expired));
+        assert!(chosen(&cleaning, newer, &[]).is_ok());
     }
 
     #[test]
@@ -521,8 +743,9 @@ mod tests {
         let cleaning = Cleaning::default();
         let token = scanned(&cleaning, vec![finding("/Users/dev/.npm/_cacache")]);
 
-        let odd = cleaning.take(token, &paths(&["/Users/dev/.npm/./_cacache"]));
-        let twice = cleaning.take(
+        let odd = chosen(&cleaning, token, &paths(&["/Users/dev/.npm/./_cacache"]));
+        let twice = chosen(
+            &cleaning,
             token,
             &paths(&["/Users/dev/.npm/_cacache", "/Users/dev/.npm/_cacache"]),
         );
@@ -542,7 +765,7 @@ mod tests {
             Ok(vec![finding("/Users/dev/.npm/_cacache")])
         );
         // Once a removal took them, there is nothing to look at.
-        cleaning.take(token, &[]).unwrap();
+        chosen(&cleaning, token, &[]).unwrap();
         assert_eq!(cleaning.shown(token), Err(Refusal::Expired));
     }
 
@@ -630,11 +853,13 @@ mod tests {
             bytes: 5,
         });
         let found = ScanEvent::Done {
-            token: 3,
             home: PathBuf::from("/Users/dev"),
-            findings: Vec::new(),
-            scanned: true,
-            hunted: false,
+            listed: Listed {
+                token: 3,
+                findings: Vec::new(),
+                scanned: true,
+                hunted: false,
+            },
         };
         let removed = RunEvent::Removed(Removal {
             path: PathBuf::from("/Users/dev/.npm/_cacache"),
@@ -642,11 +867,34 @@ mod tests {
                 why: Why::InUse { by: "node".into() },
             },
         });
-        let done = RunEvent::Done(Cleaned {
-            removals: Vec::new(),
-            freed_bytes: 7,
-        });
+        let done = RunEvent::Done {
+            cleaned: Cleaned {
+                removals: Vec::new(),
+                freed_bytes: 7,
+            },
+            listed: Listed {
+                token: 4,
+                findings: Vec::new(),
+                scanned: true,
+                hunted: false,
+            },
+        };
+        let failed = RunEvent::Failed {
+            refusal: Refusal::Failed {
+                message: "no disk".into(),
+            },
+            listed: Listed {
+                token: 5,
+                findings: Vec::new(),
+                scanned: true,
+                hunted: true,
+            },
+        };
         let json = |value: serde_json::Result<serde_json::Value>| value.unwrap();
+        assert_eq!(
+            json(serde_json::to_value(failed)),
+            serde_json::json!({"kind": "failed", "refusal": {"code": "failed", "message": "no disk"}, "token": 5, "findings": [], "scanned": true, "hunted": true})
+        );
 
         assert_eq!(
             json(serde_json::to_value(measured)),
@@ -667,7 +915,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(done)),
-            serde_json::json!({"kind": "done", "removals": [], "freedBytes": 7})
+            serde_json::json!({"kind": "done", "removals": [], "freedBytes": 7, "token": 4, "findings": [], "scanned": true, "hunted": false})
         );
         assert_eq!(
             json(serde_json::to_value(Refusal::Unlisted)),

@@ -159,6 +159,21 @@ pub enum Outcome {
     Interrupted,
 }
 
+impl Outcome {
+    /// Whether the finding was left just as the scan measured it: never
+    /// reached, or turned down for what was using it. Anything else may be
+    /// gone, partly gone, or something else by now.
+    pub fn left_as_it_was(&self) -> bool {
+        matches!(
+            self,
+            Self::Stopped
+                | Self::Refused {
+                    why: Why::InUse { .. } | Why::Unchecked { .. }
+                }
+        )
+    }
+}
+
 /// Why a finding was left alone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
@@ -450,7 +465,25 @@ pub fn account_home() -> io::Result<PathBuf> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::in_use;
+    use super::{Outcome, Why, in_use};
+
+    #[test]
+    fn tells_what_was_left_just_as_the_scan_measured_it() {
+        let refused = |why| Outcome::Refused { why };
+        let error = || "x".to_string();
+
+        assert!(Outcome::Stopped.left_as_it_was());
+        assert!(refused(Why::InUse { by: "java".into() }).left_as_it_was());
+        assert!(refused(Why::Unchecked { error: error() }).left_as_it_was());
+        // Gone, partly gone, or no longer what was measured.
+        assert!(!Outcome::Deleted.left_as_it_was());
+        assert!(!Outcome::Trashed.left_as_it_was());
+        assert!(!Outcome::Interrupted.left_as_it_was());
+        assert!(!Outcome::Failed { why: error() }.left_as_it_was());
+        assert!(!refused(Why::Changed).left_as_it_was());
+        assert!(!refused(Why::NotReached { error: error() }).left_as_it_was());
+        assert!(!refused(Why::OutsideHome).left_as_it_was());
+    }
 
     #[test]
     fn a_dev_server_above_or_below_a_project_is_using_it() {

@@ -142,6 +142,10 @@ export interface Messages {
   confirmChecked: string;
   removing: string;
   freed: string;
+  freedSoFar: string;
+  movedToTrash: string;
+  trashHint: string;
+  backToList: string;
   cleanedItems: Plural;
   leftItems: Plural;
   outcomeDeleted: string;
@@ -324,6 +328,10 @@ export const en: Messages = {
   confirmChecked: "Each item is checked again right before it goes; anything in use by then is left alone.",
   removing: "Cleaning up… {done} of {total}",
   freed: "{bytes} freed",
+  freedSoFar: "{bytes} freed so far",
+  movedToTrash: "{bytes} moved to the Trash",
+  trashHint: "The room comes back once the Trash is emptied.",
+  backToList: "Back to the list",
   cleanedItems: { one: "{count} item cleaned up", other: "{count} items cleaned up" },
   leftItems: { one: "{count} not cleaned up", other: "{count} not cleaned up" },
   outcomeDeleted: "deleted",
@@ -507,6 +515,10 @@ export const tr: Messages = {
   confirmChecked: "Her öğe gitmeden hemen önce yeniden denetlenir; o an kullanımda olan bırakılır.",
   removing: "Temizleniyor… {done}/{total}",
   freed: "{bytes} boşaldı",
+  freedSoFar: "şimdilik {bytes} açıldı",
+  movedToTrash: "{bytes} Çöp Sepeti'ne taşındı",
+  trashHint: "Bu alan, Çöp Sepeti boşaltılınca açılır.",
+  backToList: "Listeye dön",
   cleanedItems: { one: "{count} öğe temizlendi", other: "{count} öğe temizlendi" },
   leftItems: { one: "{count} öğe temizlenmedi", other: "{count} öğe temizlenmedi" },
   outcomeDeleted: "silindi",

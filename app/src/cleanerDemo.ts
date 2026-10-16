@@ -78,10 +78,11 @@ const LARGE: Finding[] = [
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-/** What the pretend app shows: the last scan's and the last hunt's findings. */
+/** What the pretend app shows: the last scan's and the last hunt's findings, less what it removed. */
 let scanned = false;
 let hunted = false;
-const shown = () => [...(scanned ? FINDINGS : []), ...(hunted ? LARGE : [])];
+const removed = new Set<string>();
+const shown = () => [...(scanned ? FINDINGS : []), ...(hunted ? LARGE : [])].filter((each) => !removed.has(each.path));
 
 /** A backend that pretends: it measures for a few seconds and removes nothing. */
 export const demo: CleanerBackend = {
@@ -112,11 +113,13 @@ export const demo: CleanerBackend = {
       if (going?.group === "logs") {
         onEvent({ kind: "removed", path, outcome: "refused", why: { code: "inUse", by: "Console" } });
       } else {
-        freed += going?.bytes ?? 0;
+        // What goes to the Trash frees nothing until the Trash is emptied.
+        if (going?.kind !== "personal") freed += going?.bytes ?? 0;
+        removed.add(path);
         onEvent({ kind: "removed", path, outcome: going?.kind === "personal" ? "trashed" : "deleted" });
       }
     }
-    onEvent({ kind: "done", removals: [], freedBytes: freed });
+    onEvent({ kind: "done", removals: [], freedBytes: freed, token: 3, findings: shown(), scanned, hunted });
   },
   stop: () => Promise.resolve(),
   disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),

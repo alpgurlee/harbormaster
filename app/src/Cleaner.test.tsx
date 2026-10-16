@@ -132,6 +132,11 @@ function hunted(driver: ReturnType<typeof fake>, findings: Finding[], scanned = 
   act(() => driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true }));
 }
 
+/** Ends a removal as the app does: what it did, and what is shown from then on. */
+function ended(run: { onEvent: (event: RunEvent) => void }, freedBytes: number, findings: Finding[]) {
+  act(() => run.onEvent({ kind: "done", removals: [], freedBytes, token: 9, findings, scanned: true, hunted: false }));
+}
+
 /** Opens a section of the window from its side. */
 const section = (name: string) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }));
 
@@ -446,10 +451,56 @@ describe("the cleaner window", () => {
     act(() =>
       run.onEvent({ kind: "removed", path: npm.path, outcome: "refused", why: { code: "inUse", by: "node" } }),
     );
-    act(() => run.onEvent({ kind: "done", removals: [], freedBytes: GB }));
+    ended(run, GB, [tool, npm, pip, archive, trash]);
 
     expect(hero()).toBe("1.0 GB freed1 item cleaned up · 1 not cleaned up");
     expect(screen.getByText("left alone: node is using it")).toBeTruthy();
+  });
+
+  it("goes back to what is left once a clean-up is done, where it began", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    section("Developer");
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    const run = driver.runs[0];
+    act(() => run.onEvent({ kind: "removed", path: shop.path, outcome: "deleted" }));
+    act(() =>
+      run.onEvent({ kind: "removed", path: npm.path, outcome: "refused", why: { code: "inUse", by: "node" } }),
+    );
+    ended(run, GB, [tool, { ...npm, inUse: "node" }, pip, archive, trash]);
+    // The sections lead back to the list as well.
+    expect(screen.getByRole("button", { name: /^Developer/ })).toHaveProperty("disabled", false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to the list" }));
+
+    expect(screen.getByText("0 items")).toBeTruthy();
+    expect(within(screen.getByRole("list", { name: "Projects" })).queryByText("shop · node_modules")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Package caches/ }));
+    // What the removal found in use stays out of reach.
+    expect(screen.getByRole("checkbox", { name: "npm" })).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "pip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    expect(driver.runs.map(({ token, paths }) => ({ token, paths }))[1]).toEqual({ token: 9, paths: [pip.path] });
+  });
+
+  it("says how much went to the Trash, whose room comes back once it is emptied", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver, [archive]);
+    section("Developer");
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-09-20" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    const run = driver.runs[0];
+
+    act(() => run.onEvent({ kind: "removed", path: archive.path, outcome: "trashed" }));
+    ended(run, 0, []);
+
+    expect(hero()).toBe("1.0 GB moved to the Trash1 item cleaned up · 0 MB freed so far");
+    expect(screen.getByText("The room comes back once the Trash is emptied.")).toBeTruthy();
   });
 
   it("never calls what didn't finish untouched", () => {
@@ -462,11 +513,37 @@ describe("the cleaner window", () => {
 
     act(() => run.onEvent({ kind: "removed", path: shop.path, outcome: "interrupted" }));
     act(() => run.onEvent({ kind: "removed", path: npm.path, outcome: "stopped" }));
-    act(() => run.onEvent({ kind: "done", removals: [], freedBytes: 0 }));
+    ended(run, 0, [tool, npm, pip, archive, trash]);
 
     expect(hero()).toBe("0 MB freed0 items cleaned up · 2 not cleaned up");
     expect(screen.getByText("stopped during cleanup; some contents may have been deleted")).toBeTruthy();
     expect(screen.getByText("stopped before its turn")).toBeTruthy();
+  });
+
+  it("goes back to what is left when the removal began and then failed", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver);
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    const run = driver.runs[0];
+    act(() => run.onEvent({ kind: "removed", path: shop.path, outcome: "deleted" }));
+
+    act(() =>
+      run.onEvent({
+        kind: "failed",
+        refusal: { code: "failed", message: "the disk's free space couldn't be read" },
+        token: 9,
+        findings: [tool, npm, pip, archive, trash],
+        scanned: true,
+        hunted: false,
+      }),
+    );
+
+    expect(screen.getByText("Something went wrong: the disk's free space couldn't be read")).toBeTruthy();
+    expect(screen.getByText("deleted")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the list" }));
+    expect(screen.getByText("0 items")).toBeTruthy();
   });
 
   it("keeps what was done in sight when the app turns the rest down", async () => {
