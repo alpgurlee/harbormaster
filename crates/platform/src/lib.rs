@@ -69,6 +69,13 @@ pub fn tracks_exec() -> bool {
     sys::tracks_exec()
 }
 
+/// Raises how many files this process may hold open as far as the system
+/// allows, since measuring a folder tree holds one per level and launchd
+/// hands an app only 256. Says how many it may hold now.
+pub fn allow_more_open_files() -> Result<u64, Error> {
+    Ok(sys::allow_more_open_files()?)
+}
+
 /// Used and total memory of the machine, if the OS says.
 pub fn memory() -> Option<Memory> {
     sys::memory()

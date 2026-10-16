@@ -101,6 +101,8 @@ struct ListArgs {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // More open files let more places be measured at once; without, fewer are.
+    let _ = harbormaster_platform::allow_more_open_files();
     let outcome = match cli.command {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),

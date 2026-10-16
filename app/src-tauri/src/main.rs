@@ -12,6 +12,8 @@ mod tray;
 use tauri::Manager;
 
 fn main() {
+    // More open files let the cleaner measure more places at once; without, fewer are.
+    let _ = harbormaster_platform::allow_more_open_files();
     tauri::Builder::default()
         // A second launch shows the first one's panel instead.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
