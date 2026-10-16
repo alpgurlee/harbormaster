@@ -5,15 +5,17 @@ mod process;
 mod signal;
 
 use std::collections::HashSet;
-use std::ffi::c_int;
+use std::ffi::{CStr, OsStr, c_int};
 use std::io;
-use std::mem::size_of;
+use std::mem::{MaybeUninit, size_of};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 
 use libproc::file_info::pidfdinfo;
 use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 
-use crate::{Listener, SocketId};
+use crate::{Listener, SocketId, Whereabouts};
 
 pub(crate) use memory::memory;
 pub(crate) use process::{details, executable_of, processes, tracks_exec};
@@ -22,6 +24,128 @@ pub(crate) use signal::{presence, signal};
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;
 const INI_IPV6: u8 = 0x2;
+const PROC_PIDFDVNODEPATHINFO: c_int = 2;
+
+/// `struct proc_fileinfo` from xnu bsd/sys/proc_info.h.
+#[repr(C)]
+struct FileInfo {
+    open_flags: u32,
+    status: u32,
+    offset: libc::off_t,
+    kind: i32,
+    guard_flags: u32,
+}
+
+/// `struct vnode_fdinfowithpath`: a file's details, then its vnode's, which
+/// end with its path.
+#[repr(C)]
+struct VnodeWithPath {
+    file: FileInfo,
+    vnode: libc::vnode_info_path,
+}
+
+/// Each of this user's processes with its working folder, program and open files.
+pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
+    // SAFETY: getuid has no preconditions.
+    let own = unsafe { libc::getuid() };
+    let mut found = Vec::new();
+    for pid in all_pids()? {
+        let Ok((info, key)) = process::identify(pid) else {
+            continue;
+        };
+        if info.pbi_uid != own {
+            continue;
+        }
+        let mut paths = Vec::new();
+        paths.extend(working_folder(pid));
+        paths.extend(program_path(pid));
+        if let Some(descriptors) = file_descriptors(pid) {
+            paths.extend(
+                descriptors
+                    .iter()
+                    .filter(|descriptor| descriptor.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
+                    .filter_map(|descriptor| open_file(pid, descriptor.proc_fd)),
+            );
+        }
+        // The pid may name another process by now, or another program.
+        if !process::identify(pid).is_ok_and(|(after, again)| again == key && after.pbi_uid == own)
+        {
+            continue;
+        }
+        found.push(Whereabouts {
+            pid: key.pid,
+            name: process::name_of(&info),
+            paths,
+        });
+    }
+    Ok(found)
+}
+
+/// The path of the file `fd` names in `pid`, if it is still open.
+fn open_file(pid: libc::pid_t, fd: i32) -> Option<PathBuf> {
+    let size = c_int::try_from(size_of::<VnodeWithPath>()).ok()?;
+    let mut info = MaybeUninit::<VnodeWithPath>::zeroed();
+    // SAFETY: `info` is a zeroed buffer of exactly `size` bytes.
+    let written = unsafe {
+        libc::proc_pidfdinfo(
+            pid,
+            fd,
+            PROC_PIDFDVNODEPATHINFO,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: the kernel filled all `size` bytes; zeroes are valid for every field.
+    path_of(&unsafe { info.assume_init() }.vnode)
+}
+
+/// The program `pid` runs, kept as bytes: a path need not be valid text.
+fn program_path(pid: libc::pid_t) -> Option<PathBuf> {
+    let mut buffer = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let size = u32::try_from(buffer.len()).ok()?;
+    // SAFETY: `buffer` is writable for `size` bytes.
+    let written = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), size) };
+    if written <= 0 {
+        return None;
+    }
+    let path = CStr::from_bytes_until_nul(&buffer).ok()?;
+    (!path.is_empty()).then(|| PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+}
+
+/// Where `pid` is working.
+fn working_folder(pid: libc::pid_t) -> Option<PathBuf> {
+    let size = c_int::try_from(size_of::<libc::proc_vnodepathinfo>()).ok()?;
+    let mut info = MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    // SAFETY: `info` is a zeroed buffer of exactly `size` bytes.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: the kernel filled all `size` bytes; zeroes are valid for every field.
+    path_of(&unsafe { info.assume_init() }.pvi_cdir)
+}
+
+/// The path at the end of a vnode's details, read no further than its buffer.
+fn path_of(vnode: &libc::vnode_info_path) -> Option<PathBuf> {
+    let buffer = &vnode.vip_path;
+    // SAFETY: the nested arrays are one contiguous run of `size_of_val(buffer)` bytes.
+    let bytes = unsafe {
+        std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), std::mem::size_of_val(buffer))
+    };
+    let path = CStr::from_bytes_until_nul(bytes).ok()?;
+    (!path.is_empty()).then(|| PathBuf::from(OsStr::from_bytes(path.to_bytes())))
+}
 
 pub(crate) fn listeners() -> io::Result<Vec<Listener>> {
     let mut seen = HashSet::new();

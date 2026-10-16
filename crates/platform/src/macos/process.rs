@@ -278,7 +278,7 @@ fn bsd_info(pid: libc::pid_t) -> io::Result<libc::proc_bsdinfo> {
     }
 }
 
-fn name_of(info: &libc::proc_bsdinfo) -> String {
+pub(super) fn name_of(info: &libc::proc_bsdinfo) -> String {
     let name = c_string(&info.pbi_name);
     if name.is_empty() {
         c_string(&info.pbi_comm)

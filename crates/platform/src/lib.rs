@@ -9,7 +9,7 @@ use macos as sys;
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
     Field, Listener, Memory, Owner, Pid, Presence, ProcessDetails, ProcessEntry, ProcessKey,
-    Signal, SignalOutcome, SocketId, StartTime,
+    Signal, SignalOutcome, SocketId, StartTime, Whereabouts,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +21,12 @@ pub enum Error {
 /// Every TCP socket in the LISTEN state that this user can see.
 pub fn listeners() -> Result<Vec<Listener>, Error> {
     Ok(sys::listeners()?)
+}
+
+/// Where each of this user's processes is, for telling whether a folder is
+/// in use. Processes that can't be read are left out.
+pub fn whereabouts() -> Result<Vec<Whereabouts>, Error> {
+    Ok(sys::whereabouts()?)
 }
 
 /// Every process the OS reports, with usage figures where readable.

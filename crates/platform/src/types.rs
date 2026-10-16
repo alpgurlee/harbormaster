@@ -19,6 +19,15 @@ pub struct ProcessKey {
     pub exec: u32,
 }
 
+/// Where one of this user's processes is: its working folder, its program
+/// and the files it has open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Whereabouts {
+    pub pid: Pid,
+    pub name: String,
+    pub paths: Vec<std::path::PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
     CurrentUser,
