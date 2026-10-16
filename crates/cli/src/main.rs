@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use harbormaster_cleaner::Survey;
+use harbormaster_cleaner::{Survey, Usage};
 use harbormaster_engine::{
     Classification, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target, live,
 };
@@ -25,9 +25,6 @@ const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
 const KILL_GRACE: Duration = Duration::from_secs(2);
 /// How long a project sits untouched before its build outputs are picked.
 const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
-
-/// Paths, each with what is using it.
-type UsedBy = Vec<(PathBuf, String)>;
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -197,13 +194,13 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
 fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
     let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
     let roots = harbormaster_cleaner::usual_roots(&home);
-    let (busy, running) = in_use_now(&home)?;
+    let usage = in_use_now(&home)?;
     let now = SystemTime::now();
     let survey = Survey {
         home: &home,
         roots: &roots,
-        busy: &busy,
-        running: &running,
+        busy: &usage.busy,
+        running: &usage.running,
         idle_after: IDLE_AFTER,
         now,
     };
@@ -223,17 +220,10 @@ fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
         return Ok(0);
     }
     clean::remove_picked(&findings, json, &mut out, |picked, stop, told| {
-        // Scanning took a while, so what is in use is read again.
-        let (busy, running) = in_use_now(&home)?;
-        let survey = Survey {
-            busy: &busy,
-            running: &running,
-            now: SystemTime::now(),
-            ..survey
-        };
         harbormaster_cleaner::remove(
-            &survey,
+            &home,
             picked,
+            &|| in_use_now(&home).map_err(io::Error::other),
             &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
             stop,
             told,
@@ -244,29 +234,15 @@ fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
 
 /// The paths this user's other processes hold, and the projects with a dev
 /// server running, as they are now.
-fn in_use_now(home: &Path) -> anyhow::Result<(UsedBy, UsedBy)> {
-    let busy = busy_paths().context("could not tell which folders are in use")?;
-    Ok((busy, running_projects(home)?))
-}
-
-/// Every path this user's other processes hold, each with its process's name.
-fn busy_paths() -> anyhow::Result<UsedBy> {
-    let own = std::process::id();
-    Ok(harbormaster_platform::whereabouts()?
-        .into_iter()
-        .filter(|process| process.pid.0 != own)
-        .flat_map(|process| {
-            let name = process.name;
-            process
-                .paths
-                .into_iter()
-                .map(move |path| (path, name.clone()))
-        })
-        .collect())
+fn in_use_now(home: &Path) -> anyhow::Result<Usage> {
+    Ok(Usage {
+        busy: live::held().context("could not tell which folders are in use")?,
+        running: running_projects(home)?,
+    })
 }
 
 /// The projects with a dev server running, each with what to call the server.
-fn running_projects(home: &Path) -> anyhow::Result<UsedBy> {
+fn running_projects(home: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
     let snapshot = live::scan(&mut Scanner::default(), home)?;
     Ok(snapshot
         .services

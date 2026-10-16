@@ -6,7 +6,7 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Candidate, Finding, Identity};
+use crate::{Candidate, Finding, Identity, Measured};
 
 /// The most places measured at once.
 const WORKERS: usize = 4;
@@ -16,10 +16,17 @@ const DEEPEST: usize = 64;
 /// Open files left for everything else the process does.
 const RESERVE: u64 = 64;
 
-/// Measures every candidate under `home`, several at a time. A place that
-/// couldn't be measured in full is left out rather than shown too small.
-pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> Vec<Finding> {
+/// Measures every candidate under `home`, several at a time, telling
+/// `measured` after each. A place that couldn't be measured in full is left
+/// out rather than shown too small.
+pub(crate) fn all(
+    home: &Dir,
+    candidates: Vec<Candidate>,
+    stop: &AtomicBool,
+    measured: &(dyn Fn(Measured) + Sync),
+) -> Vec<Finding> {
     let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
     let measured: Vec<(usize, (Identity, u64))> = std::thread::scope(|scope| {
         let running: Vec<_> = (0..workers())
             .map(|_| {
@@ -30,12 +37,18 @@ pub(crate) fn all(home: &Dir, candidates: Vec<Candidate>, stop: &AtomicBool) -> 
                         let Some(candidate) = candidates.get(at) else {
                             break;
                         };
-                        let measured = home.descend(&candidate.relative).and_then(|dir| {
+                        let sized = home.descend(&candidate.relative).and_then(|dir| {
                             Ok((Identity::of(&dir.metadata()?), size(&dir, stop)?))
                         });
-                        if let Ok(measured) = measured {
-                            mine.push((at, measured));
+                        let bytes = sized.as_ref().map_or(0, |(_, bytes)| *bytes);
+                        if let Ok(sized) = sized {
+                            mine.push((at, sized));
                         }
+                        measured(Measured {
+                            done: done.fetch_add(1, Ordering::Relaxed) + 1,
+                            total: candidates.len(),
+                            bytes,
+                        });
                     }
                     mine
                 })

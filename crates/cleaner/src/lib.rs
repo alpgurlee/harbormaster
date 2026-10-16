@@ -9,6 +9,7 @@ mod remove;
 mod walk;
 
 use std::ffi::{CStr, OsStr};
+use std::fmt;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
@@ -116,11 +117,50 @@ pub enum Outcome {
     /// In the Trash.
     Trashed,
     /// Left alone: it was in use, or no longer what the scan saw.
-    Refused { why: String },
+    Refused { why: Why },
     /// Something went wrong partway; `why` says what.
     Failed { why: String },
-    /// Not reached before the stop.
+    /// Not reached before the stop, so left as it was.
     Stopped,
+    /// Stopped while being removed: some of it may be gone.
+    Interrupted,
+}
+
+/// Why a finding was left alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "code",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Why {
+    /// It isn't inside the home folder, or no longer is.
+    OutsideHome,
+    /// A link or something else stands where a folder on its way was.
+    NotReached {
+        error: String,
+    },
+    /// Another folder is in its place now.
+    Changed,
+    InUse {
+        by: String,
+    },
+    /// What is using what couldn't be read, so it isn't known to be free.
+    Unchecked {
+        error: String,
+    },
+}
+
+impl fmt::Display for Why {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutsideHome => f.write_str("outside the home folder"),
+            Self::NotReached { error } => write!(f, "not reached through real folders ({error})"),
+            Self::Changed => f.write_str("no longer the folder the scan measured"),
+            Self::InUse { by } => write!(f, "in use by {by}"),
+            Self::Unchecked { error } => write!(f, "couldn't tell what is using it ({error})"),
+        }
+    }
 }
 
 /// One finding's removal.
@@ -139,6 +179,30 @@ pub struct Cleaned {
     pub removals: Vec<Removal>,
     /// Room the disk got back, read from the disk before and after.
     pub freed_bytes: u64,
+}
+
+/// How far measuring has come, told after each place is measured. Places
+/// are measured several at a time, so `done` can arrive out of order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Measured {
+    /// Places measured so far, this one included.
+    pub done: usize,
+    /// Places there are to measure.
+    pub total: usize,
+    /// What this place adds to the list: none when it is too small or
+    /// couldn't be measured in full.
+    pub bytes: u64,
+}
+
+/// What is using what on the machine, as removal reads it before each item.
+#[derive(Debug, Clone, Default)]
+pub struct Usage {
+    /// Paths processes hold, such as working folders, programs and open
+    /// files, each with its process's name.
+    pub busy: Vec<(PathBuf, String)>,
+    /// Project roots with a dev server running, each with what to call the server.
+    pub running: Vec<(PathBuf, String)>,
 }
 
 /// What a scan looks through, and what it knows about the machine.
@@ -179,46 +243,72 @@ pub(crate) struct Candidate {
 /// What could go on the machine `survey` describes, measured, by group and
 /// largest first. `stop` cuts a long scan short, keeping what was measured.
 pub fn scan(survey: &Survey, stop: &AtomicBool) -> io::Result<Vec<Finding>> {
+    scan_with(survey, stop, &|_| {})
+}
+
+/// `scan`, telling `measured` after each place is measured.
+pub fn scan_with(
+    survey: &Survey,
+    stop: &AtomicBool,
+    measured: &(dyn Fn(Measured) + Sync),
+) -> io::Result<Vec<Finding>> {
     let root = walk::Dir::open(survey.home)?;
     let mut candidates = catalog::candidates(&root, survey.home, stop);
     candidates.extend(projects::candidates(&root, survey, stop));
     for candidate in &mut candidates {
-        candidate.in_use = in_use(&candidate.path, candidate.project.as_deref(), survey);
+        candidate.in_use = in_use(
+            &candidate.path,
+            candidate.project.as_deref(),
+            survey.busy,
+            survey.running,
+        );
         candidate.picked &= candidate.in_use.is_none();
     }
-    let mut findings = measure::all(&root, candidates, stop);
+    let mut findings = measure::all(&root, candidates, stop, &|progress: Measured| {
+        let listed = progress.bytes >= SMALLEST;
+        measured(Measured {
+            bytes: if listed { progress.bytes } else { 0 },
+            ..progress
+        });
+    });
     findings.retain(|finding| finding.bytes >= SMALLEST);
     findings.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
     Ok(findings)
 }
 
-/// Removes `findings`, which must come from `scan`, one by one, looking at
-/// each again right before: it must still be reached through real folders
-/// inside the survey's home, still be the folder the scan measured, and
-/// nothing the survey knows of may be using it. Rebuildable and discarded
-/// things are deleted, the Trash first so nothing moved into it goes too;
-/// personal things go to the Trash through `trash`, which moves the item at
-/// a path there and says where it went. `told` hears of each as it is done.
-/// One failing stops nothing else.
+/// Removes `findings`, which must come from a scan of `home`, one by one,
+/// looking at each again right before: it must still be reached through
+/// real folders inside `home`, still be the folder the scan measured, and
+/// nothing may be using it by what `usage` reads then. Rebuildable and
+/// discarded things are deleted, the Trash first so nothing moved into it
+/// goes too; personal things go to the Trash through `trash`, which moves
+/// the item at a path there and says where it went. `told` hears of each as
+/// it is done. One failing stops nothing else.
 pub fn remove(
-    survey: &Survey,
+    home: &Path,
     findings: &[Finding],
+    usage: &dyn Fn() -> io::Result<Usage>,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
-    remove::all(survey, findings, trash, stop, told)
+    remove::all(home, findings, usage, trash, stop, told)
 }
 
 /// Who is using the folder at `path`, a build output of `project` if any: a
 /// dev server running in the project, above it or below it, or else a
 /// process holding a path inside the folder or the project.
-pub(crate) fn in_use(path: &Path, project: Option<&Path>, survey: &Survey) -> Option<String> {
-    let server = survey.running.iter().find(|(root, _)| {
+pub(crate) fn in_use(
+    path: &Path,
+    project: Option<&Path>,
+    busy: &[(PathBuf, String)],
+    running: &[(PathBuf, String)],
+) -> Option<String> {
+    let server = running.iter().find(|(root, _)| {
         project.is_some_and(|project| root.starts_with(project) || project.starts_with(root))
     });
     let holder = || {
-        survey.busy.iter().find(|(held, _)| {
+        busy.iter().find(|(held, _)| {
             held.starts_with(path) || project.is_some_and(|project| held.starts_with(project))
         })
     };
@@ -269,27 +359,15 @@ pub fn account_home() -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::time::{Duration, SystemTime};
 
-    use super::{Survey, in_use};
-
-    fn survey<'a>(running: &'a [(PathBuf, String)]) -> Survey<'a> {
-        Survey {
-            home: Path::new("/Users/dev"),
-            roots: &[],
-            busy: &[],
-            running,
-            idle_after: Duration::ZERO,
-            now: SystemTime::now(),
-        }
-    }
+    use super::in_use;
 
     #[test]
     fn a_dev_server_above_or_below_a_project_is_using_it() {
         let web = Path::new("/Users/dev/code/mono/apps/web");
         let modules = web.join("node_modules");
         let server = |root: &str| vec![(PathBuf::from(root), "the server".to_string())];
-        let using = |root: &str| in_use(&modules, Some(web), &survey(&server(root))).is_some();
+        let using = |root: &str| in_use(&modules, Some(web), &[], &server(root)).is_some();
 
         assert!(using("/Users/dev/code/mono"));
         assert!(using("/Users/dev/code/mono/apps/web/src"));

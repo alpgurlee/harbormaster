@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use common::{DAY, MIB, Machine, age, machine, node_project, write};
 use harbormaster_cleaner::{
-    Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, remove, scan,
+    Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, Usage, Why, remove, scan,
 };
 
 fn survey<'a>(home: &'a Path, roots: &'a [PathBuf], busy: &'a [(PathBuf, String)]) -> Survey<'a> {
@@ -46,13 +46,18 @@ fn removed(
     let survey = survey(&machine.home, &roots, &[]);
     let chosen = chosen(&survey, names);
     remove(
-        &survey,
+        &machine.home,
         &chosen,
+        &nothing_used,
         trash,
         &AtomicBool::new(false),
         &mut |_| {},
     )
     .expect("removal should run")
+}
+
+fn nothing_used() -> io::Result<Usage> {
+    Ok(Usage::default())
 }
 
 fn never(path: &Path) -> io::Result<PathBuf> {
@@ -148,8 +153,14 @@ fn refuses_what_a_process_is_using_by_then() {
     let busy = [(project.join("src/index.ts"), "code".to_string())];
 
     let cleaned = remove(
-        &survey(&machine.home, &roots, &busy),
+        &machine.home,
         &chosen,
+        &|| {
+            Ok(Usage {
+                busy: busy.to_vec(),
+                running: Vec::new(),
+            })
+        },
         &never,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -159,7 +170,7 @@ fn refuses_what_a_process_is_using_by_then() {
     assert!(
         matches!(
             outcome(&cleaned, &project.join("node_modules")),
-            Outcome::Refused { why } if why.contains("code")
+            Outcome::Refused { why: Why::InUse { by } } if by == "code"
         ),
         "{cleaned:?}"
     );
@@ -180,8 +191,9 @@ fn refuses_a_folder_swapped_for_a_link_since_the_scan() {
     symlink(elsewhere.home.join("kept"), project.join("node_modules")).expect("the link");
 
     let cleaned = remove(
-        &survey,
+        survey.home,
         &chosen,
+        &nothing_used,
         &never,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -191,7 +203,9 @@ fn refuses_a_folder_swapped_for_a_link_since_the_scan() {
     assert!(
         matches!(
             outcome(&cleaned, &project.join("node_modules")),
-            Outcome::Refused { .. }
+            Outcome::Refused {
+                why: Why::NotReached { .. }
+            }
         ),
         "{cleaned:?}"
     );
@@ -213,8 +227,9 @@ fn refuses_a_folder_replaced_by_another_since_the_scan() {
     );
 
     let cleaned = remove(
-        &survey,
+        survey.home,
         &chosen,
+        &nothing_used,
         &never,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -224,7 +239,7 @@ fn refuses_a_folder_replaced_by_another_since_the_scan() {
     assert!(
         matches!(
             outcome(&cleaned, &project.join("node_modules")),
-            Outcome::Refused { why } if why.contains("scan")
+            Outcome::Refused { why: Why::Changed }
         ),
         "{cleaned:?}"
     );
@@ -252,8 +267,9 @@ fn refuses_anything_outside_the_home_folder() {
     };
 
     let cleaned = remove(
-        &survey(&mine.home, &[], &[]),
+        &mine.home,
         &[finding],
+        &nothing_used,
         &never,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -263,7 +279,9 @@ fn refuses_anything_outside_the_home_folder() {
     assert!(
         matches!(
             &cleaned.removals[0].outcome,
-            Outcome::Refused { why } if why.contains("home")
+            Outcome::Refused {
+                why: Why::OutsideHome
+            }
         ),
         "{cleaned:?}"
     );
@@ -377,8 +395,9 @@ fn goes_on_with_the_rest_when_one_fails_and_tells_of_each() {
 
     let mut told = Vec::new();
     let cleaned = remove(
-        &survey,
+        survey.home,
         &chosen,
+        &nothing_used,
         &never,
         &AtomicBool::new(false),
         &mut |removal| told.push(removal.path.clone()),
@@ -408,8 +427,9 @@ fn removes_nothing_once_told_to_stop() {
     let chosen = chosen(&survey, &["stopped · node_modules", "stopped · .next"]);
 
     let cleaned = remove(
-        &survey,
+        survey.home,
         &chosen,
+        &nothing_used,
         &never,
         &AtomicBool::new(true),
         &mut |_| {},
@@ -441,4 +461,85 @@ fn reports_the_room_the_disk_got_back() {
         "{}",
         cleaned.freed_bytes
     );
+}
+
+#[test]
+fn reads_what_is_in_use_again_before_each() {
+    let machine = machine();
+    let first = node_project(&machine, "first");
+    let second = node_project(&machine, "second");
+    age(&first, 60 * DAY);
+    age(&second, 60 * DAY);
+    let roots = [machine.home.join("code")];
+    let survey = survey(&machine.home, &roots, &[]);
+    let mut chosen = chosen(&survey, &["first · node_modules", "second · node_modules"]);
+    chosen.sort_by(|a, b| a.path.cmp(&b.path));
+    let reads = std::cell::Cell::new(0);
+    // A dev server starts in the second project while the first one's output goes.
+    let usage = || {
+        reads.set(reads.get() + 1);
+        let busy = if reads.get() == 1 {
+            Vec::new()
+        } else {
+            vec![(second.join("server.js"), "node".to_string())]
+        };
+        Ok(Usage {
+            busy,
+            running: Vec::new(),
+        })
+    };
+
+    let cleaned = remove(
+        &machine.home,
+        &chosen,
+        &usage,
+        &never,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("removal should run");
+
+    assert_eq!(
+        outcome(&cleaned, &first.join("node_modules")),
+        &Outcome::Deleted
+    );
+    assert!(
+        matches!(
+            outcome(&cleaned, &second.join("node_modules")),
+            Outcome::Refused { why: Why::InUse { by } } if by == "node"
+        ),
+        "{cleaned:?}"
+    );
+    assert!(second.join("node_modules/left-pad/index.js").exists());
+}
+
+#[test]
+fn leaves_alone_what_it_cant_tell_is_free() {
+    let machine = machine();
+    let project = node_project(&machine, "unknown");
+    age(&project, 60 * DAY);
+    let roots = [machine.home.join("code")];
+    let survey = survey(&machine.home, &roots, &[]);
+    let chosen = chosen(&survey, &["unknown · node_modules"]);
+
+    let cleaned = remove(
+        &machine.home,
+        &chosen,
+        &|| Err(io::Error::other("the process list couldn't be read")),
+        &never,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("removal should run");
+
+    assert!(
+        matches!(
+            outcome(&cleaned, &project.join("node_modules")),
+            Outcome::Refused {
+                why: Why::Unchecked { .. }
+            }
+        ),
+        "{cleaned:?}"
+    );
+    assert!(project.join("node_modules/left-pad/index.js").exists());
 }

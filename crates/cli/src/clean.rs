@@ -126,9 +126,13 @@ pub(crate) fn removal(removal: &Removal, findings: &[Finding]) -> String {
     let (done, why) = match &removal.outcome {
         Outcome::Deleted => ("deleted", None),
         Outcome::Trashed => ("trashed", None),
-        Outcome::Refused { why } => ("skipped", Some(why)),
-        Outcome::Failed { why } => ("failed", Some(why)),
-        Outcome::Stopped => ("stopped", None),
+        Outcome::Refused { why } => ("skipped", Some(why.to_string())),
+        Outcome::Failed { why } => ("failed", Some(why.clone())),
+        Outcome::Stopped => ("stopped", Some("before its turn".into())),
+        Outcome::Interrupted => (
+            "stopped",
+            Some("during cleanup; some contents may have been deleted".into()),
+        ),
     };
     let why = why.map(|why| format!(": {why}")).unwrap_or_default();
     format::printable(&format!("  {done:<8} {name}{why}"))
@@ -195,7 +199,7 @@ mod tests {
     use std::io::{self, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use harbormaster_cleaner::{Cleaned, Finding, Group, Identity, Kind, Outcome, Removal};
+    use harbormaster_cleaner::{Cleaned, Finding, Group, Identity, Kind, Outcome, Removal, Why};
 
     use super::lines;
 
@@ -353,7 +357,9 @@ mod tests {
                 removal(
                     3,
                     Outcome::Refused {
-                        why: "in use by \u{1b}[2Jx".into(),
+                        why: Why::InUse {
+                            by: "\u{1b}[2Jx".into(),
+                        },
                     },
                 ),
             ],
@@ -383,7 +389,7 @@ mod tests {
             removals: vec![Removal {
                 path: PathBuf::from("/Users/dev/.npm/_cacache"),
                 outcome: Outcome::Refused {
-                    why: "in use by node".into(),
+                    why: Why::InUse { by: "node".into() },
                 },
             }],
             freed_bytes: 0,
@@ -544,7 +550,7 @@ mod tests {
             removals: vec![Removal {
                 path: npm.path.clone(),
                 outcome: Outcome::Refused {
-                    why: "in use by node".into(),
+                    why: Why::InUse { by: "node".into() },
                 },
             }],
             freed_bytes: 0,
@@ -559,7 +565,7 @@ mod tests {
             serde_json::json!({
                 "path": "/Users/dev/.npm/_cacache",
                 "outcome": "refused",
-                "why": "in use by node",
+                "why": {"code": "inUse", "by": "node"},
             })
         );
         assert!(json["findings"][0].get("identity").is_none(), "{text}");

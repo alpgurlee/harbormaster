@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
-use harbormaster_cleaner::{Finding, Group, Kind, Survey, scan};
+use harbormaster_cleaner::{Finding, Group, Kind, Survey, scan, scan_with};
 
 const MIB: usize = 1024 * 1024;
 
@@ -319,4 +319,29 @@ fn says_whether_a_place_is_emptied_or_goes_whole() {
     assert!(named(&findings, "npm").unwrap().emptied);
     assert!(!named(&findings, "16.4 (20E247)").unwrap().emptied);
     assert!(!named(&findings, "JetBrains IDEs").unwrap().emptied);
+}
+
+#[test]
+fn tells_how_far_measuring_has_come() {
+    let home = tempfile::tempdir().unwrap();
+    write(&home.path().join(".npm/_cacache/a"), 2 * MIB);
+    write(&home.path().join("Library/Caches/pip/b"), 3 * MIB);
+    // Measured, but too small to be listed.
+    write(&home.path().join("Library/Caches/Yarn/c"), 1024);
+    let real = home.path().canonicalize().unwrap();
+    let told = std::sync::Mutex::new(Vec::new());
+
+    let findings = scan_with(&survey(&real), &AtomicBool::new(false), &|measured| {
+        told.lock().unwrap().push(measured);
+    })
+    .unwrap();
+
+    let told = told.into_inner().unwrap();
+    let mut done: Vec<usize> = told.iter().map(|measured| measured.done).collect();
+    done.sort_unstable();
+    assert_eq!(done, [1, 2, 3]);
+    assert!(told.iter().all(|measured| measured.total == 3), "{told:?}");
+    let listed: u64 = findings.iter().map(|finding| finding.bytes).sum();
+    let found: u64 = told.iter().map(|measured| measured.bytes).sum();
+    assert_eq!(found, listed);
 }

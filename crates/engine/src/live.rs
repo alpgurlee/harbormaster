@@ -2,7 +2,7 @@
 //! things before stopping anything.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use harbormaster_platform::{Error, ProcessKey};
@@ -22,6 +22,23 @@ pub fn scan(scanner: &mut Scanner, home: &Path) -> Result<Snapshot, Error> {
         home,
         now: Instant::now(),
     }))
+}
+
+/// Every path this user's processes other than this one hold, such as
+/// working folders, programs and open files, each with its process's name.
+pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
+    let own = std::process::id();
+    Ok(harbormaster_platform::whereabouts()?
+        .into_iter()
+        .filter(|process| process.pid.0 != own)
+        .flat_map(|process| {
+            let name = process.name;
+            process
+                .paths
+                .into_iter()
+                .map(move |path| (path, name.clone()))
+        })
+        .collect())
 }
 
 /// Where each of `keys` stands right now, read just before a round of signals.

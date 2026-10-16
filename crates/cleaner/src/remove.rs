@@ -9,20 +9,21 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Survey, in_use};
+use crate::{Cleaned, Finding, Identity, Kind, Outcome, Removal, Usage, Why, in_use};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
 
 pub(crate) fn all(
-    survey: &Survey,
+    home: &Path,
     findings: &[Finding],
+    usage: &dyn Fn() -> io::Result<Usage>,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
-    let home = Dir::open(survey.home)?;
-    let before = free_space(survey.home)?;
+    let root = Dir::open(home)?;
+    let before = free_space(home)?;
     // Emptying the Trash comes first, so what goes into it now stays there.
     let mut order: Vec<&Finding> = findings.iter().collect();
     order.sort_by_key(|finding| finding.kind != Kind::Discarded);
@@ -31,7 +32,14 @@ pub(crate) fn all(
         let outcome = if stop.load(Ordering::Relaxed) {
             Outcome::Stopped
         } else {
-            one(&home, survey, finding, trash, stop)
+            // Removing the one before may have taken a while, so what uses
+            // what is read again for each.
+            match usage() {
+                Ok(usage) => one(&root, home, finding, &usage, trash, stop),
+                Err(error) => refused(Why::Unchecked {
+                    error: error.to_string(),
+                }),
+            }
         };
         let removal = Removal {
             path: finding.path.clone(),
@@ -40,7 +48,7 @@ pub(crate) fn all(
         told(&removal);
         removals.push(removal);
     }
-    let after = free_space(survey.home)?;
+    let after = free_space(home)?;
     Ok(Cleaned {
         removals,
         freed_bytes: after.saturating_sub(before),
@@ -49,51 +57,61 @@ pub(crate) fn all(
 
 /// One finding: looked at again, then deleted or moved to the Trash.
 fn one(
-    home: &Dir,
-    survey: &Survey,
+    root: &Dir,
+    home: &Path,
     finding: &Finding,
+    usage: &Usage,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
-    let Ok(relative) = finding.path.strip_prefix(survey.home) else {
-        return refused("outside the home folder");
+    let Ok(relative) = finding.path.strip_prefix(home) else {
+        return refused(Why::OutsideHome);
     };
     let Some((above, name)) = relative.parent().zip(relative.file_name()) else {
-        return refused("the home folder itself");
+        return refused(Why::OutsideHome);
     };
-    let opened = home.descend(above).and_then(|parent| {
+    let opened = root.descend(above).and_then(|parent| {
         let dir = parent.child(name)?;
         let seen = Identity::of(&dir.metadata()?);
         Ok((parent, dir, seen))
     });
     let (parent, dir, seen) = match opened {
         Ok(opened) => opened,
-        Err(error) => return refused(format!("not reached through real folders ({error})")),
+        Err(error) => {
+            return refused(Why::NotReached {
+                error: error.to_string(),
+            });
+        }
     };
     if seen != finding.identity {
-        return refused("no longer the folder the scan measured");
+        return refused(Why::Changed);
     }
-    if let Some(who) = in_use(&finding.path, finding.project.as_deref(), survey) {
-        return refused(format!("in use by {who}"));
+    if let Some(who) = in_use(
+        &finding.path,
+        finding.project.as_deref(),
+        &usage.busy,
+        &usage.running,
+    ) {
+        return refused(Why::InUse { by: who });
     }
     if stop.load(Ordering::Relaxed) {
         return Outcome::Stopped;
     }
     let done = match finding.kind {
-        Kind::Personal => trashed(&dir, survey.home, trash),
+        Kind::Personal => trashed(&dir, home, trash),
         Kind::Rebuildable | Kind::Discarded => deleted(&parent, &dir, name, finding.emptied, stop),
     };
     match done {
         Ok(outcome) => outcome,
-        Err(error) if error.kind() == io::ErrorKind::Interrupted => Outcome::Stopped,
+        Err(error) if error.kind() == io::ErrorKind::Interrupted => Outcome::Interrupted,
         Err(error) => Outcome::Failed {
             why: error.to_string(),
         },
     }
 }
 
-fn refused(why: impl Into<String>) -> Outcome {
-    Outcome::Refused { why: why.into() }
+fn refused(why: Why) -> Outcome {
+    Outcome::Refused { why }
 }
 
 /// Empties `dir`, then, unless `emptied` is all that was asked, removes it
@@ -158,7 +176,7 @@ fn trashed(
 ) -> io::Result<Outcome> {
     let now = dir.path()?;
     if !now.starts_with(home) {
-        return Ok(refused("moved out of the home folder"));
+        return Ok(refused(Why::OutsideHome));
     }
     let landed = trash(&now)?;
     if dir.path()? != landed {
@@ -193,7 +211,29 @@ mod tests {
 
     use super::one;
     use crate::walk::Dir;
-    use crate::{Outcome, Survey, scan};
+    use crate::{Outcome, Survey, Usage, scan};
+
+    #[test]
+    fn stops_before_deleting_anything_when_told_while_listing() {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        fs::create_dir_all(home.join("cache/inner")).unwrap();
+        fs::write(home.join("cache/inner/a"), b"x").unwrap();
+        let root = Dir::open(&home).unwrap();
+        let cache = root.child(std::ffi::OsStr::new("cache")).unwrap();
+
+        let done = super::deleted(
+            &root,
+            &cache,
+            std::ffi::OsStr::new("cache"),
+            false,
+            &AtomicBool::new(true),
+        );
+
+        // So a stop during removal may have deleted nothing yet.
+        assert_eq!(done.unwrap_err().kind(), std::io::ErrorKind::Interrupted);
+        assert!(home.join("cache/inner/a").exists());
+    }
 
     #[test]
     fn moves_nothing_to_the_trash_once_told_to_stop() {
@@ -214,8 +254,9 @@ mod tests {
 
         let outcome = one(
             &Dir::open(&home).unwrap(),
-            &survey,
+            &home,
             &findings[0],
+            &Usage::default(),
             &|_| panic!("nothing may go to the Trash"),
             &AtomicBool::new(true),
         );
