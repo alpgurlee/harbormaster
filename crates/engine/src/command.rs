@@ -185,11 +185,11 @@ fn mask_token(token: &str, at_sign_follows: bool) -> (String, After) {
     // characters a shell would split at. Quoted, a password or a query value
     // goes on past the space that ends the word.
     let urls = url_starts(&normal);
+    if hide_url_secrets(&normal, &urls, &mut hidden) {
+        after = After::RestHidden;
+    }
     for &start in &urls {
         let url = &normal[start..];
-        if hide_url_secrets(url, start, &mut hidden) {
-            after = After::RestHidden;
-        }
         if at_sign_follows && let Some(user_info) = spanning_user_info(url) {
             hidden.push(start + user_info..normal.len());
             after = After::RestHidden;
@@ -323,38 +323,59 @@ fn hide_plain_value(
     hidden.push(value..value_end);
 }
 
-/// A URL's user info, whole, and query values whose key names a credential.
-/// Returns whether there was such a value.
-fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>) -> bool {
-    let Some(scheme_end) = segment.find("://") else {
+/// The user info of every URL in `text`, whole, and query values whose key
+/// names a credential. Returns whether there was such a value.
+fn hide_url_secrets(text: &str, urls: &[usize], hidden: &mut Vec<Range<usize>>) -> bool {
+    if urls.is_empty() {
         return false;
-    };
-    let start = scheme_end + 3;
-    let rest = &segment[start..];
+    }
     // Passwords often hold `@`, `/` or `#` unencoded, so with a colon in the
     // user info everything up to the last `@` goes. A user name alone may be
     // a token; it ends where the host does, so `/@types/node` stays.
-    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let user_end = match rest.rfind('@') {
-        Some(at) if rest[..at].contains(':') => Some(at),
-        _ => rest[..host_end].rfind('@'),
-    };
-    if let Some(at) = user_end {
-        hidden.push(offset + start..offset + start + at);
+    let last_at = text.rfind('@');
+    let last_colon = last_at.and_then(|at| text[..at].rfind(':'));
+    let mut chars = text.char_indices().rev().peekable();
+    let mut host_at = None;
+    let mut query_at = None;
+    // URL bodies overlap, so share their suffixes instead of searching each.
+    for &offset in urls.iter().rev() {
+        let Some(scheme_end) = text[offset..].find("://") else {
+            continue;
+        };
+        let start = offset + scheme_end + 3;
+        while let Some((at, c)) = chars.next_if(|&(at, _)| at >= start) {
+            match c {
+                '/' => host_at = None,
+                '?' | '#' => {
+                    host_at = None;
+                    query_at = Some(at);
+                }
+                '@' if host_at.is_none() => host_at = Some(at),
+                _ => {}
+            }
+        }
+        let user_end = if last_colon.is_some_and(|at| at >= start) {
+            last_at
+        } else {
+            host_at
+        };
+        if let Some(at) = user_end {
+            hidden.push(start..at);
+        }
     }
     // The query and the fragment, where OAuth hands out tokens, both hold
     // `key=value` pairs. A value may hold `:` and `@` too, so they are read
-    // from the first `?` or `#` whatever the user info turned out to be.
-    let Some(pairs_at) = segment[start..].find(['?', '#']) else {
+    // once from the earliest URL's first `?` or `#`.
+    let Some(pairs_at) = query_at else {
         return false;
     };
     let mut found = false;
-    let mut pair_start = start + pairs_at + 1;
-    for pair in segment[pair_start..].split(['&', '#', '?']) {
+    let mut pair_start = pairs_at + 1;
+    for pair in text[pair_start..].split(['&', '#', '?']) {
         if let Some((key, _)) = pair.split_once('=')
             && is_credential_key(key)
         {
-            hidden.push(offset + pair_start + key.len() + 1..offset + pair_start + pair.len());
+            hidden.push(pair_start + key.len() + 1..pair_start + pair.len());
             found = true;
         }
         pair_start += pair.len() + 1;
@@ -912,6 +933,123 @@ mod tests {
         show(&["app", &word]);
         let took = started.elapsed();
         assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+    }
+
+    #[test]
+    fn masks_many_url_schemes_without_rescanning_the_word() {
+        let word = "xx://".repeat(200_000);
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app {word}"));
+    }
+
+    #[test]
+    fn masks_many_urls_before_a_long_query_without_rescanning_it() {
+        let prefix = "xx://".repeat(100_000);
+        let pairs = "q=&".repeat(166_666);
+        let word = format!("{prefix}h/?{pairs}token=sentinel");
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app {prefix}h/?{pairs}token=***"));
+    }
+
+    #[test]
+    fn masks_half_a_million_query_pairs_without_rescanning_them() {
+        let pairs = "x=&".repeat(499_999);
+        let word = format!("xx://h/?{pairs}token=sentinel");
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app xx://h/?{pairs}token=***"));
+    }
+
+    #[test]
+    fn masks_many_user_info_parts_without_rescanning_them() {
+        let word = format!("xx://{}h", "u:p@".repeat(250_000));
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, "app xx://***@h");
+    }
+
+    #[test]
+    fn masks_many_urls_with_queries_without_rescanning_their_pairs() {
+        let prefix = "xx://h/?q=&".repeat(90_909);
+        let word = format!("{prefix}%74oken=sentinel");
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app {prefix}%74oken=***"));
+    }
+
+    #[test]
+    fn masks_many_urls_before_spanning_user_info_without_rescanning_them() {
+        let word = format!(
+            "{}{} later@h",
+            "xx://u@".repeat(100_000),
+            "p".repeat(300_000)
+        );
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, "app xx://***");
+    }
+
+    #[test]
+    fn masks_a_long_percent_encoded_query_key_without_rescanning_it() {
+        let key = format!("{}%74oken", "%ff".repeat(333_333));
+        let word = format!("xx://h/?{key}=sentinel");
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app xx://h/?{key}=***"));
+    }
+
+    #[test]
+    fn masks_a_megabyte_of_flag_separators_without_rescanning_it() {
+        let word = format!("--x{}", "=x".repeat(500_000));
+        let started = std::time::Instant::now();
+        let shown = show(&["app", &word]);
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+        assert_eq!(shown, format!("app {word}"));
+    }
+
+    #[test]
+    fn masks_user_info_for_each_url_in_the_same_word() {
+        assert_eq!(
+            show(&["app", "xx://u@h/yy://v@host/path"]),
+            "app xx://***@host/path"
+        );
+        assert_eq!(
+            show(&["app", "xx://h/yy://v@host/path"]),
+            "app xx://***@host/path"
+        );
+        assert_eq!(
+            show(&["app", "xx://h/yy://host/path@tail"]),
+            "app xx://***@tail"
+        );
+    }
+
+    #[test]
+    fn reads_query_pairs_once_across_nested_urls() {
+        assert_eq!(
+            show(&["app", "xx://h/?%74oken=one&next=yy://h/#sig=two&q=ok"]),
+            "app xx://h/?%74oken=***&next=yy://h/#sig=***&q=ok"
+        );
+        assert_eq!(
+            show(&["app", "--x?%74oken=visible;xx://h/#sig=&q=ok"]),
+            "app --x?%74oken=visible;xx://h/#sig=***&q=ok"
+        );
     }
 
     #[test]
