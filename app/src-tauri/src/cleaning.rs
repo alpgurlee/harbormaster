@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use harbormaster_cleaner::{
-    Cleaned, Finding, Hunt, Measured, Outcome, Removal, Survey, Usage, Why,
+    Area, Chart, Charting, Cleaned, Finding, Hunt, Measured, Outcome, Removal, Survey, Usage, Why,
 };
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
@@ -88,6 +88,22 @@ pub(crate) enum RunEvent {
     },
 }
 
+/// What a map tells the window as it goes.
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum MapEvent {
+    Charting(Charting),
+    /// The map, under the token showing its places in Finder takes.
+    Done {
+        token: u64,
+        area: Area,
+    },
+}
+
 /// Why the cleaner turned the window down.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(
@@ -104,6 +120,8 @@ pub(crate) enum Refusal {
     Expired,
     /// The window asked for something that scan didn't list.
     Unlisted,
+    /// What the window names isn't what was found there any more.
+    Changed,
     Failed {
         message: String,
     },
@@ -121,7 +139,17 @@ pub(crate) struct Cleaning {
 struct Ledger {
     last: u64,
     shown: Option<Shown>,
+    /// The last map, kept whole so its places can be shown in Finder; none
+    /// of them is ever taken to be removed.
+    map: Option<Mapped>,
     working: bool,
+}
+
+/// A map shown to the window, under the token it holds.
+#[derive(Debug)]
+struct Mapped {
+    token: u64,
+    root: Area,
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +347,41 @@ impl Cleaning {
         })
     }
 
+    /// Keeps `root` as the map shown from now on, in place of the last,
+    /// and gives the token that showing its places in Finder takes.
+    fn keep_map(&self, root: Area) -> u64 {
+        let mut ledger = self.lock();
+        ledger.last += 1;
+        let token = ledger.last;
+        ledger.map = Some(Mapped { token, root });
+        token
+    }
+
+    /// Where the place `id` of the map under `token` is, if it is still
+    /// what the map found there. The home folder itself isn't one of them.
+    pub(crate) fn mapped(&self, token: u64, id: u32) -> Result<PathBuf, Refusal> {
+        let (home, path, identity) = {
+            let ledger = self.lock();
+            let map = ledger
+                .map
+                .as_ref()
+                .filter(|map| map.token == token)
+                .ok_or(Refusal::Expired)?;
+            let place = map
+                .root
+                .inside
+                .iter()
+                .find_map(|each| place(each, id))
+                .ok_or(Refusal::Unlisted)?;
+            (map.root.path.clone(), place.path.clone(), place.identity)
+        };
+        // Looked at once the lock is let go: it reads the disk.
+        if !harbormaster_cleaner::still_there(&home, &path, identity) {
+            return Err(Refusal::Changed);
+        }
+        Ok(path)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Ledger> {
         self.ledger.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -359,6 +422,24 @@ impl Working {
         findings.retain(showable);
         let listed = cleaning.show(Search::Hunt, findings).into();
         told(ScanEvent::Done { home, listed });
+        Ok(())
+    }
+
+    /// Maps this user's home folder, and other apps' data in it when
+    /// `others` asks, telling `told` as it goes.
+    pub(crate) fn map(&self, others: bool, told: &mut dyn FnMut(MapEvent)) -> Result<(), Refusal> {
+        let cleaning = &self.0;
+        let home = harbormaster_cleaner::account_home().map_err(failed)?;
+        let chart = Chart {
+            home: &home,
+            others,
+        };
+        let root = harbormaster_cleaner::map(&chart, &cleaning.stop, &mut |charting| {
+            told(MapEvent::Charting(charting));
+        })
+        .map_err(failed)?;
+        let token = cleaning.keep_map(root.clone());
+        told(MapEvent::Done { token, area: root });
         Ok(())
     }
 
@@ -426,6 +507,14 @@ fn stayed(chosen: Vec<Finding>, removals: &[Removal]) -> Vec<Finding> {
         .collect()
 }
 
+/// The place numbered `id`, `area` or one below it.
+fn place(area: &Area, id: u32) -> Option<&Area> {
+    if area.id == id {
+        return Some(area);
+    }
+    area.inside.iter().find_map(|each| place(each, id))
+}
+
 /// Whether the window can be told of `finding`: its paths must be text.
 /// APFS names always are; another disk mounted in the home folder may not be.
 fn showable(finding: &Finding) -> bool {
@@ -470,15 +559,17 @@ fn failed(error: impl Display) -> Refusal {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use harbormaster_cleaner::{
-        Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal, Why,
+        Area, Chart, Charting, Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal,
+        Why,
     };
 
-    use super::{Cleaning, Listed, Refusal, RunEvent, ScanEvent, Search, stayed};
+    use super::{Cleaning, Listed, MapEvent, Refusal, RunEvent, ScanEvent, Search, stayed};
 
     fn finding(path: &str) -> Finding {
         Finding {
@@ -508,6 +599,80 @@ mod tests {
     /// What a removal under `token` would take of `paths`.
     fn chosen(cleaning: &Cleaning, token: u64, paths: &[PathBuf]) -> Result<Vec<Finding>, Refusal> {
         cleaning.take(token, paths).map(|taken| taken.chosen)
+    }
+
+    /// A home folder holding one large film, under its real path.
+    fn home_with_a_film() -> (tempfile::TempDir, PathBuf) {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        fs::create_dir_all(home.join("Movies")).unwrap();
+        fs::write(home.join("Movies/trip.mov"), vec![1; 2 << 20]).unwrap();
+        (place, home)
+    }
+
+    fn mapped(home: &Path) -> Area {
+        let chart = Chart {
+            home,
+            others: false,
+        };
+        harbormaster_cleaner::map(&chart, &AtomicBool::new(false), &mut |_| {}).unwrap()
+    }
+
+    /// The number of the place at `names` down from `area`.
+    fn id(area: &Area, names: &[&str]) -> u32 {
+        names
+            .iter()
+            .fold(area, |area, name| {
+                area.inside.iter().find(|each| each.name == *name).unwrap()
+            })
+            .id
+    }
+
+    #[test]
+    fn shows_in_finder_only_a_place_of_the_last_map_still_as_it_was() {
+        let (_place, home) = home_with_a_film();
+        let cleaning = Cleaning::default();
+        let root = mapped(&home);
+        let trip = id(&root, &["Movies", "trip.mov"]);
+        let token = cleaning.keep_map(root);
+
+        assert_eq!(
+            cleaning.mapped(token, trip),
+            Ok(home.join("Movies/trip.mov"))
+        );
+        assert_eq!(cleaning.mapped(token + 1, trip), Err(Refusal::Expired));
+        assert_eq!(cleaning.mapped(token, 999), Err(Refusal::Unlisted));
+        // The home folder itself isn't one of its places.
+        assert_eq!(cleaning.mapped(token, 0), Err(Refusal::Unlisted));
+
+        fs::remove_file(home.join("Movies/trip.mov")).unwrap();
+        assert_eq!(cleaning.mapped(token, trip), Err(Refusal::Changed));
+    }
+
+    #[test]
+    fn lets_a_new_map_replace_the_last() {
+        let (_place, home) = home_with_a_film();
+        let cleaning = Cleaning::default();
+        let root = mapped(&home);
+        let trip = id(&root, &["Movies", "trip.mov"]);
+
+        let first = cleaning.keep_map(root.clone());
+        let second = cleaning.keep_map(root);
+
+        assert_eq!(cleaning.mapped(first, trip), Err(Refusal::Expired));
+        assert!(cleaning.mapped(second, trip).is_ok());
+    }
+
+    #[test]
+    fn never_takes_a_mapped_place_for_removal() {
+        let (_place, home) = home_with_a_film();
+        let cleaning = Cleaning::default();
+        let film = home.join("Movies/trip.mov");
+
+        let token = cleaning.keep_map(mapped(&home));
+
+        assert!(!cleaning.lists(&film));
+        assert_eq!(chosen(&cleaning, token, &[film]), Err(Refusal::Expired));
     }
 
     #[test]
@@ -890,7 +1055,32 @@ mod tests {
                 hunted: true,
             },
         };
+        let charting = MapEvent::Charting(Charting {
+            bytes: 8,
+            items: 2,
+            folder: "Library/Caches".into(),
+        });
+        let (_place, home) = home_with_a_film();
+        let mut area = mapped(&home);
+        area.inside.clear();
+        area.bytes = 6;
+        area.rest = 6;
+        area.short = None;
+        let charted = MapEvent::Done { token: 6, area };
         let json = |value: serde_json::Result<serde_json::Value>| value.unwrap();
+        assert_eq!(
+            json(serde_json::to_value(charting)),
+            serde_json::json!({"kind": "charting", "bytes": 8, "items": 2, "folder": "Library/Caches"})
+        );
+        let name = home.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            json(serde_json::to_value(charted)),
+            serde_json::json!({"kind": "done", "token": 6, "area": {"id": 0, "name": name, "bytes": 6, "folder": true, "short": null, "inside": [], "rest": 6}})
+        );
+        assert_eq!(
+            json(serde_json::to_value(Refusal::Changed)),
+            serde_json::json!({"code": "changed"})
+        );
         assert_eq!(
             json(serde_json::to_value(failed)),
             serde_json::json!({"kind": "failed", "refusal": {"code": "failed", "message": "no disk"}, "token": 5, "findings": [], "scanned": true, "hunted": true})

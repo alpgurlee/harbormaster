@@ -62,7 +62,7 @@ fn one(
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
-    let (parent, opened, name) = match reached(root, home, finding) {
+    let (parent, opened, name) = match reached(root, home, &finding.path, finding.identity) {
         Ok(reached) => reached,
         Err(why) => return refused(why),
     };
@@ -96,10 +96,10 @@ fn one(
     }
 }
 
-/// Whether `finding` is still the folder or file the scan measured, reached
+/// Whether `path` is still the folder or file with `identity`, reached
 /// through real folders inside `home`.
-pub(crate) fn still_there(root: &Dir, home: &Path, finding: &Finding) -> bool {
-    reached(root, home, finding).is_ok()
+pub(crate) fn still_there(root: &Dir, home: &Path, path: &Path, identity: Identity) -> bool {
+    reached(root, home, path, identity).is_ok()
 }
 
 /// What a finding names, opened.
@@ -108,23 +108,21 @@ enum Opened {
     File(Item),
 }
 
-/// What `finding` names, opened through real folders from `root`, with the
-/// folder above it and its name there, if it is still what the scan measured.
+/// What `path` names, opened through real folders from `root`, with the
+/// folder above it and its name there, if it is still the one with `identity`.
 fn reached<'a>(
     root: &Dir,
     home: &Path,
-    finding: &'a Finding,
+    path: &'a Path,
+    identity: Identity,
 ) -> Result<(Dir, Opened, &'a OsStr), Why> {
-    let relative = finding
-        .path
-        .strip_prefix(home)
-        .map_err(|_| Why::OutsideHome)?;
+    let relative = path.strip_prefix(home).map_err(|_| Why::OutsideHome)?;
     let (above, name) = relative
         .parent()
         .zip(relative.file_name())
         .ok_or(Why::OutsideHome)?;
     let opened = root.descend(above).and_then(|parent| {
-        let (opened, stat) = if finding.identity.folder {
+        let (opened, stat) = if identity.folder {
             let dir = parent.child(name)?;
             let stat = dir.metadata()?;
             (Opened::Folder(dir), stat)
@@ -138,7 +136,7 @@ fn reached<'a>(
     let (parent, opened, seen) = opened.map_err(|error| Why::NotReached {
         error: error.to_string(),
     })?;
-    if seen != finding.identity {
+    if seen != identity {
         return Err(Why::Changed);
     }
     Ok((parent, opened, name))

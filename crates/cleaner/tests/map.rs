@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use common::{MIB, machine, write};
-use harbormaster_cleaner::{Area, Chart, Short, map};
+use harbormaster_cleaner::{Area, Chart, Short, map, still_there};
 
 fn mapped(home: &Path, others: bool) -> Area {
     let chart = Chart { home, others };
@@ -175,4 +175,29 @@ fn shows_only_the_largest_of_many_and_counts_the_rest_together() {
     assert_eq!(downloads.inside.len(), 50);
     assert_eq!(downloads.inside[0].name, "file-59.bin");
     assert!(downloads.rest >= 10 * MIB as u64);
+}
+
+#[test]
+fn knows_a_place_is_still_there_only_as_the_map_found_it() {
+    let machine = machine();
+    let home = &machine.home;
+    write(&home.join("Movies/trip.mov"), &vec![1; 2 * MIB]);
+    write(&home.join("Movies/cut/a.mov"), &vec![1; 2 * MIB]);
+    let root = mapped(home, false);
+    let trip = at(&root, &["Movies", "trip.mov"]).clone();
+    let cut = at(&root, &["Movies", "cut"]).clone();
+
+    assert!(still_there(home, &trip.path, trip.identity));
+    assert!(still_there(home, &cut.path, cut.identity));
+
+    // Made again in its place, a file is another one.
+    fs::remove_file(&trip.path).expect("removed");
+    write(&trip.path, b"again");
+    assert!(!still_there(home, &trip.path, trip.identity));
+    // A link in a folder's place is never gone through, even to it.
+    fs::rename(&cut.path, home.join("Movies/moved")).expect("moved");
+    symlink(home.join("Movies/moved"), &cut.path).expect("a link");
+    assert!(!still_there(home, &cut.path, cut.identity));
+    // Nor is the home folder one of its own places.
+    assert!(!still_there(home, &root.path, root.identity));
 }

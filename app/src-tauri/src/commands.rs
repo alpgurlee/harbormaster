@@ -8,7 +8,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::cleaning::{Cleaning, Refusal, RunEvent, ScanEvent};
+use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning, Update};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
@@ -188,6 +188,27 @@ fn open(window: &WebviewWindow) -> bool {
     window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
 }
 
+/// Maps this user's home folder, telling the window as it goes; the map
+/// comes last, under the token showing its places in Finder takes.
+#[tauri::command]
+pub(crate) async fn clean_map(
+    others: bool,
+    channel: Channel<MapEvent>,
+    window: WebviewWindow,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    let working = cleaning.begin(|| open(&window))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        working.map(others, &mut |event| {
+            let _ = channel.send(event);
+        })
+    })
+    .await
+    .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
 /// The findings the scan under `token` listed, as they stand now.
 #[tauri::command]
 pub(crate) async fn clean_recheck(
@@ -228,6 +249,27 @@ pub(crate) fn clean_reveal(
     if !cleaning.lists(&path) {
         return Err(Refusal::Unlisted);
     }
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })
+}
+
+/// Shows a place of the last map in Finder, if it is still what the map found.
+#[tauri::command]
+pub(crate) async fn clean_reveal_area(
+    token: u64,
+    id: u32,
+    app: AppHandle,
+    cleaning: State<'_, Arc<Cleaning>>,
+) -> Result<(), Refusal> {
+    let cleaning = Arc::clone(&cleaning);
+    let path = tauri::async_runtime::spawn_blocking(move || cleaning.mapped(token, id))
+        .await
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })??;
     app.opener()
         .reveal_item_in_dir(path)
         .map_err(|error| Refusal::Failed {

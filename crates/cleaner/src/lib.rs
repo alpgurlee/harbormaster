@@ -439,6 +439,12 @@ pub fn map(chart: &Chart, stop: &AtomicBool, told: &mut dyn FnMut(Charting)) -> 
     map::chart(chart, stop, told)
 }
 
+/// Whether the folder or file at `path` in `home` is still the one with
+/// `identity`, as a map found it, reached through real folders.
+pub fn still_there(home: &Path, path: &Path, identity: Identity) -> bool {
+    walk::Dir::open(home).is_ok_and(|root| remove::still_there(&root, home, path, identity))
+}
+
 /// The large files in the home folder, by kind and largest first, never
 /// picked: each is the user's own, and goes only to the Trash. The Library,
 /// hidden folders, apps and other packages, and caches are never looked in.
@@ -459,7 +465,7 @@ pub fn recheck(home: &Path, findings: &[Finding], usage: &Usage) -> io::Result<V
     let root = walk::Dir::open(home)?;
     Ok(findings
         .iter()
-        .filter(|finding| remove::still_there(&root, home, finding))
+        .filter(|finding| remove::still_there(&root, home, &finding.path, finding.identity))
         .map(|finding| Finding {
             in_use: in_use(
                 &finding.path,
