@@ -178,8 +178,9 @@
 }
 
 .scan {
-  width: 120px;
+  min-width: 120px;
   height: 40px;
+  padding: 0 22px;
   border: 0;
   border-radius: 20px;
   background: var(--brass);

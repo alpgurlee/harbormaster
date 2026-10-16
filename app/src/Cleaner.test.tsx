@@ -455,7 +455,7 @@ describe("the cleaner window", () => {
 
     section("Apps");
     expect(screen.getByText(/are left to Finder/)).toBeTruthy();
-    fireEvent.click(scanButton());
+    fireEvent.click(screen.getByRole("button", { name: "List apps" }));
     expect(driver.listings).toHaveLength(1);
     expect(driver.scans).toHaveLength(0);
     expect(screen.getByText("Looking through your apps…")).toBeTruthy();
@@ -472,16 +472,41 @@ describe("the cleaner window", () => {
     expect(screen.getByRole("button", { name: "Developer" })).toHaveProperty("disabled", true);
   });
 
+  it.each(["done", "failed"] as const)("keeps the apps listed through a removal that ends as %s", (kind) => {
+    const driver = fake();
+    show(driver.backend);
+    section("Apps");
+    fireEvent.click(screen.getByRole("button", { name: "List apps" }));
+    listedApps(driver, [docker, slack]);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Docker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    const listed = { token: 10, findings: [slack], scanned: false, hunted: false, appsListed: true };
+    act(() =>
+      driver.runs[0].onEvent(
+        kind === "done"
+          ? { kind, ...listed, removals: [], freedBytes: 0 }
+          : { kind, ...listed, refusal: { code: "failed", message: "no disk" } },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back to the list" }));
+
+    expect(screen.getByRole("checkbox", { name: "Slack" })).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "List apps" })).toBeNull();
+    screen.getByRole("button", { name: "Refresh list" });
+  });
+
   it("says no apps of the user's were found only once it has looked", () => {
     const driver = fake();
     show(driver.backend);
     section("Apps");
-    fireEvent.click(scanButton());
+    fireEvent.click(screen.getByRole("button", { name: "List apps" }));
 
     listedApps(driver, []);
 
     expect(screen.getByText("No apps of yours were found in Applications.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Scan again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
     expect(driver.listings).toHaveLength(2);
   });
 

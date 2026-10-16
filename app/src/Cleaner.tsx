@@ -60,8 +60,10 @@ const SECTION_NAMES = {
   apps: "moduleApps",
 } as const;
 
-/** What each search says before it starts, while it looks, and once it has measured some. */
+/** What each search says before it starts, its buttons, what it says while it looks, and once it has measured some. */
 const HINTS: Record<Search, TextKey> = { scan: "scanHint", hunt: "huntHint", apps: "appsHint" };
+const STARTS: Record<Search, TextKey> = { scan: "scan", hunt: "scan", apps: "appsStart" };
+const AGAINS: Record<Search, TextKey> = { scan: "cleanScanAgain", hunt: "cleanScanAgain", apps: "appsAgain" };
 const LOOKING: Record<Search, TextKey> = { scan: "cleanLooking", hunt: "huntLooking", apps: "appsLooking" };
 const MEASURED: Record<Search, TextKey> = { scan: "cleanMeasured", hunt: "huntMeasured", apps: "appsMeasured" };
 /** What a section searched for on its own says when its search found nothing. */
@@ -382,7 +384,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               disabled={charting}
               onClick={() => search(view === "overview" ? "scan" : SEARCHES[view])}
             >
-              {i18n.t("cleanScanAgain")}
+              {i18n.t(AGAINS[view === "overview" ? "scan" : SEARCHES[view]])}
             </button>
           )}
         </header>
@@ -401,7 +403,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             <Start
               disk={disk}
               hint={i18n.t(charting ? "waitForMap" : HINTS[first])}
-              start={i18n.t("scan")}
+              start={i18n.t(STARTS[first])}
               disabled={charting}
               onStart={() => search(first)}
             />

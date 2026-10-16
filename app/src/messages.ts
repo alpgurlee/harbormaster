@@ -211,6 +211,8 @@ export interface Messages {
   appsLooking: string;
   appsMeasured: string;
   noApps: string;
+  appsStart: string;
+  appsAgain: string;
   mapChanged: string;
   shortDeep: string;
   shortChanged: string;
@@ -431,6 +433,8 @@ export const en: Messages = {
   appsLooking: "Looking through your apps…",
   appsMeasured: "Measured {done} of {total} apps",
   noApps: "No apps of yours were found in Applications.",
+  appsStart: "List apps",
+  appsAgain: "Refresh list",
   mapChanged: "It has changed since the map was made. Map again to see it as it is.",
   shortDeep: "Goes deeper than the map looks",
   shortChanged: "Something in it changed while it was mapped",
@@ -651,6 +655,8 @@ export const tr: Messages = {
   appsLooking: "Uygulamaların inceleniyor…",
   appsMeasured: "{total} uygulamadan {done} tanesi ölçüldü",
   noApps: "Uygulamalar klasöründe sana ait bir uygulama bulunamadı.",
+  appsStart: "Uygulamaları listele",
+  appsAgain: "Listeyi yenile",
   mapChanged: "Harita çıkarıldıktan sonra değişmiş. Güncel halini görmek için yeniden haritala.",
   shortDeep: "Haritanın baktığından daha derine iniyor",
   shortChanged: "Haritalanırken içinde bir şey değişti",
