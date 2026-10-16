@@ -97,3 +97,29 @@ fn holds_this_programs_own_file_while_it_runs() {
         "{own:?} in {held:?}"
     );
 }
+
+/// Run as a copy of this test program whose file is then taken away.
+const MOVED: &str = "HARBORMASTER_TEST_MOVED_PROGRAM";
+
+#[test]
+fn says_nothing_can_be_told_free_once_it_cant_tell_where_it_runs_from() {
+    if std::env::var_os(MOVED).is_some() {
+        std::fs::remove_file(std::env::current_exe().expect("this program")).expect("taken away");
+        assert!(harbormaster_engine::live::held().is_err());
+        return;
+    }
+    let place = tempfile::tempdir().expect("a temp folder");
+    let copy = place.path().join("moved");
+    std::fs::copy(std::env::current_exe().expect("this program"), &copy).expect("a copy");
+
+    let status = std::process::Command::new(&copy)
+        .args([
+            "--exact",
+            "says_nothing_can_be_told_free_once_it_cant_tell_where_it_runs_from",
+        ])
+        .env(MOVED, "1")
+        .status()
+        .expect("the copy should run");
+
+    assert!(status.success());
+}
