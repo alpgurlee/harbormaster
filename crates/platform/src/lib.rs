@@ -8,8 +8,8 @@ use macos as sys;
 
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
-    Field, Listener, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, Signal, SignalOutcome,
-    SocketId, StartTime,
+    Field, Listener, Memory, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, Signal,
+    SignalOutcome, SocketId, StartTime,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -42,4 +42,9 @@ pub fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
 /// Whether the process `key` names is still running. A zombie isn't.
 pub fn is_running(key: ProcessKey) -> bool {
     sys::is_running(key)
+}
+
+/// Used and total memory of the machine, if the OS says.
+pub fn memory() -> Option<Memory> {
+    sys::memory()
 }

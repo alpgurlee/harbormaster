@@ -100,3 +100,11 @@ pub enum SignalOutcome {
     Denied,
     Failed(String),
 }
+
+/// The machine's memory the way its own monitor counts it: Activity
+/// Monitor's "Memory Used", Task Manager's "In use".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Memory {
+    pub used: u64,
+    pub total: u64,
+}

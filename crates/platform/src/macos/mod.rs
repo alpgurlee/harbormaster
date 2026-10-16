@@ -1,3 +1,4 @@
+mod memory;
 mod procargs;
 mod process;
 mod signal;
@@ -13,6 +14,7 @@ use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 
 use crate::{Listener, SocketId};
 
+pub(crate) use memory::memory;
 pub(crate) use process::{details, processes};
 pub(crate) use signal::{is_running, signal};
 
