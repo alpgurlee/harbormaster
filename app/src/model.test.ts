@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatUptime, groupByProject, totals } from "./model";
+import { groupByProject, totals } from "./model";
 import type { Service } from "./types";
 
 function service(id: string, port: number, project: string | null, memory = 100): Service {
@@ -73,19 +73,5 @@ describe("totals", () => {
       memoryBytes: 150 * 1024 * 1024,
       cpuPercent: 3,
     });
-  });
-});
-
-describe("formatting", () => {
-  it("shows megabytes, then gigabytes", () => {
-    expect(formatBytes(812 * 1024 * 1024)).toBe("812 MB");
-    expect(formatBytes(2.2 * 1024 * 1024 * 1024)).toBe("2.2 GB");
-  });
-
-  it("shows uptime with its two largest units", () => {
-    expect(formatUptime(20)).toBe("<1m");
-    expect(formatUptime(41 * 60)).toBe("41m");
-    expect(formatUptime(3 * 3600 + 12 * 60)).toBe("3h 12m");
-    expect(formatUptime(2 * 86400 + 5 * 3600)).toBe("2d 5h");
   });
 });

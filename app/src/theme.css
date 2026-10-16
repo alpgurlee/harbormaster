@@ -1,0 +1,94 @@
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  --panel-radius: 10px;
+  --green: #3ddc97;
+  --red: #e5484d;
+
+  --surface: #f6f6f7;
+  --raised: #e9e9ec;
+  --field: #ffffff;
+  --field-edge: rgb(0 0 0 / 0.12);
+  --field-focus: rgb(0 0 0 / 0.3);
+  --edge: rgb(0 0 0 / 0.12);
+  --line: rgb(0 0 0 / 0.08);
+  --track: rgb(0 0 0 / 0.08);
+  --chip: rgb(0 0 0 / 0.06);
+  --text: #1c1c1f;
+  --muted: #6c6c74;
+  --brass: #a8761f;
+  --plate-text: #7d520b;
+  --plate-fill: rgb(168 118 31 / 0.1);
+
+  color-scheme: light dark;
+}
+
+:root[data-platform="windows"] {
+  --panel-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #242427;
+    --raised: #2f2f33;
+    --field: #1b1b1e;
+    --field-edge: rgb(255 255 255 / 0.1);
+    --field-focus: rgb(255 255 255 / 0.26);
+    --edge: rgb(255 255 255 / 0.1);
+    --line: rgb(255 255 255 / 0.08);
+    --track: rgb(255 255 255 / 0.1);
+    --chip: rgb(255 255 255 / 0.08);
+    --text: #ececef;
+    --muted: #9a9aa3;
+    --brass: #e0b36a;
+    --plate-text: #ebc37f;
+    --plate-fill: rgb(224 179 106 / 0.1);
+  }
+}
+
+:root[data-theme="dark"] {
+  --surface: #242427;
+  --raised: #2f2f33;
+  --field: #1b1b1e;
+  --field-edge: rgb(255 255 255 / 0.1);
+  --field-focus: rgb(255 255 255 / 0.26);
+  --edge: rgb(255 255 255 / 0.1);
+  --line: rgb(255 255 255 / 0.08);
+  --track: rgb(255 255 255 / 0.1);
+  --chip: rgb(255 255 255 / 0.08);
+  --text: #ececef;
+  --muted: #9a9aa3;
+  --brass: #e0b36a;
+  --plate-text: #ebc37f;
+  --plate-fill: rgb(224 179 106 / 0.1);
+}
+
+@media (forced-colors: active) {
+  :root {
+    --brass: CanvasText;
+    --plate-text: CanvasText;
+    --green: CanvasText;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 1px;
+}

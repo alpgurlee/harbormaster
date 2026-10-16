@@ -1,6 +1,8 @@
 import type { Service } from "./types";
 
 export interface Group {
+  /** The repository's folder, or the project's when it isn't in one. */
+  id: string;
   /** The project's name, the repository's when it holds several projects, or null outside any project. */
   name: string | null;
   framework: string | null;
@@ -18,6 +20,7 @@ export function groupByProject(services: Service[]): Group[] {
     const names = new Set(members.map((service) => service.project?.name ?? null));
     const frameworks = new Set(members.map(frameworkOf));
     return {
+      id: key,
       // Projects that share a repository go under the repository's folder.
       name: names.size === 1 ? [...names][0] : folderName(key),
       framework: frameworks.size === 1 ? [...frameworks][0] : null,
@@ -51,20 +54,4 @@ export function totals(services: Service[]) {
 function sumKnown(values: (number | null)[]): number | null {
   const known = values.filter((value): value is number => value !== null);
   return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) : null;
-}
-
-const MIB = 1024 * 1024;
-const GIB = MIB * 1024;
-
-export function formatBytes(bytes: number): string {
-  return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GB` : `${Math.round(bytes / MIB)} MB`;
-}
-
-export function formatUptime(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const [days, hours, mins] = [Math.floor(minutes / 1440), Math.floor(minutes / 60) % 24, minutes % 60];
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${mins}m`;
-  if (mins > 0) return `${mins}m`;
-  return "<1m";
 }

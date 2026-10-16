@@ -1,0 +1,283 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-height: 600px;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: var(--panel-radius);
+  background: var(--surface);
+  color: var(--text);
+  font: 13px/1.35 var(--font);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mark {
+  color: var(--brass);
+}
+
+.meter {
+  height: 3px;
+  margin: 0 14px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--track);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brass);
+}
+
+.stats {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 14px 10px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 6px;
+  padding: 0 10px;
+  height: 30px;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--muted);
+}
+
+.search:focus-within {
+  border-color: var(--field-focus);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.search input::placeholder {
+  color: var(--muted);
+}
+
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.searchIcon {
+  flex: none;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+  outline: 0;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 8px 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: default;
+}
+
+.row:hover,
+.row[aria-selected="true"] {
+  background: var(--raised);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.details {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side {
+  display: grid;
+  flex: none;
+  justify-items: end;
+}
+
+.side > * {
+  grid-area: 1 / 1;
+}
+
+.memory {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  visibility: hidden;
+}
+
+.row:hover .memory {
+  visibility: hidden;
+}
+
+.row:hover .actions {
+  visibility: visible;
+}
+
+.action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+}
+
+.action:hover {
+  border-color: var(--brass);
+}
+
+.danger {
+  color: var(--red);
+}
+
+.danger:hover {
+  border-color: var(--red);
+}
+
+.action:disabled {
+  opacity: 0.4;
+}
+
+.note {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.more:hover {
+  color: var(--text);
+}
+
+.more svg {
+  transition: transform 120ms ease;
+}
+
+.open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .more svg {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .row[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .search:focus-within {
+    outline: 2px solid Highlight;
+  }
+
+  .meter > span {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}
