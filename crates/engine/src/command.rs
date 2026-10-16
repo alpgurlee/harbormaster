@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::role::normalize;
 
 /// Parts of a flag or variable name that mark its value as a credential.
@@ -74,46 +76,50 @@ fn file_name(path: &str) -> String {
 
 const HIDDEN: &str = "***";
 
+/// What a masked word means for the words after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum After {
+    Nothing,
+    /// A secret's value may run on past the next space, as quoting allows.
+    RestHidden,
+    /// The word is a secret flag or header whose value comes next.
+    NextHidden,
+}
+
 fn mask(words: &[String]) -> Vec<String> {
-    // The environment sits right after the arguments in memory, and a
-    // process that rewrote its arguments can shift some of it into view. Only
-    // the tail can be that, so any assignment there is masked.
-    let tail = words
-        .iter()
-        .rposition(|word| !word.is_empty() && assignment_name(word).is_none())
-        .map_or(0, |last| last + 1);
     let mut masked = Vec::with_capacity(words.len());
     let mut hide_next = false;
-    for (index, word) in words.iter().enumerate() {
+    for word in words {
         if hide_next {
             masked.push(HIDDEN.to_string());
             hide_next = false;
-        } else if let Some(name) = assignment_name(word).filter(|_| index >= tail) {
+        } else if let Some(name) = whole_assignment(word) {
             masked.push(format!("{name}={HIDDEN}"));
         } else {
-            let (text, value_follows) = mask_argument(word);
+            let (text, after) = mask_argument(word);
             masked.push(text);
-            hide_next = value_follows;
+            hide_next = after == After::NextHidden;
         }
     }
     masked
 }
 
-/// `NAME` in `NAME=value`, for a shell-style variable name.
-fn assignment_name(word: &str) -> Option<&str> {
+/// `NAME` when the whole argument is `NAME=value`. An environment entry that
+/// a rewritten argv let slip in looks just like that, and its name can be
+/// anything, so the value goes whatever the name says.
+fn whole_assignment(word: &str) -> Option<&str> {
     let (name, _) = word.split_once('=')?;
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    let valid = (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
-    valid.then_some(name)
+    let plain = !name.is_empty()
+        && !name.starts_with('-')
+        && !name.contains(char::is_whitespace)
+        && !name.contains("://");
+    plain.then_some(name)
 }
 
 /// An argument with spaces may be a shell's command string or a process
 /// title, where quoting can carry a value past the next space, so everything
-/// after a secret in it is hidden. Also says whether the argument ended on a
-/// flag whose value is the next argument.
-fn mask_argument(argument: &str) -> (String, bool) {
+/// after a secret in it is hidden.
+fn mask_argument(argument: &str) -> (String, After) {
     let mut words = Vec::new();
     let mut tokens = argument.split_whitespace().peekable();
     while let Some(token) = tokens.next() {
@@ -122,71 +128,148 @@ fn mask_argument(argument: &str) -> (String, bool) {
         } else {
             token.to_string()
         };
-        match secret(&token) {
-            Some(Secret::Kept(prefix)) => {
-                words.push(format!("{prefix}{HIDDEN}"));
-                break;
+        let (text, after) = mask_token(&token);
+        words.push(text);
+        match after {
+            After::Nothing => {}
+            After::RestHidden => break,
+            After::NextHidden if tokens.peek().is_none() => {
+                return (words.join(" "), After::NextHidden);
             }
-            Some(Secret::Follows(flag)) => {
-                words.push(flag);
-                if tokens.peek().is_none() {
-                    return (words.join(" "), true);
-                }
+            After::NextHidden => {
                 words.push(HIDDEN.to_string());
                 break;
             }
-            None => words.push(mask_url(&token)),
         }
     }
-    (words.join(" "), false)
+    (words.join(" "), After::Nothing)
 }
 
-enum Secret {
-    /// `--token=abc`, `Cookie:abc`: what comes before the value, separator included.
-    Kept(String),
-    /// `--token`, `Bearer`, `Authorization:`: the value comes next.
-    Follows(String),
-}
+/// Characters after which a shell starts a new word even without a space.
+const SHELL_OPERATORS: &[char] = &['&', ';', '|', '(', ')', '<', '>'];
 
-fn secret(token: &str) -> Option<Secret> {
+/// Every detector marks what to hide in the word, and all of it is hidden at
+/// once, so no detector's output can shield a secret another one found.
+fn mask_token(token: &str) -> (String, After) {
     // Quotes and escapes don't change what a shell hands on: `"--to\ken=x"` is `--token=x`.
-    let token: String = token
+    let normal: String = token
         .chars()
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '\\' | '^'))
         .collect();
-    // A shell starts a new word after an operator even without a space:
-    // `x;--password`, `build&&--token`.
+    let mut hidden: Vec<Range<usize>> = Vec::new();
+    let mut after = After::Nothing;
     let mut offset = 0;
-    for piece in token.split(SHELL_OPERATORS) {
-        // A URL's query is mask_url's business.
-        let head = match (piece.find("://"), piece.find('?')) {
-            (Some(scheme), Some(query)) if scheme < query => &piece[..query],
-            _ => piece,
-        };
-        // Any `=` or `:` can end a name: `--env=API_TOKEN=x`, `$env:API_TOKEN=x`,
-        // `X-Api-Key:x`, `{"password":"x"}`.
-        for (at, separator) in head.match_indices(['=', ':']) {
-            // A header name ending the word, `Authorization:`, has its value next.
-            if separator == ":" && offset + at + 1 == token.len() {
-                break;
-            }
-            let name = &head[..at];
-            if is_secret_flag(name) || mentions_a_credential(name_at_end(name)) {
-                return Some(Secret::Kept(token[..=offset + at].to_string()));
+    // `&` stays inside URLs, where it separates query pairs.
+    for segment in normal.split([';', '|', '(', ')', '<', '>']) {
+        if segment.contains("://") {
+            hide_url_secrets(segment, offset, &mut hidden);
+        } else {
+            let mut start = offset;
+            for part in segment.split('&') {
+                if hide_assignment_secrets(part, start, normal.len(), &mut hidden) {
+                    after = After::RestHidden;
+                }
+                start += part.len() + 1;
             }
         }
-        offset += piece.len() + 1;
+        offset += segment.len() + 1;
     }
-    let last = token.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
+    let last = normal.rsplit(SHELL_OPERATORS).next().unwrap_or_default();
+    let flag = !last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer"));
     let header = last
         .strip_suffix(':')
         .is_some_and(|name| mentions_a_credential(name_at_end(name)));
-    let follows = header
-        || (!last.contains('=') && (is_secret_flag(last) || last.eq_ignore_ascii_case("bearer")));
-    follows.then_some(Secret::Follows(token))
+    if after == After::Nothing && (flag || header) {
+        after = After::NextHidden;
+    }
+    if after == After::Nothing && hidden.is_empty() {
+        return (token.to_string(), after);
+    }
+    (with_hidden(&normal, hidden), after)
 }
 
-const SHELL_OPERATORS: &[char] = &[';', '|', '&', '(', ')', '<', '>'];
+/// `--secret-flag=value`, `API_TOKEN=value`, `X-Api-Key:value` in one word.
+/// Returns whether the rest of the argument has to go too. Any other
+/// `name=value` keeps its name only: it may be the environment.
+fn hide_assignment_secrets(
+    part: &str,
+    offset: usize,
+    end: usize,
+    hidden: &mut Vec<Range<usize>>,
+) -> bool {
+    for (at, separator) in part.match_indices(['=', ':']) {
+        // `Authorization:` ending the word has its value in the next one.
+        if separator == ":" && offset + at + 1 == end {
+            break;
+        }
+        let name = &part[..at];
+        if is_secret_flag(name) || mentions_a_credential(name_at_end(name)) {
+            hidden.push(offset + at + 1..end);
+            return true;
+        }
+    }
+    if let Some(at) = part.find('=')
+        && !part.starts_with('-')
+    {
+        hidden.push(offset + at + 1..offset + part.len());
+    }
+    false
+}
+
+/// A URL's user info, whole, and query values whose key names a credential.
+fn hide_url_secrets(segment: &str, offset: usize, hidden: &mut Vec<Range<usize>>) {
+    let Some(scheme_end) = segment.find("://") else {
+        return;
+    };
+    let start = scheme_end + 3;
+    let rest = &segment[start..];
+    // Passwords often hold `@`, `/` or `#` unencoded, so with a colon in the
+    // user info everything up to the last `@` goes. A user name alone may be
+    // a token; it ends where the host does, so `/@types/node` stays.
+    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let user_end = match rest.rfind('@') {
+        Some(at) if rest[..at].contains(':') => Some(at),
+        _ => rest[..host_end].rfind('@'),
+    };
+    if let Some(at) = user_end {
+        hidden.push(offset + start..offset + start + at);
+    }
+    let after_user = user_end.map_or(start, |at| start + at + 1);
+    let Some(query) = segment[after_user..].find('?') else {
+        return;
+    };
+    let query_start = after_user + query + 1;
+    let query_end = segment[query_start..]
+        .find('#')
+        .map_or(segment.len(), |end| query_start + end);
+    let mut pair_start = query_start;
+    for pair in segment[query_start..query_end].split('&') {
+        if let Some((key, _)) = pair.split_once('=')
+            && is_credential_key(key)
+        {
+            hidden.push(offset + pair_start + key.len() + 1..offset + pair_start + pair.len());
+        }
+        pair_start += pair.len() + 1;
+    }
+}
+
+/// Replaces the marked ranges, merged, with the mask.
+fn with_hidden(text: &str, mut hidden: Vec<Range<usize>>) -> String {
+    hidden.sort_by_key(|range| range.start);
+    let mut shown = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for range in hidden {
+        if range.start < cursor {
+            cursor = cursor.max(range.end);
+            continue;
+        }
+        shown.push_str(&text[cursor..range.start]);
+        shown.push_str(HIDDEN);
+        cursor = range.end;
+    }
+    shown.push_str(&text[cursor.min(text.len())..]);
+    shown
+}
 
 /// `API_TOKEN` in `true;API_TOKEN`, `X-Api-Key` in `-HX-Api-Key`.
 fn name_at_end(text: &str) -> &str {
@@ -208,55 +291,40 @@ fn mentions_a_credential(name: &str) -> bool {
 }
 
 /// Query keys that carry a credential without saying so in their name.
-const QUERY_CREDENTIALS: &[&str] = &["key", "sig", "signature", "auth", "jwt", "sid"];
+const QUERY_CREDENTIALS: &[&str] = &["key", "sig", "signature", "jwt", "sid"];
 
-/// Masks credentials in the authority and in the query string.
-fn mask_url(word: &str) -> String {
-    let word = mask_url_user(word);
-    let Some((base, query)) = word.split_once('?') else {
-        return word;
-    };
-    if !base.contains("://") {
-        return word;
-    }
-    let query: Vec<String> = query
-        .split('&')
-        .map(|pair| match pair.split_once('=') {
-            Some((key, _))
-                if mentions_a_credential(key)
-                    || QUERY_CREDENTIALS
-                        .iter()
-                        .any(|known| key.eq_ignore_ascii_case(known)) =>
-            {
-                format!("{key}={HIDDEN}")
-            }
-            _ => pair.to_string(),
-        })
-        .collect();
-    format!("{base}?{}", query.join("&"))
+/// Compared the way a server reads it: `%74oken` is `token`.
+fn is_credential_key(key: &str) -> bool {
+    let key = percent_decoded(key);
+    mentions_a_credential(&key)
+        || QUERY_CREDENTIALS
+            .iter()
+            .any(|known| key.eq_ignore_ascii_case(known))
 }
 
-/// `scheme://user:password@host` → `scheme://user:***@host`.
-fn mask_url_user(word: &str) -> String {
-    let Some(scheme_end) = word.find("://") else {
-        return word.to_string();
-    };
-    let start = scheme_end + 3;
-    let rest = &word[start..];
-    // Passwords often hold `@`, `/` or `#` unencoded, so after a colon
-    // everything up to the last `@` goes.
-    if let Some(at) = rest.rfind('@')
-        && let Some(colon) = rest[..at].find(':')
-    {
-        return format!("{}{HIDDEN}{}", &word[..=start + colon], &word[start + at..]);
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let escape = bytes[at] == b'%'
+            && bytes.get(at + 1).is_some_and(u8::is_ascii_hexdigit)
+            && bytes.get(at + 2).is_some_and(u8::is_ascii_hexdigit);
+        match escape
+            .then(|| u8::from_str_radix(&text[at + 1..at + 3], 16).ok())
+            .flatten()
+        {
+            Some(byte) => {
+                decoded.push(byte);
+                at += 3;
+            }
+            None => {
+                decoded.push(bytes[at]);
+                at += 1;
+            }
+        }
     }
-    // A user name alone may be a token (`https://ghp_…@github.com`). It ends
-    // where the host does, so `/@types/node` in a path stays.
-    let authority = rest.find(['/', '?', '#']).map_or(rest, |end| &rest[..end]);
-    match authority.rfind('@') {
-        Some(at) => format!("{}{HIDDEN}{}", &word[..start], &word[start + at..]),
-        None => word.to_string(),
-    }
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 #[cfg(test)]
@@ -354,7 +422,7 @@ mod tests {
         );
         assert_eq!(
             show(&["env", "GITHUB_TOKEN=ghp_1", "PORT=3000", "node", "a.js"]),
-            "env GITHUB_TOKEN=*** PORT=3000 node a.js"
+            "env GITHUB_TOKEN=*** PORT=*** node a.js"
         );
     }
 
@@ -476,8 +544,8 @@ mod tests {
     fn masks_trailing_assignments_that_may_be_the_environment() {
         assert_eq!(show(&["aXb", "SESSION=sentinel"]), "aXb SESSION=***");
         assert_eq!(
-            show(&["env", "PORT=3000", "node", "a.js"]),
-            "env PORT=3000 node a.js"
+            show(&["aXbXc", "SESSION=sentinel", "A.B=x"]),
+            "aXbXc SESSION=*** A.B=***"
         );
     }
 
@@ -499,7 +567,7 @@ mod tests {
 
     #[test]
     fn survives_names_that_are_not_ascii() {
-        assert_eq!(show(&["x", "é=1", "--ünïcode=2"]), "x é=1 --ünïcode=2");
+        assert_eq!(show(&["x", "é=1", "--ünïcode=2"]), "x é=*** --ünïcode=2");
         assert_eq!(show(&["x", "ключ_token=1", "y"]), "x ключ_token=*** y");
     }
 
@@ -515,11 +583,11 @@ mod tests {
     fn masks_passwords_that_hold_url_characters() {
         assert_eq!(
             show(&["psql", "postgres://u:p#ss@h/db"]),
-            "psql postgres://u:***@h/db"
+            "psql postgres://***@h/db"
         );
         assert_eq!(
             show(&["psql", "postgres://u:p@ss/w@h/db"]),
-            "psql postgres://u:***@h/db"
+            "psql postgres://***@h/db"
         );
     }
 
@@ -573,6 +641,26 @@ mod tests {
     }
 
     #[test]
+    fn one_secret_never_shields_another() {
+        assert_eq!(
+            show(&["open", "https://h/?token=sentinel&auth=x"]),
+            "open https://h/?token=***&auth=***"
+        );
+        assert_eq!(
+            show(&["git", "clone", "https://ghp_sentinel:x@h/r"]),
+            "git clone https://***@h/r"
+        );
+    }
+
+    #[test]
+    fn reads_query_keys_the_way_a_server_would() {
+        assert_eq!(
+            show(&["open", "https://h/?%74oken=sentinel&q=1"]),
+            "open https://h/?%74oken=***&q=1"
+        );
+    }
+
+    #[test]
     fn masks_secrets_in_flags_and_urls() {
         assert_eq!(show(&["server", "--token=abc123"]), "server --token=***");
         assert_eq!(
@@ -582,7 +670,7 @@ mod tests {
         assert_eq!(show(&["worker", "--api-key", "k"]), "worker --api-key ***");
         assert_eq!(
             show(&["worker", "postgres://app:s3cret@localhost:5432/app"]),
-            "worker postgres://app:***@localhost:5432/app"
+            "worker postgres://***@localhost:5432/app"
         );
     }
 }
