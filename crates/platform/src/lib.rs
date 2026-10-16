@@ -34,6 +34,11 @@ pub fn details(key: ProcessKey) -> ProcessDetails {
     sys::details(key)
 }
 
+/// The program file of the process `key` names; cheaper than `details`.
+pub fn executable(key: ProcessKey) -> Field<std::path::PathBuf> {
+    sys::executable_of(key)
+}
+
 /// Sends `signal` only if `key` still names the same process.
 pub fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
     sys::signal(key, signal)

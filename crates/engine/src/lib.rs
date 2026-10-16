@@ -1,3 +1,4 @@
+pub mod apps;
 mod command;
 pub mod live;
 mod port;

@@ -1,6 +1,8 @@
 use std::process::{Command, Stdio};
 
-use harbormaster_platform::{Field, Owner, Pid, ProcessEntry, details, processes, tracks_exec};
+use harbormaster_platform::{
+    Field, Owner, Pid, ProcessEntry, details, executable, processes, tracks_exec,
+};
 
 fn find(pid: u32) -> ProcessEntry {
     processes()
@@ -90,6 +92,27 @@ fn reads_empty_arguments_without_reaching_the_environment() {
         info.args,
         Field::Known(vec![String::new(), String::new(), "x".to_string()])
     );
+}
+
+#[test]
+fn reads_the_executable_alone() {
+    let own = find(std::process::id()).key;
+
+    let Field::Known(path) = executable(own) else {
+        panic!("our own executable should be readable");
+    };
+    let expected = std::env::current_exe().unwrap();
+    assert_eq!(path.file_name(), expected.file_name());
+}
+
+#[test]
+fn says_gone_for_the_executable_of_a_process_that_exited() {
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let key = find(child.id()).key;
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert_eq!(executable(key), Field::Gone);
 }
 
 #[test]

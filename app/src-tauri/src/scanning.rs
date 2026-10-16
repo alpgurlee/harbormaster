@@ -1,8 +1,11 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use harbormaster_engine::apps::AppUsage;
 use harbormaster_engine::{Classification, Scanner, Service, Snapshot, live};
+use harbormaster_platform::ProcessKey;
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri::ipc::Channel;
@@ -13,12 +16,17 @@ use crate::tray;
 const SHOWN_EVERY: Duration = Duration::from_secs(2);
 const HIDDEN_EVERY: Duration = Duration::from_secs(5);
 
+/// The panel names this many apps by memory and sums up the rest.
+const APPS_SHOWN: usize = 8;
+
 /// One scan, the way the panel reads it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Update {
     services: Vec<Service>,
     memory: Option<Memory>,
+    /// Read only while the panel shows.
+    apps: Option<Vec<AppUsage>>,
     /// Milliseconds since the Unix epoch.
     scanned_at: u64,
 }
@@ -86,12 +94,14 @@ impl Scanning {
     }
 
     fn publish(&self, snapshot: Snapshot) {
+        let shown = self.lock().shown;
         let update = Update {
             services: snapshot.services.clone(),
             memory: harbormaster_platform::memory().map(|memory| Memory {
                 used: memory.used,
                 total: memory.total,
             }),
+            apps: shown.then(|| apps(&snapshot.services)).flatten(),
             scanned_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |since| {
@@ -151,8 +161,30 @@ impl Scanning {
     }
 }
 
+/// The apps using the most memory, the dev servers left out: the panel
+/// counts those on their own.
+fn apps(services: &[Service]) -> Option<Vec<AppUsage>> {
+    let servers: HashSet<ProcessKey> = services
+        .iter()
+        .filter(|service| service.classification == Classification::Dev)
+        .flat_map(|service| service.processes.iter().map(|member| member.key))
+        .collect();
+    match live::apps(&servers) {
+        Ok(mut apps) => {
+            apps.truncate(APPS_SHOWN);
+            Some(apps)
+        }
+        Err(error) => {
+            eprintln!("harbormaster: reading memory by app failed: {error}");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use harbormaster_engine::apps::AppUsage;
+
     use super::{Memory, Update};
 
     #[test]
@@ -160,12 +192,22 @@ mod tests {
         let update = Update {
             services: Vec::new(),
             memory: Some(Memory { used: 1, total: 2 }),
+            apps: Some(vec![AppUsage {
+                name: "Google Chrome".into(),
+                memory_bytes: 3,
+                processes: 2,
+            }]),
             scanned_at: 42,
         };
 
         assert_eq!(
             serde_json::to_value(update).unwrap(),
-            serde_json::json!({ "services": [], "memory": { "used": 1, "total": 2 }, "scannedAt": 42 })
+            serde_json::json!({
+                "services": [],
+                "memory": { "used": 1, "total": 2 },
+                "apps": [{ "name": "Google Chrome", "memoryBytes": 3, "processes": 2 }],
+                "scannedAt": 42
+            })
         );
     }
 }

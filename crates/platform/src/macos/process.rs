@@ -125,6 +125,22 @@ pub(crate) fn details(key: ProcessKey) -> ProcessDetails {
     }
 }
 
+/// The executable alone, cheaper than every detail, for telling apps apart.
+pub(crate) fn executable_of(key: ProcessKey) -> Field<PathBuf> {
+    let Ok(pid) = libc::pid_t::try_from(key.pid.0) else {
+        return Field::Gone;
+    };
+    if let Some(missing) = identity_problem(pid, key) {
+        return missing.field();
+    }
+    let path = executable(pid);
+    // The pid may have been reused while we were reading.
+    match identity_problem(pid, key) {
+        Some(missing) => missing.field(),
+        None => path,
+    }
+}
+
 /// Why nothing about a process can be read.
 #[derive(Debug, Clone, Copy)]
 enum Missing {

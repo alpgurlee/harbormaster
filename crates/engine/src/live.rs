@@ -1,12 +1,13 @@
 //! The engine wired to this machine, so the CLI and the app check the same
 //! things before stopping anything.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
 use harbormaster_platform::{Error, ProcessKey};
 
+use crate::apps::AppUsage;
 use crate::{Input, Scanner, Snapshot, Standing, standings};
 
 /// What listens on this machine right now.
@@ -37,6 +38,13 @@ pub fn guards(home: &Path, keys: &[ProcessKey]) -> Result<HashMap<ProcessKey, St
     Ok(standings(input, keys, &harbormaster_platform::presence)
         .into_iter()
         .collect())
+}
+
+/// This machine's memory by app, largest first, leaving out `skip`.
+pub fn apps(skip: &HashSet<ProcessKey>) -> Result<Vec<AppUsage>, Error> {
+    let processes = harbormaster_platform::processes()?;
+    let executable = |key| harbormaster_platform::executable(key).known().cloned();
+    Ok(crate::apps::usage(&processes, &executable, skip))
 }
 
 /// This process and everything above it, which a stop must never reach.

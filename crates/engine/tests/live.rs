@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::TcpListener;
 
 use harbormaster_engine::{Scanner, Standing, live};
@@ -42,4 +43,16 @@ fn finds_nothing_against_stopping_a_plain_process_of_this_user() {
     let guards = live::guards(home.path(), &[key]).unwrap();
 
     assert_eq!(guards.get(&key), Some(&Standing::Clear));
+}
+
+#[test]
+fn tells_how_much_memory_each_app_uses() {
+    let apps = live::apps(&HashSet::new()).unwrap();
+
+    assert!(!apps.is_empty());
+    assert!(
+        apps.windows(2)
+            .all(|pair| pair[0].memory_bytes >= pair[1].memory_bytes),
+        "{apps:?}"
+    );
 }

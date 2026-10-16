@@ -45,6 +45,10 @@ const update: Update = {
     server(5432, "db", "main", 40, { classification: "other", project: null, command: "postgres -D data" }),
   ],
   memory: { used: 16 * 1024 * MIB, total: 32 * 1024 * MIB },
+  apps: [
+    { name: "Google Chrome", memoryBytes: 3.2 * 1024 * MIB, processes: 31 },
+    { name: "Slack", memoryBytes: 640 * MIB, processes: 6 },
+  ],
   scannedAt: NOW,
 };
 
@@ -75,6 +79,69 @@ describe("Panel", () => {
 
     expect(screen.getByText(byContent("2 servers · 998 MB · CPU 5%"))).toBeTruthy();
     expect(screen.getByText("16.0 of 32 GB")).toBeTruthy();
+  });
+
+  it("marks the dev servers' share on the memory meter", () => {
+    show();
+
+    const [servers, rest] = [...screen.getByRole("meter").children] as HTMLElement[];
+    expect(parseFloat(servers.style.width)).toBeCloseTo((998 / (32 * 1024)) * 100);
+    expect(parseFloat(rest.style.width)).toBeCloseTo(((16 * 1024 - 998) / (32 * 1024)) * 100);
+  });
+
+  it("says what uses the memory when asked, and folds it away again", () => {
+    show();
+    const toggle = screen.getByRole("button", { name: "16.0 of 32 GB" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("list", { name: "Memory by app" })).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const items = within(screen.getByRole("list", { name: "Memory by app" })).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Dev servers998 MB", "Google Chrome3.2 GB", "Slack640 MB"]);
+    expect(screen.getByText("Figures as in Activity Monitor")).toBeTruthy();
+    // Bars share the meter's scale, so the dev servers' bar lines up with their part of it.
+    const [servers] = [...screen.getByRole("meter").children] as HTMLElement[];
+    expect(items[0].querySelector<HTMLElement>("[aria-hidden] > span")?.style.width).toBe(servers.style.width);
+
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("list", { name: "Memory by app" })).toBeNull();
+  });
+
+  it("keeps the dev servers' whole figure when it passes the memory in use", () => {
+    show({ update: { ...update, services: [server(3000, "app", "main", 8 * 1024)], memory: { used: 6 * 1024 * MIB, total: 8 * 1024 * MIB } } });
+
+    fireEvent.click(screen.getByRole("button", { name: "6.0 of 8 GB" }));
+
+    const list = screen.getByRole("list", { name: "Memory by app" });
+    expect(within(list).getByText("8.0 GB")).toBeTruthy();
+  });
+
+  it("says so while it is still measuring the apps", () => {
+    show({ update: { ...update, apps: null } });
+
+    fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
+
+    expect(screen.getByText("Measuring…")).toBeTruthy();
+  });
+
+  it("leaves the dev servers out of the breakdown while none run", () => {
+    const services = update.services.filter((service) => service.classification !== "dev");
+    show({ update: { ...update, services } });
+
+    fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
+
+    const items = within(screen.getByRole("list", { name: "Memory by app" })).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Google Chrome3.2 GB", "Slack640 MB"]);
+  });
+
+  it("names a coding agent the way the rest of the panel does", () => {
+    show({ update: { ...update, apps: [{ name: "claude", memoryBytes: 1.7 * 1024 * MIB, processes: 2 }] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
+
+    expect(screen.getByText("Claude Code")).toBeTruthy();
   });
 
   it("narrows the list to what the search matches", () => {
@@ -187,6 +254,9 @@ describe("Panel", () => {
     show({}, "tr");
 
     expect(screen.getByText(byContent("2 sunucu · 998 MB · CPU %5"))).toBeTruthy();
-    expect(screen.getByText("16,0 / 32 GB")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "16,0 / 32 GB" }));
+    const items = within(screen.getByRole("list", { name: "Uygulamalara göre bellek" })).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Dev sunucuları998 MB", "Google Chrome3,2 GB", "Slack640 MB"]);
+    expect(screen.getByText("Değerler Etkinlik Monitörü'ndeki gibi")).toBeTruthy();
   });
 });

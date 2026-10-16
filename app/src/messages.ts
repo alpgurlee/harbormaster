@@ -8,6 +8,11 @@ export interface Messages {
   servers: Plural;
   memoryOf: string;
   memoryInUse: string;
+  memoryByApp: string;
+  devServers: string;
+  measuring: string;
+  figuresMac: string;
+  figuresWindows: string;
   cpu: string;
   search: string;
   otherListeners: string;
@@ -83,6 +88,11 @@ export const en: Messages = {
   servers: { one: "{count} server", other: "{count} servers" },
   memoryOf: "{used} of {total}",
   memoryInUse: "Memory in use",
+  memoryByApp: "Memory by app",
+  devServers: "Dev servers",
+  measuring: "Measuring…",
+  figuresMac: "Figures as in Activity Monitor",
+  figuresWindows: "Figures as in Task Manager",
   cpu: "CPU {percent}",
   search: "Search servers, ports, projects",
   otherListeners: "Other listeners · {count}",
@@ -158,6 +168,11 @@ export const tr: Messages = {
   servers: { one: "{count} sunucu", other: "{count} sunucu" },
   memoryOf: "{used} / {total}",
   memoryInUse: "Kullanılan bellek",
+  memoryByApp: "Uygulamalara göre bellek",
+  devServers: "Dev sunucuları",
+  measuring: "Ölçülüyor…",
+  figuresMac: "Değerler Etkinlik Monitörü'ndeki gibi",
+  figuresWindows: "Değerler Görev Yöneticisi'ndeki gibi",
   cpu: "CPU {percent}",
   search: "Sunucu, port ya da proje ara",
   otherListeners: "Diğer dinleyiciler · {count}",

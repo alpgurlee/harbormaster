@@ -15,6 +15,7 @@
   --edge: rgb(0 0 0 / 0.12);
   --line: rgb(0 0 0 / 0.08);
   --track: rgb(0 0 0 / 0.08);
+  --in-use: rgb(0 0 0 / 0.28);
   --chip: rgb(0 0 0 / 0.06);
   --text: #1c1c1f;
   --muted: #6c6c74;
@@ -41,6 +42,7 @@
     --edge: rgb(255 255 255 / 0.1);
     --line: rgb(255 255 255 / 0.08);
     --track: rgb(255 255 255 / 0.1);
+    --in-use: rgb(255 255 255 / 0.3);
     --chip: rgb(255 255 255 / 0.08);
     --text: #ececef;
     --muted: #9a9aa3;
@@ -61,6 +63,7 @@
   --edge: rgb(255 255 255 / 0.1);
   --line: rgb(255 255 255 / 0.08);
   --track: rgb(255 255 255 / 0.1);
+  --in-use: rgb(255 255 255 / 0.3);
   --chip: rgb(255 255 255 / 0.08);
   --text: #ececef;
   --muted: #9a9aa3;

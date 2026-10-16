@@ -61,9 +61,18 @@ export interface Memory {
   total: number;
 }
 
+/** One app's processes together, or one plain program. */
+export interface AppUsage {
+  name: string;
+  memoryBytes: number;
+  processes: number;
+}
+
 export interface Update {
   services: Service[];
   memory: Memory | null;
+  /** The apps using the most memory, dev servers left out; null until measured. */
+  apps: AppUsage[] | null;
   /** Milliseconds since the Unix epoch. */
   scannedAt: number;
 }

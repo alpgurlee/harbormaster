@@ -4,8 +4,9 @@ import { useI18n } from "./i18n";
 import { Chevron, Mark, OpenOut, Search, Square } from "./icons";
 import { groupByProject, totals } from "./model";
 import { Plate } from "./Plate";
-import { agentOf } from "./session";
-import type { Memory, Service, Update } from "./types";
+import { platform } from "./platform";
+import { agentOf, displayName } from "./session";
+import type { AppUsage, Memory, Service, Update } from "./types";
 import styles from "./Panel.module.css";
 
 /** A scan younger than this reads as now. */
@@ -98,7 +99,7 @@ export function Panel({ hidden = false, update, now, onShow, onOpen, onStop }: P
   return (
     <div className={styles.panel} hidden={hidden}>
       <Header />
-      <Summary dev={dev} memory={update.memory} />
+      <Summary dev={dev} memory={update.memory} apps={update.apps} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
         <input
@@ -170,9 +171,13 @@ function Header() {
   );
 }
 
-function Summary({ dev, memory }: { dev: Service[]; memory: Memory | null }) {
+function Summary({ dev, memory, apps }: { dev: Service[]; memory: Memory | null; apps: AppUsage[] | null }) {
   const i18n = useI18n();
+  const [open, setOpen] = useState(false);
   const sum = totals(dev);
+  const servers = sum.memoryBytes ?? 0;
+  // Footprints can pass the memory in use; the meter can't show more than that.
+  const serversInUse = Math.min(servers, memory?.used ?? 0);
   const strong = (value: string): ReactNode => <strong>{value}</strong>;
   return (
     <>
@@ -186,7 +191,8 @@ function Summary({ dev, memory }: { dev: Service[]; memory: Memory | null }) {
           aria-valuetext={i18n.memoryOf(memory.used, memory.total)}
           className={styles.meter}
         >
-          <span style={{ width: `${Math.min(100, (memory.used / memory.total) * 100)}%` }} />
+          <span className={styles.servers} style={{ width: share(serversInUse, memory.total) }} />
+          <span style={{ width: share(memory.used - serversInUse, memory.total) }} />
         </div>
       ) : null}
       <div className={styles.stats}>
@@ -197,10 +203,63 @@ function Summary({ dev, memory }: { dev: Service[]; memory: Memory | null }) {
             <> · {i18n.marked("cpu", { percent: i18n.percent(sum.cpuPercent) }, strong)}</>
           ) : null}
         </span>
-        {memory ? <span>{i18n.memoryOf(memory.used, memory.total)}</span> : null}
+        {memory ? (
+          <button
+            type="button"
+            className={styles.more}
+            aria-expanded={open}
+            aria-controls={open ? "memory-by-app" : undefined}
+            onClick={() => setOpen(!open)}
+          >
+            {i18n.memoryOf(memory.used, memory.total)}
+            <Chevron className={open ? styles.open : undefined} />
+          </button>
+        ) : null}
       </div>
+      {memory && open ? <Breakdown servers={servers} apps={apps} total={memory.total} /> : null}
     </>
   );
+}
+
+/**
+ * The dev servers and the apps using the most memory, on the meter's scale.
+ * Nothing sums them up: each counts compressed memory at full size, as
+ * Activity Monitor does, so together they can come to more than is in use.
+ */
+function Breakdown({ servers, apps, total }: { servers: number; apps: AppUsage[] | null; total: number }) {
+  const i18n = useI18n();
+  if (apps === null) {
+    return (
+      <p id="memory-by-app" className={styles.breakdown}>
+        {i18n.t("measuring")}
+      </p>
+    );
+  }
+  const parts = [
+    { key: "servers", name: i18n.t("devServers"), bytes: servers },
+    ...apps.map((app) => ({ key: `app:${app.name}`, name: displayName(app.name), bytes: app.memoryBytes })),
+  ].filter((part) => part.bytes > 0);
+  return (
+    <div id="memory-by-app" className={styles.breakdown}>
+      <ul aria-label={i18n.t("memoryByApp")} className={styles.parts}>
+        {parts.map((part) => (
+          <li key={part.key}>
+            <span className={styles.partName}>{part.name}</span>
+            <span className={styles.partAmount}>{i18n.bytes(part.bytes)}</span>
+            <span className={styles.bar} aria-hidden="true">
+              <span className={part.key === "servers" ? styles.servers : undefined} style={{ width: share(part.bytes, total) }} />
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className={styles.figures}>{i18n.t(platform === "windows" ? "figuresWindows" : "figuresMac")}</p>
+    </div>
+  );
+}
+
+/** A width for `bytes` out of `whole`. */
+function share(bytes: number, whole: number): string {
+  return `${whole > 0 ? Math.min(100, (bytes / whole) * 100) : 0}%`;
 }
 
 interface RowProps {

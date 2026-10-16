@@ -23,6 +23,7 @@
 }
 
 .meter {
+  display: flex;
   height: 3px;
   margin: 0 14px;
   overflow: hidden;
@@ -30,10 +31,16 @@
   background: var(--track);
 }
 
-.meter > span {
+.meter > span,
+.bar > span {
+  flex: none;
   display: block;
   height: 100%;
-  border-radius: inherit;
+  background: var(--in-use);
+}
+
+.meter > .servers,
+.bar > .servers {
   background: var(--brass);
 }
 
@@ -49,6 +56,52 @@
 .stats strong {
   color: var(--text);
   font-weight: 600;
+}
+
+.breakdown {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.parts {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.parts > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+}
+
+.partName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partAmount {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  grid-column: 1 / -1;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--track);
+}
+
+.figures {
+  margin: 0;
 }
 
 .search {
@@ -274,8 +327,14 @@
     outline: 2px solid Highlight;
   }
 
-  .meter > span {
+  .meter > span,
+  .bar > span {
     forced-color-adjust: none;
+    background: GrayText;
+  }
+
+  .meter > .servers,
+  .bar > .servers {
     background: Highlight;
   }
 }
