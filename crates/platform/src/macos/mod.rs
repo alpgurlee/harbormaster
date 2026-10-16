@@ -1,3 +1,4 @@
+mod kinfo;
 mod memory;
 mod procargs;
 mod process;
@@ -16,7 +17,7 @@ use crate::{Listener, SocketId};
 
 pub(crate) use memory::memory;
 pub(crate) use process::{details, processes};
-pub(crate) use signal::{is_running, signal};
+pub(crate) use signal::{presence, signal};
 
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;

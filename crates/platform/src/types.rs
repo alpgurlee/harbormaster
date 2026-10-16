@@ -95,10 +95,25 @@ pub enum Signal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignalOutcome {
     Sent,
-    /// It already exited, or its pid now belongs to another process.
+    /// It already exited.
     Gone,
+    /// The pid belongs to another process now, or the process became another
+    /// program. Nothing was sent.
+    Replaced,
     Denied,
     Failed(String),
+}
+
+/// Whether the process a key names is still there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    Running,
+    /// Exited, a zombie nobody reaped yet included.
+    Gone,
+    /// The pid is alive under another identity: reused, or exec'd.
+    Replaced,
+    /// The OS wouldn't say.
+    Unknown,
 }
 
 /// The machine's memory the way its own monitor counts it: Activity

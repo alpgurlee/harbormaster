@@ -5,6 +5,7 @@ use harbormaster_platform::ProcessKey;
 
 use crate::format::{label, ports, printable, table};
 
+pub(crate) const FAILED: u8 = 1;
 pub(crate) const NOT_FOUND: u8 = 3;
 pub(crate) const REFUSED: u8 = 4;
 pub(crate) const PARTIAL: u8 = 5;
@@ -141,13 +142,16 @@ fn reason(service: &Service, protection: Protection) -> String {
     }
 }
 
-/// What happened, and the exit status: 0 when everything stopped.
+/// What happened, and the exit status: 0 when everything stopped, 1 when a
+/// check failed, 4 when a process turned out to be another one, 5 when some
+/// of it still runs.
 pub(crate) fn report(service: &Service, outcomes: &[(ProcessKey, Outcome)]) -> (Vec<String>, u8) {
     let problems: Vec<String> = outcomes
         .iter()
         .filter_map(|(key, outcome)| {
             let problem = match outcome {
                 Outcome::Stopped | Outcome::AlreadyGone => return None,
+                Outcome::Replaced => "is a different process now; left alone".to_string(),
                 Outcome::StillRunning => "still running".to_string(),
                 Outcome::AccessDenied => "not allowed to stop it".to_string(),
                 Outcome::Failed(reason) => format!("failed: {}", printable(reason)),
@@ -155,6 +159,7 @@ pub(crate) fn report(service: &Service, outcomes: &[(ProcessKey, Outcome)]) -> (
             Some(format!("  {}  {problem}", key.pid.0))
         })
         .collect();
+    let any = |wanted: fn(&Outcome) -> bool| outcomes.iter().any(|(_, outcome)| wanted(outcome));
     let name = printable(label(service));
     if outcomes
         .iter()
@@ -167,7 +172,14 @@ pub(crate) fn report(service: &Service, outcomes: &[(ProcessKey, Outcome)]) -> (
     }
     let mut lines = vec![format!("Could not stop all of {name}:")];
     lines.extend(problems);
-    (lines, PARTIAL)
+    let status = if any(|outcome| matches!(outcome, Outcome::Failed(_))) {
+        FAILED
+    } else if any(|outcome| *outcome == Outcome::Replaced) {
+        REFUSED
+    } else {
+        PARTIAL
+    };
+    (lines, status)
 }
 
 /// Only a plain yes goes ahead.
@@ -337,6 +349,31 @@ mod tests {
             ["Could not stop all of node:", "  20  still running"]
         );
         assert_eq!(status, 5);
+    }
+
+    #[test]
+    fn treats_a_changed_identity_as_refused_and_a_failed_check_as_an_error() {
+        let (lines, status) = report(
+            &server(),
+            &[(key(30), Outcome::Stopped), (key(20), Outcome::Replaced)],
+        );
+        assert_eq!(
+            lines,
+            [
+                "Could not stop all of node:",
+                "  20  is a different process now; left alone",
+            ]
+        );
+        assert_eq!(status, 4);
+
+        let (_, status) = report(
+            &server(),
+            &[
+                (key(30), Outcome::Replaced),
+                (key(20), Outcome::Failed("boom".into())),
+            ],
+        );
+        assert_eq!(status, 1);
     }
 
     #[test]

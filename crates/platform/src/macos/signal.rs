@@ -1,7 +1,7 @@
 use std::io;
 
 use super::process::identify;
-use crate::{ProcessKey, Signal, SignalOutcome};
+use crate::{Presence, ProcessKey, Signal, SignalOutcome};
 
 pub(crate) fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
     let Some(pid) = signal_target(key.pid.0) else {
@@ -9,8 +9,13 @@ pub(crate) fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
     };
     // The last identity check before the signal. macOS has no pidfd, so a
     // pid reused within this instant is the one race left.
-    if !is_running(key) {
-        return SignalOutcome::Gone;
+    match presence(key) {
+        Presence::Running => {}
+        Presence::Gone => return SignalOutcome::Gone,
+        Presence::Replaced => return SignalOutcome::Replaced,
+        Presence::Unknown => {
+            return SignalOutcome::Failed("could not confirm it is the same process".into());
+        }
     }
     let number = match signal {
         Signal::Terminate => libc::SIGTERM,
@@ -28,13 +33,18 @@ pub(crate) fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
     }
 }
 
-/// PROC_PIDTBSDINFO fails for zombies, so an exited but unreaped process
-/// doesn't count.
-pub(crate) fn is_running(key: ProcessKey) -> bool {
+/// proc_pidinfo answers ESRCH for zombies too, so an exited but unreaped
+/// process counts as gone.
+pub(crate) fn presence(key: ProcessKey) -> Presence {
     let Ok(pid) = libc::pid_t::try_from(key.pid.0) else {
-        return false;
+        return Presence::Gone;
     };
-    identify(pid).is_ok_and(|(_, found)| found == key)
+    match identify(pid) {
+        Ok((_, found)) if found == key => Presence::Running,
+        Ok(_) => Presence::Replaced,
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Presence::Gone,
+        Err(_) => Presence::Unknown,
+    }
 }
 
 /// kill(0) would reach our whole process group and kill(1) launchd, so

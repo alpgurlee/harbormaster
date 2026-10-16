@@ -5,27 +5,33 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use super::{all_pids, procargs};
+use super::{all_pids, kinfo, procargs};
 use crate::{Field, Owner, Pid, ProcessDetails, ProcessEntry, ProcessKey, StartTime};
 
 pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
     // SAFETY: getuid has no failure mode.
     let own_uid = unsafe { libc::getuid() };
-    let entries = all_pids()?
+    let table = kinfo::all()?;
+    if !matches_our_own_record(&table) {
+        return processes_one_by_one(own_uid);
+    }
+    let entries = table
         .into_iter()
-        .filter_map(|pid| {
-            let (info, key) = identify(pid).ok()?;
-            // Drop the figures if the pid changed hands while we read them.
-            let usage = rusage(pid).filter(|_| identify(pid).is_ok_and(|(_, again)| again == key));
+        .filter(|entry| entry.pid > 0 && !entry.zombie)
+        .filter_map(|entry| {
+            let key = ProcessKey {
+                pid: Pid(entry.pid.unsigned_abs()),
+                start: entry.start,
+                exec: exec_version(entry.pid).ok()?,
+            };
+            // Our own user's processes also give their full name and usage.
+            let ours = identify(entry.pid).ok().filter(|(_, found)| *found == key);
+            let usage = ours.as_ref().and_then(|_| usage_of(entry.pid, key));
             Some(ProcessEntry {
                 key,
-                parent: (info.pbi_ppid > 0).then_some(Pid(info.pbi_ppid)),
-                name: name_of(&info),
-                owner: match info.pbi_uid {
-                    uid if uid == own_uid => Owner::CurrentUser,
-                    0 => Owner::System,
-                    _ => Owner::OtherUser,
-                },
+                parent: (entry.parent > 0).then_some(Pid(entry.parent.unsigned_abs())),
+                name: ours.map_or(entry.command, |(info, _)| name_of(&info)),
+                owner: owner(entry.user, own_uid),
                 memory_bytes: usage.map(|usage| usage.ri_phys_footprint),
                 cpu_time: usage.map(|usage| {
                     Duration::from_nanos(mach_to_nanos(usage.ri_user_time + usage.ri_system_time))
@@ -34,6 +40,58 @@ pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
         })
         .collect();
     Ok(entries)
+}
+
+/// The table's layout is checked against what proc_pidinfo says about us.
+fn matches_our_own_record(table: &[kinfo::Entry]) -> bool {
+    let own = std::process::id();
+    let Ok(pid) = libc::pid_t::try_from(own) else {
+        return false;
+    };
+    let Ok((info, key)) = identify(pid) else {
+        return false;
+    };
+    table.iter().any(|entry| {
+        entry.pid == pid
+            && entry.start == key.start
+            && entry.parent.unsigned_abs() == info.pbi_ppid
+            && entry.user == info.pbi_uid
+    })
+}
+
+/// The slower way, process by process, which only sees this user's processes.
+fn processes_one_by_one(own_uid: libc::uid_t) -> io::Result<Vec<ProcessEntry>> {
+    let entries = all_pids()?
+        .into_iter()
+        .filter_map(|pid| {
+            let (info, key) = identify(pid).ok()?;
+            let usage = usage_of(pid, key);
+            Some(ProcessEntry {
+                key,
+                parent: (info.pbi_ppid > 0).then_some(Pid(info.pbi_ppid)),
+                name: name_of(&info),
+                owner: owner(info.pbi_uid, own_uid),
+                memory_bytes: usage.map(|usage| usage.ri_phys_footprint),
+                cpu_time: usage.map(|usage| {
+                    Duration::from_nanos(mach_to_nanos(usage.ri_user_time + usage.ri_system_time))
+                }),
+            })
+        })
+        .collect();
+    Ok(entries)
+}
+
+fn owner(uid: libc::uid_t, own_uid: libc::uid_t) -> Owner {
+    match uid {
+        uid if uid == own_uid => Owner::CurrentUser,
+        0 => Owner::System,
+        _ => Owner::OtherUser,
+    }
+}
+
+/// Usage figures, dropped if the pid changed hands while we read them.
+fn usage_of(pid: libc::pid_t, key: ProcessKey) -> Option<libc::rusage_info_v4> {
+    rusage(pid).filter(|_| identify(pid).is_ok_and(|(_, again)| again == key))
 }
 
 pub(crate) fn details(key: ProcessKey) -> ProcessDetails {
@@ -91,11 +149,14 @@ fn identity_problem(pid: libc::pid_t, key: ProcessKey) -> Option<Missing> {
 /// A process's details and the identity they belong to.
 pub(super) fn identify(pid: libc::pid_t) -> io::Result<(libc::proc_bsdinfo, ProcessKey)> {
     let info = bsd_info(pid)?;
-    let nanos = info.pbi_start_tvsec * 1_000_000_000 + info.pbi_start_tvusec * 1_000;
+    let nanos = info
+        .pbi_start_tvsec
+        .saturating_mul(1_000_000_000)
+        .saturating_add(info.pbi_start_tvusec.saturating_mul(1_000));
     let key = ProcessKey {
         pid: Pid(pid.unsigned_abs()),
         start: StartTime(nanos),
-        exec: exec_version(pid),
+        exec: exec_version(pid)?,
     };
     Ok((info, key))
 }
@@ -113,9 +174,19 @@ struct UniqueIdentifierInfo {
 
 const PROC_PIDUNIQIDENTIFIERINFO: c_int = 17;
 
-/// xnu bumps `p_idversion` on exec. 0 if this macOS won't say, which leaves
-/// the pid and start time to tell processes apart.
-fn exec_version(pid: libc::pid_t) -> u32 {
+/// xnu bumps `p_idversion` on exec. Whether this macOS answers is judged once,
+/// on our own process: if it does, a process it won't answer for can't be
+/// identified this round; if it doesn't, every process gets 0 and the pid and
+/// start time alone tell processes apart.
+fn exec_version(pid: libc::pid_t) -> io::Result<u32> {
+    static ANSWERS: OnceLock<bool> = OnceLock::new();
+    let answers = *ANSWERS.get_or_init(|| {
+        libc::pid_t::try_from(std::process::id()).is_ok_and(|own| id_version(own).is_ok())
+    });
+    if answers { id_version(pid) } else { Ok(0) }
+}
+
+fn id_version(pid: libc::pid_t) -> io::Result<u32> {
     // SAFETY: UniqueIdentifierInfo is plain old data; all-zero is a valid value.
     let mut info: UniqueIdentifierInfo = unsafe { zeroed() };
     let size = size_of::<UniqueIdentifierInfo>() as c_int;
@@ -130,9 +201,9 @@ fn exec_version(pid: libc::pid_t) -> u32 {
         )
     };
     if written == size {
-        info.id_version as u32
+        Ok(info.id_version as u32)
     } else {
-        0
+        Err(io::Error::last_os_error())
     }
 }
 

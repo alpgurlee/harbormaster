@@ -4,7 +4,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use harbormaster_platform::{
-    ProcessKey, Signal, SignalOutcome, StartTime, is_running, processes, signal,
+    Presence, ProcessKey, Signal, SignalOutcome, StartTime, presence, processes, signal,
 };
 
 fn sleeper() -> (Child, ProcessKey) {
@@ -39,7 +39,7 @@ fn never_signals_a_process_that_only_shares_the_pid() {
     child.kill().unwrap();
     child.wait().unwrap();
 
-    assert_eq!(outcome, SignalOutcome::Gone);
+    assert_eq!(outcome, SignalOutcome::Replaced);
     assert!(still_running, "a reused pid must not receive the signal");
 }
 
@@ -49,23 +49,35 @@ fn reports_an_exited_process_as_gone() {
     child.kill().unwrap();
     child.wait().unwrap();
 
-    assert!(!is_running(key));
+    assert_eq!(presence(key), Presence::Gone);
     assert_eq!(signal(key, Signal::Terminate), SignalOutcome::Gone);
 }
 
 #[test]
 fn does_not_count_a_zombie_as_running() {
     let (mut child, key) = sleeper();
-    assert!(is_running(key));
+    assert_eq!(presence(key), Presence::Running);
     child.kill().unwrap();
 
     // Not reaped yet, so the kernel keeps a zombie with the same identity.
     let deadline = Instant::now() + Duration::from_secs(2);
-    while is_running(key) && Instant::now() < deadline {
+    while presence(key) == Presence::Running && Instant::now() < deadline {
         sleep(Duration::from_millis(10));
     }
-    let running = is_running(key);
+    let after = presence(key);
     child.wait().unwrap();
 
-    assert!(!running);
+    assert_eq!(after, Presence::Gone);
+}
+
+#[test]
+fn says_when_a_pid_belongs_to_another_process_now() {
+    let (mut child, mut key) = sleeper();
+    key.start = StartTime(key.start.0 + 1);
+
+    let found = presence(key);
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert_eq!(found, Presence::Replaced);
 }

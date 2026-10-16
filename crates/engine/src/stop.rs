@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use harbormaster_platform::{ProcessKey, Signal, SignalOutcome};
+use harbormaster_platform::{Presence, ProcessKey, Signal, SignalOutcome};
 use serde::Serialize;
 
 use crate::{Protection, Service, Snapshot};
@@ -116,6 +116,9 @@ pub fn recheck<'a>(approved: &Service, now: &'a Snapshot) -> Result<Vec<ProcessK
 pub enum Outcome {
     Stopped,
     AlreadyGone,
+    /// Its pid now names another process, or it became another program, so
+    /// it was left alone.
+    Replaced,
     AccessDenied,
     StillRunning,
     Failed(String),
@@ -124,7 +127,7 @@ pub enum Outcome {
 /// The OS calls a stop needs, so the sequence can be tested without one.
 pub struct Signals<'a> {
     pub send: &'a dyn Fn(ProcessKey, Signal) -> SignalOutcome,
-    pub is_running: &'a dyn Fn(ProcessKey) -> bool,
+    pub presence: &'a dyn Fn(ProcessKey) -> Presence,
     pub sleep: &'a dyn Fn(Duration),
 }
 
@@ -147,18 +150,30 @@ pub fn stop(
         match (signals.send)(key, signal) {
             SignalOutcome::Sent => waiting.push(key),
             SignalOutcome::Gone => outcomes.push((key, Outcome::AlreadyGone)),
+            SignalOutcome::Replaced => outcomes.push((key, Outcome::Replaced)),
             SignalOutcome::Denied => outcomes.push((key, Outcome::AccessDenied)),
             SignalOutcome::Failed(reason) => outcomes.push((key, Outcome::Failed(reason))),
         }
     }
     let mut waited = Duration::ZERO;
+    let mut unclear = Vec::new();
     loop {
-        waiting.retain(|&key| {
-            let running = (signals.is_running)(key);
-            if !running {
-                outcomes.push((key, Outcome::Stopped));
+        unclear.clear();
+        waiting.retain(|&key| match (signals.presence)(key) {
+            Presence::Running => true,
+            // Not knowing is never taken for an exit.
+            Presence::Unknown => {
+                unclear.push(key);
+                true
             }
-            running
+            Presence::Gone => {
+                outcomes.push((key, Outcome::Stopped));
+                false
+            }
+            Presence::Replaced => {
+                outcomes.push((key, Outcome::Replaced));
+                false
+            }
         });
         if waiting.is_empty() || waited >= grace {
             break;
@@ -166,7 +181,14 @@ pub fn stop(
         (signals.sleep)(POLL);
         waited += POLL;
     }
-    outcomes.extend(waiting.into_iter().map(|key| (key, Outcome::StillRunning)));
+    outcomes.extend(waiting.into_iter().map(|key| {
+        let outcome = if unclear.contains(&key) {
+            Outcome::Failed("could not tell whether it exited".into())
+        } else {
+            Outcome::StillRunning
+        };
+        (key, outcome)
+    }));
     outcomes.sort_by_key(|(key, _)| targets.iter().position(|target| target == key));
     outcomes
 }
@@ -178,7 +200,7 @@ mod tests {
     use std::net::IpAddr;
     use std::time::Duration;
 
-    use harbormaster_platform::{Pid, ProcessKey, Signal, SignalOutcome, StartTime};
+    use harbormaster_platform::{Pid, Presence, ProcessKey, Signal, SignalOutcome, StartTime};
 
     use super::{Outcome, Refusal, Signals, Target, choose, order, recheck, stop};
     use crate::{Classification, Member, Port, Protection, Service, Snapshot};
@@ -386,29 +408,36 @@ mod tests {
         let replies = HashMap::from([
             (key(2), SignalOutcome::Gone),
             (key(3), SignalOutcome::Denied),
+            (key(5), SignalOutcome::Replaced),
         ]);
-        // key(1) exits on the second check; key(4) never does.
+        // key(1) exits on the second look; key(4) never does; key(6) can't
+        // be looked at; key(7) turns into another process.
         let checks: RefCell<HashMap<ProcessKey, u32>> = RefCell::default();
         let sent: RefCell<Vec<ProcessKey>> = RefCell::default();
-        let never_exits = key(4);
         let send = |target: ProcessKey, _: Signal| {
             sent.borrow_mut().push(target);
             replies.get(&target).cloned().unwrap_or(SignalOutcome::Sent)
         };
-        let is_running = |target: ProcessKey| {
+        let presence = |target: ProcessKey| {
             let mut checks = checks.borrow_mut();
             let seen = checks.entry(target).or_default();
             *seen += 1;
-            target == never_exits || *seen < 2
+            match target.pid.0 {
+                1 if *seen >= 2 => Presence::Gone,
+                6 => Presence::Unknown,
+                7 => Presence::Replaced,
+                _ => Presence::Running,
+            }
         };
         let signals = Signals {
             send: &send,
-            is_running: &is_running,
+            presence: &presence,
             sleep: &|_| {},
         };
+        let targets = [key(1), key(2), key(3), key(4), key(5), key(6), key(7)];
 
         let outcomes = stop(
-            &[key(1), key(2), key(3), key(4)],
+            &targets,
             Signal::Terminate,
             Duration::from_secs(1),
             &signals,
@@ -421,8 +450,14 @@ mod tests {
                 (key(2), Outcome::AlreadyGone),
                 (key(3), Outcome::AccessDenied),
                 (key(4), Outcome::StillRunning),
+                (key(5), Outcome::Replaced),
+                (
+                    key(6),
+                    Outcome::Failed("could not tell whether it exited".into())
+                ),
+                (key(7), Outcome::Replaced),
             ]
         );
-        assert_eq!(*sent.borrow(), [key(1), key(2), key(3), key(4)]);
+        assert_eq!(*sent.borrow(), targets);
     }
 }

@@ -109,3 +109,11 @@ fn gives_a_process_that_execs_a_new_identity() {
     assert_ne!(before, after, "exec must change the identity");
     assert_eq!(stale.args, Field::Gone);
 }
+
+#[test]
+fn lists_processes_of_other_users_too() {
+    let launchd = find(1);
+
+    assert_eq!(launchd.owner, Owner::System);
+    assert_eq!(launchd.name, "launchd");
+}
