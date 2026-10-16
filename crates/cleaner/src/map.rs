@@ -205,7 +205,8 @@ fn unopened(error: &io::Error) -> Short {
 
 /// Takes `each` into `area`: its room, why it may hold more, and itself if
 /// it is among the largest worth showing. A place left out for a reason is
-/// worth showing whatever its size, so the reason is seen.
+/// worth showing whatever its size, so the reason is seen. Of places as
+/// large, the first by name stays first, whichever was read first.
 fn offered(area: &mut Area, each: Area) {
     area.bytes += each.bytes;
     area.short = area.short.max(each.short);
@@ -214,9 +215,9 @@ fn offered(area: &mut Area, each: Area) {
         area.rest += each.bytes;
         return;
     }
-    let at = area
-        .inside
-        .partition_point(|shown| shown.bytes >= each.bytes);
+    let at = area.inside.partition_point(|shown| {
+        shown.bytes > each.bytes || (shown.bytes == each.bytes && shown.path <= each.path)
+    });
     area.inside.insert(at, each);
     if area.inside.len() > SHOWN_INSIDE
         && let Some(last) = area.inside.pop()
@@ -408,6 +409,31 @@ mod tests {
 
         assert_eq!(home.inside.len(), 2);
         assert_eq!(home.rest, 0);
+    }
+
+    #[test]
+    fn keeps_the_same_of_many_as_large_whatever_order_they_come_in() {
+        let many: Vec<Area> = (0..51)
+            .map(|index| area(&format!("f{index:02}"), 2 * MIB as u64, Vec::new()))
+            .collect();
+        let mut forward = area("home", 0, Vec::new());
+        let mut backward = area("home", 0, Vec::new());
+
+        many.iter()
+            .cloned()
+            .for_each(|each| offered(&mut forward, each));
+        many.into_iter()
+            .rev()
+            .for_each(|each| offered(&mut backward, each));
+
+        let names = |area: &Area| {
+            area.inside
+                .iter()
+                .map(|each| each.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&forward), names(&backward));
+        assert_eq!(forward.rest, backward.rest);
     }
 
     #[test]
