@@ -57,6 +57,7 @@ const FINDINGS = [shop, tool, npm, pip, archive, trash];
 function fake() {
   const scans: ((event: ScanEvent) => void)[] = [];
   const hunts: ((event: ScanEvent) => void)[] = [];
+  const listings: ((event: ScanEvent) => void)[] = [];
   const runs: { token: number; paths: string[]; onEvent: (event: RunEvent) => void }[] = [];
   let stops = 0;
   let refusal: unknown = null;
@@ -71,6 +72,10 @@ function fake() {
     },
     hunt: (onEvent) => {
       hunts.push(onEvent);
+      return Promise.resolve();
+    },
+    apps: (onEvent) => {
+      listings.push(onEvent);
       return Promise.resolve();
     },
     run: (token, paths, onEvent) => {
@@ -102,6 +107,7 @@ function fake() {
     shownAreas,
     scans,
     hunts,
+    listings,
     runs,
     revealed,
     rechecks,
@@ -126,7 +132,7 @@ const scanButton = () => screen.getByRole("button", { name: "Scan" });
 function found(driver: ReturnType<typeof fake>, findings = FINDINGS) {
   if (driver.scans.length === 0) fireEvent.click(scanButton());
   act(() =>
-    driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings, scanned: true, hunted: false }),
+    driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings, scanned: true, hunted: false, appsListed: false }),
   );
 }
 
@@ -141,12 +147,12 @@ const film = finding("trip.mov", `${HOME}/Movies/trip.mov`, {
 
 /** Ends the latest hunt with `findings`, as the app sends them: a scan's too, when one came first. */
 function hunted(driver: ReturnType<typeof fake>, findings: Finding[], scanned = false) {
-  act(() => driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true }));
+  act(() => driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true, appsListed: false }));
 }
 
 /** Ends a removal as the app does: what it did, and what is shown from then on. */
 function ended(run: { onEvent: (event: RunEvent) => void }, freedBytes: number, findings: Finding[]) {
-  act(() => run.onEvent({ kind: "done", removals: [], freedBytes, token: 9, findings, scanned: true, hunted: false }));
+  act(() => run.onEvent({ kind: "done", removals: [], freedBytes, token: 9, findings, scanned: true, hunted: false, appsListed: false }));
 }
 
 /** Opens a section of the window from its side. */
@@ -393,6 +399,7 @@ describe("the cleaner window", () => {
         findings: [npm, film],
         scanned: true,
         hunted: true,
+        appsListed: false,
       }),
     );
     expect(screen.getByText("2 items")).toBeTruthy();
@@ -410,6 +417,72 @@ describe("the cleaner window", () => {
     hunted(driver, []);
 
     expect(screen.getByText("No files over 50 MB were found in the folders looked in.")).toBeTruthy();
+  });
+
+  const docker = finding("Docker", "/Applications/Docker.app", {
+    group: "applications",
+    kind: "personal",
+    bytes: 2 * GB,
+    picked: false,
+    emptied: false,
+  });
+  const slack = finding("Slack", "/Applications/Slack.app", {
+    group: "applications",
+    kind: "personal",
+    picked: false,
+    emptied: false,
+    inUse: "Slack",
+  });
+
+  /** Ends the latest listing of apps with `findings`, as the app sends them. */
+  function listedApps(driver: ReturnType<typeof fake>, findings: Finding[]) {
+    act(() =>
+      driver.listings[driver.listings.length - 1]({
+        kind: "done",
+        token: 9,
+        home: HOME,
+        findings,
+        scanned: false,
+        hunted: false,
+        appsListed: true,
+      }),
+    );
+  }
+
+  it("lists the user's apps only when asked, from their own section, none chosen and a running one locked", () => {
+    const driver = fake();
+    show(driver.backend);
+
+    section("Apps");
+    expect(screen.getByText(/are left to Finder/)).toBeTruthy();
+    fireEvent.click(scanButton());
+    expect(driver.listings).toHaveLength(1);
+    expect(driver.scans).toHaveLength(0);
+    expect(screen.getByText("Looking through your apps…")).toBeTruthy();
+    act(() => driver.listings[0]({ kind: "measured", done: 3, total: 9, bytes: GB }));
+    expect(screen.getByText("Measured 3 of 9 apps")).toBeTruthy();
+
+    listedApps(driver, [docker, slack]);
+
+    const items = within(screen.getByRole("list", { name: "Your apps" }));
+    expect(items.getByRole("checkbox", { name: "Docker" })).toHaveProperty("checked", false);
+    expect(items.getByText("/Applications · goes to the Trash")).toBeTruthy();
+    expect(items.getByRole("checkbox", { name: "Slack" })).toHaveProperty("disabled", true);
+    // Nothing was scanned or hunted for: those sections wait.
+    expect(screen.getByRole("button", { name: "Developer" })).toHaveProperty("disabled", true);
+  });
+
+  it("says no apps of the user's were found only once it has looked", () => {
+    const driver = fake();
+    show(driver.backend);
+    section("Apps");
+    fireEvent.click(scanButton());
+
+    listedApps(driver, []);
+
+    expect(screen.getByText("No apps of yours were found in Applications.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Scan again" }));
+    expect(driver.listings).toHaveLength(2);
   });
 
   it("shows an item in Finder through the app, by its path", () => {
@@ -549,6 +622,7 @@ describe("the cleaner window", () => {
         findings: [tool, npm, pip, archive, trash],
         scanned: true,
         hunted: false,
+        appsListed: false,
       }),
     );
 

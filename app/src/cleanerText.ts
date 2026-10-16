@@ -16,6 +16,7 @@ export const NAMES: Record<CleanGroup, TextKey> = {
   images: "groupImages",
   documents: "groupDocuments",
   otherFiles: "groupOtherFiles",
+  applications: "groupApplications",
 };
 
 export const ABOUT: Record<CleanGroup, TextKey> = {
@@ -32,6 +33,7 @@ export const ABOUT: Record<CleanGroup, TextKey> = {
   images: "aboutImages",
   documents: "aboutDocuments",
   otherFiles: "aboutOtherFiles",
+  applications: "aboutApplications",
 };
 
 /** Each group's color, from the panel's project tints. */
@@ -49,13 +51,15 @@ export const TINTS: Record<CleanGroup, number> = {
   images: 4,
   documents: 3,
   otherFiles: 0,
+  applications: 1,
 };
 
 /** Where it is, then why it is or isn't chosen. */
 export function note(finding: Finding, home: string, now: number, i18n: Translator): string {
   if (finding.inUse !== null) return i18n.t("inUseBy", { who: finding.inUse });
-  // A large file's name is shown already; the folder it is in is what's left to say.
-  const where = shown(largeFile(finding) ? folderOf(finding.path) : (finding.project ?? finding.path), home);
+  // A large file's or an app's name is shown already; the folder it is in is what's left to say.
+  const named = largeFile(finding) || finding.group === "applications";
+  const where = shown(named ? folderOf(finding.path) : (finding.project ?? finding.path), home);
   const why =
     finding.touched !== null
       ? i18n.t(largeFile(finding) ? "changedAgo" : "lastTouched", { ago: i18n.ago(now - finding.touched * 1000) })

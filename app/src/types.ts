@@ -92,7 +92,8 @@ export type CleanGroup =
   | "audio"
   | "images"
   | "documents"
-  | "otherFiles";
+  | "otherFiles"
+  | "applications";
 
 /**
  * How a finding goes: deleted (its tool rebuilds it), to the Trash (it may
@@ -143,9 +144,10 @@ export type ScanEvent =
       home: string;
       /** What this scan or hunt found, beside what the last of the other found. */
       findings: Finding[];
-      /** Whether what tools and apps leave was scanned for, and whether the large files were hunted for, so none listed means none found. */
+      /** Whether what tools and apps leave was scanned for, whether the large files were hunted for, and whether the user's apps were listed, so none listed means none found. */
       scanned: boolean;
       hunted: boolean;
+      appsListed: boolean;
     };
 
 /** What is shown once a removal is over: what wasn't chosen, and what was left as it was. */
@@ -154,6 +156,7 @@ export interface Listed {
   findings: Finding[];
   scanned: boolean;
   hunted: boolean;
+  appsListed: boolean;
 }
 
 export type RunEvent =

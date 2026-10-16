@@ -15,16 +15,24 @@ export const GROUPS: CleanGroup[] = [
   "images",
   "documents",
   "otherFiles",
+  "applications",
 ];
 
 /** The window's sections past the overview, and the groups each reviews. */
-export type CleanModule = "developer" | "system" | "large";
+export type CleanModule = "developer" | "system" | "large" | "apps";
 
 export const MODULES: Record<CleanModule, CleanGroup[]> = {
   developer: ["projects", "packages", "xcode"],
   system: ["apps", "logs", "trash"],
   large: ["videos", "archives", "installers", "audio", "images", "documents", "otherFiles"],
+  apps: ["applications"],
 };
+
+/** What looks for findings: a scan for what tools and apps leave, a hunt for large files, or a listing of the user's apps. */
+export type Search = "scan" | "hunt" | "apps";
+
+/** The search each section shows what it found. */
+export const SEARCHES: Record<CleanModule, Search> = { developer: "scan", system: "scan", large: "hunt", apps: "apps" };
 
 /** How a group's items are listed. */
 export type Order = "size" | "name" | "age";
@@ -59,14 +67,18 @@ export const selectable = (finding: Finding) => finding.inUse === null;
 /** Whether a finding is one of the user's large files, which a hunt finds. */
 export const largeFile = (finding: Finding) => MODULES.large.includes(finding.group);
 
+/** The search that finds `finding`. */
+export const searchOf = (finding: Finding): Search =>
+  finding.group === "applications" ? "apps" : largeFile(finding) ? "hunt" : "scan";
+
 /**
  * What is chosen once a scan, or a hunt when `hunt`, ends with `findings`:
  * of what it looked for, what it picked; of the rest, what was chosen before.
  */
-export function rechosen(chosen: Set<string>, findings: Finding[], hunt: boolean): Set<string> {
+export function rechosen(chosen: Set<string>, findings: Finding[], search: Search): Set<string> {
   return new Set(
     findings
-      .filter((finding) => selectable(finding) && (largeFile(finding) === hunt ? finding.picked : chosen.has(finding.path)))
+      .filter((finding) => selectable(finding) && (searchOf(finding) === search ? finding.picked : chosen.has(finding.path)))
       .map((finding) => finding.path),
   );
 }

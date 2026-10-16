@@ -133,11 +133,26 @@ const MAP: Area = numbered(
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-/** What the pretend app shows: the last scan's and the last hunt's findings, less what it removed. */
+/** An app of the user's own at `path`. */
+function app(name: string, path: string, gib: number, inUse: string | null = null): Finding {
+  return { ...finding("applications", name, "", gib), path, kind: "personal", picked: false, emptied: false, inUse };
+}
+
+/** The user's own apps. */
+const APPS: Finding[] = [
+  app("Docker", "/Applications/Docker.app", 2.3),
+  app("Blender", `${HOME}/Applications/Blender.app`, 1.6),
+  app("Cursor", "/Applications/Cursor.app", 0.9),
+  app("Slack", "/Applications/Slack.app", 0.5, "Slack"),
+];
+
+/** What the pretend app shows: the last scan's, hunt's and listing's findings, less what it removed. */
 let scanned = false;
 let hunted = false;
+let appsListed = false;
 const removed = new Set<string>();
-const shown = () => [...(scanned ? FINDINGS : []), ...(hunted ? LARGE : [])].filter((each) => !removed.has(each.path));
+const shown = () =>
+  [...(scanned ? FINDINGS : []), ...(hunted ? LARGE : []), ...(appsListed ? APPS : [])].filter((each) => !removed.has(each.path));
 
 /** A backend that pretends: it measures for a few seconds and removes nothing. */
 export const demo: CleanerBackend = {
@@ -148,7 +163,7 @@ export const demo: CleanerBackend = {
       onEvent({ kind: "measured", done: index + 1, total: FINDINGS.length, bytes: each.bytes });
     }
     scanned = true;
-    onEvent({ kind: "done", token: 1, home: HOME, findings: shown(), scanned, hunted });
+    onEvent({ kind: "done", token: 1, home: HOME, findings: shown(), scanned, hunted, appsListed });
   },
   async hunt(onEvent: (event: ScanEvent) => void) {
     const folders = ["Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures", "code"];
@@ -158,7 +173,15 @@ export const demo: CleanerBackend = {
       onEvent({ kind: "measured", done: index + 1, total: folders.length, bytes });
     }
     hunted = true;
-    onEvent({ kind: "done", token: 2, home: HOME, findings: shown(), scanned, hunted });
+    onEvent({ kind: "done", token: 2, home: HOME, findings: shown(), scanned, hunted, appsListed });
+  },
+  async apps(onEvent: (event: ScanEvent) => void) {
+    for (const [index, app] of APPS.entries()) {
+      await wait(250);
+      onEvent({ kind: "measured", done: index + 1, total: APPS.length, bytes: app.bytes });
+    }
+    appsListed = true;
+    onEvent({ kind: "done", token: 4, home: HOME, findings: shown(), scanned, hunted, appsListed });
   },
   async run(_token: number, paths: string[], onEvent: (event: RunEvent) => void) {
     let freed = 0;
@@ -174,7 +197,7 @@ export const demo: CleanerBackend = {
         onEvent({ kind: "removed", path, outcome: going?.kind === "personal" ? "trashed" : "deleted" });
       }
     }
-    onEvent({ kind: "done", removals: [], freedBytes: freed, token: 3, findings: shown(), scanned, hunted });
+    onEvent({ kind: "done", removals: [], freedBytes: freed, token: 3, findings: shown(), scanned, hunted, appsListed });
   },
   stop: () => Promise.resolve(),
   disk: () => Promise.resolve({ total: 494 * GIB, free: 61 * GIB }),

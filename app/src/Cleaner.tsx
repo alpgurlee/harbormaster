@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { cleanDisk, cleanHunt, cleanMap, cleanRecheck, cleanReveal, cleanRevealArea, cleanRun, cleanScan, cleanStop } from "./api";
-import { MODULES, groupsOf, largeFile, plan, rechosen, stillChosen, type CleanModule, type Plan } from "./cleanup";
+import {
+  cleanApps,
+  cleanDisk,
+  cleanHunt,
+  cleanMap,
+  cleanRecheck,
+  cleanReveal,
+  cleanRevealArea,
+  cleanRun,
+  cleanScan,
+  cleanStop,
+} from "./api";
+import { MODULES, SEARCHES, groupsOf, plan, rechosen, stillChosen, type CleanModule, type Plan, type Search } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
-import { useI18n, type Translator } from "./i18n";
+import { useI18n, type TextKey, type Translator } from "./i18n";
 import { Review } from "./Review";
 import { keepFocusInside } from "./sheet";
 import { SpaceMap } from "./SpaceMap";
@@ -15,6 +26,7 @@ import sheet from "./Sheet.module.css";
 export interface CleanerBackend {
   scan: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   hunt: (onEvent: (event: ScanEvent) => void) => Promise<void>;
+  apps: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   run: (token: number, paths: string[], onEvent: (event: RunEvent) => void) => Promise<void>;
   stop: () => Promise<void>;
   disk: () => Promise<Disk>;
@@ -27,6 +39,7 @@ export interface CleanerBackend {
 const BACKEND: CleanerBackend = {
   scan: cleanScan,
   hunt: cleanHunt,
+  apps: cleanApps,
   run: cleanRun,
   stop: cleanStop,
   disk: cleanDisk,
@@ -39,15 +52,35 @@ const BACKEND: CleanerBackend = {
 /** Coming back to the window more often than this doesn't look at the list again. */
 const RECHECK_EVERY_MS = 3_000;
 
-const SECTIONS: CleanModule[] = ["developer", "system", "large"];
-const SECTION_NAMES = { developer: "moduleDeveloper", system: "moduleSystem", large: "moduleLarge" } as const;
+const SECTIONS: CleanModule[] = ["developer", "system", "large", "apps"];
+const SECTION_NAMES = {
+  developer: "moduleDeveloper",
+  system: "moduleSystem",
+  large: "moduleLarge",
+  apps: "moduleApps",
+} as const;
+
+/** What each search says before it starts, while it looks, and once it has measured some. */
+const HINTS: Record<Search, TextKey> = { scan: "scanHint", hunt: "huntHint", apps: "appsHint" };
+const LOOKING: Record<Search, TextKey> = { scan: "cleanLooking", hunt: "huntLooking", apps: "appsLooking" };
+const MEASURED: Record<Search, TextKey> = { scan: "cleanMeasured", hunt: "huntMeasured", apps: "appsMeasured" };
+/** What a section searched for on its own says when its search found nothing. */
+const NOTHING: Partial<Record<CleanModule, TextKey>> = { large: "noLargeFiles", apps: "noApps" };
 
 type View = "overview" | CleanModule | "map";
 
 type Step =
   | { kind: "ready" }
-  | { kind: "scanning"; hunt: boolean; done: number; total: number; found: number }
-  | { kind: "found"; token: number; home: string; findings: Finding[]; scanned: boolean; hunted: boolean }
+  | { kind: "scanning"; search: Search; done: number; total: number; found: number }
+  | {
+      kind: "found";
+      token: number;
+      home: string;
+      findings: Finding[];
+      scanned: boolean;
+      hunted: boolean;
+      appsListed: boolean;
+    }
   | { kind: "removing"; home: string; chosen: Finding[]; removals: Removal[] }
   | { kind: "cleaned"; home: string; chosen: Finding[]; cleaned: Cleaned; removals: Removal[]; next: Found }
   | {
@@ -101,13 +134,13 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   }, [backend]);
   useEffect(measureDisk, [measureDisk]);
 
-  // A scan looks for what tools and apps leave; a hunt, for the user's large files.
+  // A scan looks for what tools and apps leave; a hunt, for the user's large files; a listing, for their apps.
   const search = useCallback(
-    (hunt: boolean) => {
-      setStep({ kind: "scanning", hunt, done: 0, total: 0, found: 0 });
-      setView(hunt ? "large" : "overview");
+    (kind: Search) => {
+      setStep({ kind: "scanning", search: kind, done: 0, total: 0, found: 0 });
+      setView(kind === "hunt" ? "large" : kind === "apps" ? "apps" : "overview");
       setConfirming(false);
-      const look = hunt ? backend.hunt : backend.scan;
+      const look = { scan: backend.scan, hunt: backend.hunt, apps: backend.apps }[kind];
       look((event) => {
         if (event.kind === "measured") {
           setStep((current) =>
@@ -121,7 +154,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               : current,
           );
         } else {
-          setChosen((current) => rechosen(current, event.findings, hunt));
+          setChosen((current) => rechosen(current, event.findings, kind));
           const { kind: _, ...found } = event;
           setStep({ kind: "found", ...found });
         }
@@ -264,12 +297,23 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const sectionBytes = (section: CleanModule) =>
     list?.findings.filter((finding) => MODULES[section].includes(finding.group)).reduce((total, each) => total + each.bytes, 0) ?? 0;
   const title = i18n.t(view === "overview" ? "overview" : view === "map" ? "moduleMap" : SECTION_NAMES[view]);
-  // A section shows what was looked for: the scan's, or the hunt's for large files.
+  // A section shows what its search found: the scan's, the hunt's for large files, or the listed apps.
   const list = found ?? next;
-  const listed = (section: CleanModule) => list !== null && (section === "large" ? list.hunted : list.scanned);
-  // Each is started from where it shows, whether or not the other came first.
-  const huntFirst = view === "large" && (step.kind === "ready" || (found !== null && !found.hunted));
-  const scanFirst = view === "overview" && found !== null && !found.scanned;
+  const listed = (section: CleanModule) => list !== null && searched(list, SEARCHES[section]);
+  // Each is started from where it shows, whether or not another came first.
+  const first: Search | null =
+    view === "overview"
+      ? found !== null && !found.scanned
+        ? "scan"
+        : null
+      : view !== "map" && SEARCHES[view] !== "scan" && (step.kind === "ready" || (found !== null && !searched(found, SEARCHES[view])))
+        ? SEARCHES[view]
+        : null;
+  // A section searched for on its own says so when its search found nothing.
+  const nothing =
+    view !== "overview" && view !== "map" && found !== null && !found.findings.some((finding) => MODULES[view].includes(finding.group))
+      ? NOTHING[view]
+      : undefined;
 
   return (
     <div className={styles.window}>
@@ -289,7 +333,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             type="button"
             className={styles.section}
             aria-current={view === section ? "page" : undefined}
-            disabled={section !== "large" && !listed(section)}
+            disabled={SEARCHES[section] === "scan" && !listed(section)}
             onClick={() => {
               back();
               setView(section);
@@ -331,8 +375,13 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
               {i18n.t("stop")}
             </button>
-          ) : step.kind === "ready" || huntFirst || scanFirst ? null : (
-            <button type="button" className={styles.action} disabled={charting} onClick={() => search(view === "large")}>
+          ) : step.kind === "ready" || first !== null ? null : (
+            <button
+              type="button"
+              className={styles.action}
+              disabled={charting}
+              onClick={() => search(view === "overview" ? "scan" : SEARCHES[view])}
+            >
               {i18n.t("cleanScanAgain")}
             </button>
           )}
@@ -348,16 +397,16 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onMap: chart,
               onReveal: (token, id) => backend.revealArea(token, id),
             })
-          ) : huntFirst || scanFirst ? (
+          ) : first !== null ? (
             <Start
               disk={disk}
-              hint={i18n.t(charting ? "waitForMap" : huntFirst ? "huntHint" : "scanHint")}
+              hint={i18n.t(charting ? "waitForMap" : HINTS[first])}
               start={i18n.t("scan")}
               disabled={charting}
-              onStart={() => search(huntFirst)}
+              onStart={() => search(first)}
             />
-          ) : view === "large" && found !== null && !found.findings.some(largeFile) ? (
-            <p className={styles.empty}>{i18n.t("noLargeFiles")}</p>
+          ) : nothing !== undefined ? (
+            <p className={styles.empty}>{i18n.t(nothing)}</p>
           ) : view !== "overview" && found !== null ? (
             <Review
               key={view}
@@ -369,7 +418,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
             />
           ) : (
-            overview(step, { disk, chosen, charting, i18n, onScan: () => search(false), onReview: setView, onBack: back })
+            overview(step, { disk, chosen, charting, i18n, onScan: () => search("scan"), onReview: setView, onBack: back })
           )}
         </div>
         {view !== "map" && found !== null && found.findings.length > 0 ? (
@@ -389,6 +438,11 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       ) : null}
     </div>
   );
+}
+
+/** Whether `list` shows what `search` found, so that none shown means none found. */
+function searched(list: { scanned: boolean; hunted: boolean; appsListed: boolean }, search: Search): boolean {
+  return { scan: list.scanned, hunt: list.hunted, apps: list.appsListed }[search];
 }
 
 interface Overview {
@@ -422,8 +476,8 @@ function overview(step: Step, { disk, chosen, charting, i18n, onScan, onReview, 
           </Ring>
           <p className={styles.phase}>
             {step.total === 0
-              ? i18n.t(step.hunt ? "huntLooking" : "cleanLooking")
-              : i18n.t(step.hunt ? "huntMeasured" : "cleanMeasured", { done: step.done, total: step.total })}
+              ? i18n.t(LOOKING[step.search])
+              : i18n.t(MEASURED[step.search], { done: step.done, total: step.total })}
           </p>
         </div>
       );

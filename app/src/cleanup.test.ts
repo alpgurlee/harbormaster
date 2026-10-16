@@ -38,10 +38,18 @@ describe("the cleaner's choices", () => {
     const song = finding("/u/Music/b.wav", { group: "audio", kind: "personal", picked: false, emptied: false });
     const before = new Set([pip.path, film.path]);
 
-    expect([...rechosen(before, [npm, pip, held, film, song], false)]).toEqual([npm.path, film.path]);
-    expect([...rechosen(before, [npm, pip, held, film, song], true)]).toEqual([pip.path]);
+    expect([...rechosen(before, [npm, pip, held, film, song], "scan")]).toEqual([npm.path, film.path]);
+    expect([...rechosen(before, [npm, pip, held, film, song], "hunt")]).toEqual([pip.path]);
     // What is in use is never chosen, whoever picked it.
-    expect([...rechosen(new Set([held.path]), [held], false)]).toEqual([]);
+    expect([...rechosen(new Set([held.path]), [held], "scan")]).toEqual([]);
+  });
+
+  it("takes the apps' picks, none, and keeps what the scan and the hunt chose", () => {
+    const film = finding("/u/Movies/a.mov", { group: "videos", kind: "personal", picked: false, emptied: false });
+    const app = finding("/Applications/Docker.app", { group: "applications", kind: "personal", picked: false, emptied: false });
+
+    expect([...rechosen(new Set([pip.path, film.path, app.path]), [npm, pip, film, app], "apps")]).toEqual([pip.path, film.path]);
+    expect([...rechosen(new Set([app.path]), [npm, app], "scan")]).toEqual([npm.path, app.path]);
   });
 
   it("groups findings in the cleaner's order and says how much of each is chosen", () => {

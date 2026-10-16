@@ -204,6 +204,13 @@ export interface Messages {
   mapTrail: string;
   waitForMap: string;
   waitForCleaning: string;
+  moduleApps: string;
+  groupApplications: string;
+  aboutApplications: string;
+  appsHint: string;
+  appsLooking: string;
+  appsMeasured: string;
+  noApps: string;
   mapChanged: string;
   shortDeep: string;
   shortChanged: string;
@@ -416,6 +423,14 @@ export const en: Messages = {
   mapTrail: "Where you are",
   waitForMap: "The space map is being made. A scan can start once it is done or stopped.",
   waitForCleaning: "A scan or clean-up is running. The map can start once it is done.",
+  moduleApps: "Apps",
+  groupApplications: "Your apps",
+  aboutApplications: "Apps that are yours, with the room each takes. What you choose goes to the Trash; its settings and data stay.",
+  appsHint:
+    "Lists the apps in Applications that are yours, with the room each takes. None is chosen for you, and what you choose goes to the Trash. Apps that aren't yours, such as those from the App Store, are left to Finder.",
+  appsLooking: "Looking through your apps…",
+  appsMeasured: "Measured {done} of {total} apps",
+  noApps: "No apps of yours were found in Applications.",
   mapChanged: "It has changed since the map was made. Map again to see it as it is.",
   shortDeep: "Goes deeper than the map looks",
   shortChanged: "Something in it changed while it was mapped",
@@ -628,6 +643,14 @@ export const tr: Messages = {
   mapTrail: "Bulunduğun yer",
   waitForMap: "Alan haritası çıkarılıyor. Tarama, harita bitince ya da durdurulunca başlayabilir.",
   waitForCleaning: "Bir tarama ya da temizlik sürüyor. Harita, o bitince başlayabilir.",
+  moduleApps: "Uygulamalar",
+  groupApplications: "Uygulamaların",
+  aboutApplications: "Sana ait uygulamalar ve kapladıkları alan. Seçtiklerin Çöp Sepeti'ne gider; ayarları ve verileri yerinde kalır.",
+  appsHint:
+    "Uygulamalar klasöründeki sana ait uygulamaları kapladıkları alanla listeler. Hiçbirini senin yerine seçmez; seçtiklerin Çöp Sepeti'ne gider. App Store'dan gelenler gibi sana ait olmayan uygulamalar Finder'a bırakılır.",
+  appsLooking: "Uygulamaların inceleniyor…",
+  appsMeasured: "{total} uygulamadan {done} tanesi ölçüldü",
+  noApps: "Uygulamalar klasöründe sana ait bir uygulama bulunamadı.",
   mapChanged: "Harita çıkarıldıktan sonra değişmiş. Güncel halini görmek için yeniden haritala.",
   shortDeep: "Haritanın baktığından daha derine iniyor",
   shortChanged: "Haritalanırken içinde bir şey değişti",
