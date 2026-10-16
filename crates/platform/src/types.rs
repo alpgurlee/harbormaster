@@ -23,7 +23,7 @@ pub struct ProcessKey {
 /// and the files it has open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Whereabouts {
-    pub pid: Pid,
+    pub key: ProcessKey,
     pub name: String,
     pub paths: Vec<std::path::PathBuf>,
 }

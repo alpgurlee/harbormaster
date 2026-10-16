@@ -30,15 +30,47 @@ pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
     let own = std::process::id();
     Ok(harbormaster_platform::whereabouts()?
         .into_iter()
-        .filter(|process| process.pid.0 != own)
+        .filter(|process| process.key.pid.0 != own)
         .flat_map(|process| {
-            let name = process.name;
+            // Only a JVM's arguments are read: `java` alone says little.
+            let args = (process.name == "java")
+                .then(|| harbormaster_platform::details(process.key).args)
+                .and_then(|args| args.known().cloned());
+            let name = holder(&process.name, args.as_deref());
             process
                 .paths
                 .into_iter()
                 .map(move |path| (path, name.clone()))
         })
         .collect())
+}
+
+/// The daemons a JVM may run, by the class it starts from, and what they are called.
+const DAEMONS: [(&str, &str); 2] = [
+    (
+        "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+        "Gradle daemon",
+    ),
+    (
+        "org.jetbrains.kotlin.daemon.KotlinCompileDaemon",
+        "Kotlin daemon",
+    ),
+];
+
+/// What a process holding a folder is called: a JVM by the daemon it runs.
+fn holder(name: &str, args: Option<&[String]>) -> String {
+    let daemon = || {
+        args?.iter().find_map(|arg| {
+            DAEMONS
+                .iter()
+                .find(|(class, _)| arg == class)
+                .map(|(_, daemon)| *daemon)
+        })
+    };
+    match name {
+        "java" => daemon().unwrap_or(name).to_string(),
+        _ => name.to_string(),
+    }
 }
 
 /// Where each of `keys` stands right now, read just before a round of signals.
@@ -112,7 +144,29 @@ fn lineage_from(pid: u32, parents: &HashMap<u32, u32>) -> Option<Vec<u32>> {
 mod tests {
     use std::collections::HashMap;
 
-    use super::lineage_from;
+    use super::{holder, lineage_from};
+
+    #[test]
+    fn names_a_java_process_by_the_daemon_it_runs() {
+        let args = |args: &[&str]| args.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let gradle = args(&[
+            "/usr/bin/java",
+            "-Xmx512m",
+            "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+            "8.14",
+        ]);
+        let kotlin = args(&["java", "org.jetbrains.kotlin.daemon.KotlinCompileDaemon"]);
+
+        assert_eq!(holder("java", Some(&gradle)), "Gradle daemon");
+        assert_eq!(holder("java", Some(&kotlin)), "Kotlin daemon");
+        assert_eq!(
+            holder("java", Some(&args(&["java", "-jar", "app.jar"]))),
+            "java"
+        );
+        assert_eq!(holder("java", None), "java");
+        // Only a JVM is named by what it runs.
+        assert_eq!(holder("node", Some(&gradle)), "node");
+    }
 
     #[test]
     fn traces_up_to_launchd_or_not_at_all() {

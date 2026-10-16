@@ -12,7 +12,7 @@ fn finds_where_this_process_is() {
 
     let mine = found
         .iter()
-        .find(|each| each.pid.0 == own)
+        .find(|each| each.key.pid.0 == own)
         .expect("this process should be listed");
     assert!(mine.paths.contains(&held), "{:?}", mine.paths);
     assert!(mine.paths.contains(&here), "{:?}", mine.paths);

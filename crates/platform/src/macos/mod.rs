@@ -77,7 +77,7 @@ pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
             continue;
         }
         found.push(Whereabouts {
-            pid: key.pid,
+            key,
             name: process::name_of(&info),
             paths,
         });
