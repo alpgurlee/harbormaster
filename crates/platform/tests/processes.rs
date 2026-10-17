@@ -1,4 +1,6 @@
+use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use harbormaster_platform::{
     Field, Owner, Pid, ProcessEntry, details, executable, processes, sets_variable, tracks_exec,
@@ -117,13 +119,20 @@ fn says_gone_for_the_executable_of_a_process_that_exited() {
 
 #[test]
 fn gives_a_process_that_execs_a_new_identity() {
+    // The shell execs only once told to, after its first identity is read.
     let mut child = Command::new("/bin/sh")
-        .args(["-c", "/bin/sleep 0.3; exec /bin/sleep 30"])
+        .args(["-c", "read go; exec /bin/sleep 30"])
+        .stdin(Stdio::piped())
         .spawn()
         .unwrap();
     let before = find(child.id()).key;
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    let after = find(child.id()).key;
+    child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut after = find(child.id()).key;
+    while after == before && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+        after = find(child.id()).key;
+    }
     let stale = details(before);
     child.kill().unwrap();
     child.wait().unwrap();
