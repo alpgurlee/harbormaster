@@ -53,17 +53,38 @@ fn reports_an_exited_process_as_gone() {
     assert_eq!(signal(key, Signal::Terminate), SignalOutcome::Gone);
 }
 
+/// Waits until `child` has exited but isn't reaped yet, a zombie the kernel
+/// keeps with the same identity.
+fn zombie(child: &Child) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        // SAFETY: an all-zero siginfo_t is valid, and waitid only fills it.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` lives across the call; WNOWAIT leaves the child to `wait`.
+        let status = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(status, 0, "{}", std::io::Error::last_os_error());
+        if u32::try_from(info.si_pid).is_ok_and(|pid| pid == child.id()) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "the child should have exited");
+        sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn does_not_count_a_zombie_as_running() {
     let (mut child, key) = sleeper();
     assert_eq!(presence(key), Presence::Running);
     child.kill().unwrap();
+    zombie(&child);
 
-    // Not reaped yet, so the kernel keeps a zombie with the same identity.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while presence(key) == Presence::Running && Instant::now() < deadline {
-        sleep(Duration::from_millis(10));
-    }
     let after = presence(key);
     child.wait().unwrap();
 

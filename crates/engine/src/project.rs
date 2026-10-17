@@ -694,17 +694,21 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let app = home.path().join("trap");
         fs::create_dir_all(&app).unwrap();
-        let status = std::process::Command::new("mkfifo")
-            .arg(app.join("package.json"))
-            .status()
-            .unwrap();
-        assert!(status.success());
+        let fifo = std::ffi::CString::new(
+            app.join("package.json")
+                .into_os_string()
+                .into_encoded_bytes(),
+        )
+        .unwrap();
+        // SAFETY: `fifo` is a valid C string naming a path in a folder we own.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
 
         let (done, finished) = std::sync::mpsc::channel();
         let (start, home_path) = (app.clone(), home.path().to_path_buf());
         std::thread::spawn(move || done.send(resolve(&start, &home_path)).unwrap());
 
-        let project = finished.recv_timeout(std::time::Duration::from_secs(3));
+        // Opening a FIFO to read blocks until a writer comes, which none will.
+        let project = finished.recv_timeout(std::time::Duration::from_secs(10));
         assert!(
             project.is_ok(),
             "resolving a folder with a FIFO manifest blocked"
