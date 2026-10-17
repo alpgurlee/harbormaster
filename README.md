@@ -74,7 +74,10 @@ What gets chosen, and what happens to it:
   Local History, large files and apps. Emptying the Trash deletes what is in it for good, and is never
   chosen for you either.
 - An item that one of your processes is found using is locked, with that process named. Use is checked
-  again right before anything is removed.
+  again right before anything is removed. When nothing but Gradle or Kotlin daemons uses it and no dev
+  server runs in its project, it gets a Stop button, unless the daemons are processes a server's stop
+  would refuse. You see each daemon with its PID and command first, then they are asked to exit as
+  `kill` asks, and never forced.
 - It doesn't follow symbolic links, except that a project folder from the list above which is itself a
   link is looked in when it leads somewhere inside your home folder. Before removing an item it checks
   that it is still the folder the scan found, and skips it if it was moved or replaced.
