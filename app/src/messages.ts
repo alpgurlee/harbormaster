@@ -48,6 +48,11 @@ export interface Messages {
   memoryWindows: string;
   processes: string;
   stopEllipsis: string;
+  stopNamed: string;
+  daemonWarning: string;
+  daemonHow: string;
+  daemonGone: string;
+  daemonChanged: string;
   revealFolder: string;
   gone: string;
   wontStop: string;
@@ -294,6 +299,11 @@ export const en: Messages = {
   memoryWindows: "as Task Manager counts it",
   processes: "Processes",
   stopEllipsis: "Stop…",
+  stopNamed: "Stop {name}",
+  daemonWarning: "A build it is running now is cut short. Your next build starts a new one.",
+  daemonHow: "It is asked to exit, as kill would, and never forced. Then the list looks again.",
+  daemonGone: "Nothing to stop: no daemon alone keeps it in use any more.",
+  daemonChanged: "What keeps it in use changed since you looked. Look again before stopping it.",
   revealFolder: "Reveal folder",
   gone: "This server isn't running anymore.",
   wontStop: "Harbormaster won't stop this: {reason}.",
@@ -547,6 +557,11 @@ export const tr: Messages = {
   memoryWindows: "Görev Yöneticisi'ndeki gibi",
   processes: "Süreçler",
   stopEllipsis: "Durdur…",
+  stopNamed: "Durdur: {name}",
+  daemonWarning: "Şu an çalıştırdığı bir derleme yarıda kesilir. Sonraki derlemen yenisini başlatır.",
+  daemonHow: "kill gibi kapanması istenir, asla zorlanmaz. Ardından liste yeniden bakar.",
+  daemonGone: "Durdurulacak bir şey yok: onu artık tek başına bir arka plan süreci kullanmıyor.",
+  daemonChanged: "Baktığından beri onu kullanan değişti. Durdurmadan önce yeniden bak.",
   revealFolder: "Klasörü göster",
   gone: "Bu sunucu artık çalışmıyor.",
   wontStop: "Harbormaster bunu durdurmaz: {reason}.",

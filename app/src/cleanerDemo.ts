@@ -42,7 +42,7 @@ const FINDINGS: Finding[] = [
   output("landing", "node_modules", 0.6, 9),
   finding("packages", "npm", ".npm/_cacache", 1.7),
   finding("packages", "pnpm", "Library/pnpm/store", 1.2),
-  finding("packages", "Gradle", ".gradle/caches", 4.5, { picked: false, inUse: "java" }),
+  finding("packages", "Gradle", ".gradle/caches", 4.5, { picked: false, inUse: "Gradle daemon" }),
   finding("packages", "Homebrew", "Library/Caches/Homebrew", 0.55),
   finding("packages", "pip", "Library/Caches/pip", 0.28),
   finding("xcode", "DerivedData", "Library/Developer/Xcode/DerivedData", 2.1),
@@ -156,6 +156,22 @@ const shown = () =>
 
 /** A backend that pretends: it measures for a few seconds and removes nothing. */
 export const demo: CleanerBackend = {
+  daemons: () => Promise.resolve(shown().filter((each) => each.inUse === "Gradle daemon").map((each) => each.path)),
+  daemonPreview: () =>
+    Promise.resolve({
+      kind: "ready",
+      approval: 1,
+      stops: [{ pid: 4242, name: "Gradle daemon", command: "java -Xmx512m -cp gradle-daemon-main-8.14.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.14" }],
+    }),
+  async daemonStop() {
+    await wait(600);
+    // The daemon gone, its cache is free, and chosen as caches are.
+    for (const each of FINDINGS.filter((each) => each.inUse === "Gradle daemon")) {
+      each.inUse = null;
+      each.picked = true;
+    }
+    return { outcomes: [{ pid: 4242, name: "Gradle daemon", outcome: "stopped" }], stillRunning: false };
+  },
   async scan(onEvent: (event: ScanEvent) => void) {
     await wait(700);
     for (const [index, each] of FINDINGS.entries()) {

@@ -20,14 +20,17 @@ export interface ReviewProps {
   chosen: Set<string>;
   /** How long a project had to sit for the last scan to choose its build outputs; none before a scan. */
   idleDays: number | null;
+  /** The paths of the items in use that only known dev daemons keep so, which can be stopped. */
+  stoppable: ReadonlySet<string>;
   /** Milliseconds since the Unix epoch, for how long projects have sat. */
   now: number;
   onChoose: (next: Set<string>) => void;
   onReveal: (finding: Finding) => void;
+  onStopDaemons: (finding: Finding) => void;
 }
 
 /** A section's groups on the left, the one looked at on the right, item by item. */
-export function Review({ findings, home, chosen, idleDays, now, onChoose, onReveal }: ReviewProps) {
+export function Review({ findings, home, chosen, idleDays, now, stoppable, onChoose, onReveal, onStopDaemons }: ReviewProps) {
   const i18n = useI18n();
   const groups = groupsOf(findings, chosen);
   const [current, setCurrent] = useState<CleanGroup | null>(null);
@@ -120,6 +123,16 @@ export function Review({ findings, home, chosen, idleDays, now, onChoose, onReve
                   <span className={styles.itemName}>{finding.name}</span>
                   <span className={styles.itemNote}>{note(finding, home, now, i18n)}</span>
                 </span>
+                {finding.inUse !== null && stoppable.has(finding.path) ? (
+                  <button
+                    type="button"
+                    className={styles.stopDaemons}
+                    aria-label={i18n.t("stopNamed", { name: finding.inUse })}
+                    onClick={() => onStopDaemons(finding)}
+                  >
+                    {i18n.t("stopEllipsis")}
+                  </button>
+                ) : null}
                 <span className={styles.itemSize}>{i18n.bytes(finding.bytes)}</span>
                 <button
                   type="button"

@@ -27,6 +27,11 @@ export type QuitPreview =
   | { kind: "programs"; token: number; quits: { pid: number; name: string; command: string | null }[]; staysOpen: Holder[] }
   | { kind: "refused"; reason: Reason };
 
+/** What stopping the dev daemons that keep a listed item in use would do. */
+export type DaemonPreview =
+  | { kind: "ready"; approval: number; stops: { pid: number; name: string; command: string | null }[] }
+  | { kind: "refused"; reason: Reason };
+
 export interface Stopped {
   outcomes: { pid: number; name: string; outcome: Outcome }[];
   stillRunning: boolean;
@@ -106,3 +111,7 @@ export const cleanDisk = () => invoke<Disk>("clean_disk");
 export const cleanReveal = (path: string) => invoke<void>("clean_reveal", { path });
 /** Shows the place numbered `id` of the map under `token` in Finder, if it is still as mapped. */
 export const cleanRevealArea = (token: number, id: number) => invoke<void>("clean_reveal_area", { token, id });
+/** The items listed under `token` that only known dev daemons keep in use. */
+export const cleanDaemons = (token: number) => invoke<string[]>("clean_daemons", { token });
+export const cleanDaemonPreview = (token: number, path: string) => invoke<DaemonPreview>("clean_daemon_preview", { token, path });
+export const cleanDaemonStop = (approval: number) => invoke<Stopped>("clean_daemon_stop", { approval });

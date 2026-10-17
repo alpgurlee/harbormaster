@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 
 import {
   cleanApps,
+  cleanDaemonPreview,
+  cleanDaemonStop,
+  cleanDaemons,
   cleanDisk,
   cleanHunt,
   cleanMap,
@@ -14,6 +17,7 @@ import {
 } from "./api";
 import { MODULES, SEARCHES, groupsOf, plan, rechosen, stillChosen, type CleanModule, type Plan, type Search } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
+import { DaemonSheet, type DaemonStopper } from "./DaemonSheet";
 import { useI18n, type TextKey, type Translator } from "./i18n";
 import { Review } from "./Review";
 import { keepFocusInside } from "./sheet";
@@ -23,7 +27,7 @@ import styles from "./Cleaner.module.css";
 import sheet from "./Sheet.module.css";
 
 /** The backend's cleaner calls, which tests hand in themselves. */
-export interface CleanerBackend {
+export interface CleanerBackend extends DaemonStopper {
   scan: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   hunt: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   apps: (onEvent: (event: ScanEvent) => void) => Promise<void>;
@@ -34,6 +38,8 @@ export interface CleanerBackend {
   recheck: (token: number) => Promise<Finding[]>;
   map: (others: boolean, onEvent: (event: MapEvent) => void) => Promise<void>;
   revealArea: (token: number, id: number) => Promise<void>;
+  /** Of the items listed under `token`, those only known dev daemons keep in use. */
+  daemons: (token: number) => Promise<string[]>;
 }
 
 const BACKEND: CleanerBackend = {
@@ -47,10 +53,21 @@ const BACKEND: CleanerBackend = {
   recheck: cleanRecheck,
   map: cleanMap,
   revealArea: cleanRevealArea,
+  daemons: cleanDaemons,
+  daemonPreview: cleanDaemonPreview,
+  daemonStop: cleanDaemonStop,
 };
 
 /** Coming back to the window more often than this doesn't look at the list again. */
 const RECHECK_EVERY_MS = 3_000;
+
+/** What the app said can be stopped, about the list it was asked for. */
+interface Told {
+  listed: Finding[];
+  paths: ReadonlySet<string>;
+}
+
+const NONE: ReadonlySet<string> = new Set();
 
 const SECTIONS: CleanModule[] = ["developer", "system", "large", "apps"];
 const SECTION_NAMES = {
@@ -171,6 +188,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   // Coming back to the window, the list is looked at again: what was removed
   // meanwhile drops out, and what is in use is read anew.
   const token = step.kind === "found" ? step.token : null;
+  // Looks at the list again at once, as after stopping what kept an item in use.
+  const lookAgain = useRef(() => {});
   useEffect(() => {
     if (token === null) return;
     let live = true;
@@ -209,6 +228,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
           }
         });
     };
+    lookAgain.current = recheck;
     window.addEventListener("focus", recheck);
     return () => {
       live = false;
@@ -216,6 +236,26 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       window.removeEventListener("focus", recheck);
     };
   }, [backend, token]);
+
+  // Which items in use only known dev daemons keep so, which can be stopped from
+  // here. Each answer is about the list it was asked for; none yet offers no stop.
+  const [told, setTold] = useState<Told | null>(null);
+  const [stopping, setStopping] = useState<Finding | null>(null);
+  const listedNow = step.kind === "found" ? step.findings : null;
+  useEffect(() => {
+    if (token === null || listedNow === null || !listedNow.some((finding) => finding.inUse !== null)) return;
+    let live = true;
+    backend
+      .daemons(token)
+      .then((paths) => {
+        if (live) setTold({ listed: listedNow, paths: new Set(paths) });
+      })
+      .catch(console.error);
+    return () => {
+      live = false;
+    };
+  }, [backend, token, listedNow]);
+  const stoppable = told !== null && told.listed === listedNow ? told.paths : NONE;
 
   const chart = (withOthers: boolean) => {
     setMapping({ kind: "mapping", bytes: 0, items: 0, folder: "" });
@@ -424,8 +464,10 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               chosen={chosen}
               idleDays={idleDays}
               now={now}
+              stoppable={stoppable}
               onChoose={setChosen}
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}
+              onStopDaemons={setStopping}
             />
           ) : (
             overview(step, { disk, chosen, charting, i18n, onScan: () => search("scan"), onReview: setView, onBack: back })
@@ -445,6 +487,18 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       </div>
       {confirming && found !== null ? (
         <Confirm plan={plan(found.findings, chosen)} onCancel={() => setConfirming(false)} onConfirm={() => run(found)} />
+      ) : null}
+      {stopping !== null && token !== null ? (
+        <DaemonSheet
+          token={token}
+          finding={stopping}
+          stopper={backend}
+          onClose={() => setStopping(null)}
+          onDone={() => {
+            setStopping(null);
+            lookAgain.current();
+          }}
+        />
       ) : null}
     </div>
   );

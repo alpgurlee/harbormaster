@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Cleaner, type CleanerBackend } from "./Cleaner";
@@ -65,6 +65,9 @@ function fake() {
   const rechecks: { token: number; answer: (findings: Finding[]) => void }[] = [];
   const maps: { others: boolean; onEvent: (event: MapEvent) => void }[] = [];
   const shownAreas: { token: number; id: number }[] = [];
+  let stoppable: () => Promise<string[]> = () => Promise.resolve([]);
+  const daemonPreviews: { token: number; path: string }[] = [];
+  const daemonStops: number[] = [];
   const backend: CleanerBackend = {
     scan: (onEvent) => {
       scans.push(onEvent);
@@ -100,9 +103,34 @@ function fake() {
       shownAreas.push({ token, id });
       return Promise.resolve();
     },
+    daemons: () => stoppable(),
+    daemonPreview: (token, path) => {
+      daemonPreviews.push({ token, path });
+      return Promise.resolve({
+        kind: "ready",
+        approval: 31,
+        stops: [{ pid: 4242, name: "Gradle daemon", command: "java -Xmx512m org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.14" }],
+      });
+    },
+    daemonStop: (approval) => {
+      daemonStops.push(approval);
+      return Promise.resolve({ outcomes: [{ pid: 4242, name: "Gradle daemon", outcome: "stopped" }], stillRunning: false });
+    },
   };
   return {
     backend,
+    daemonPreviews,
+    daemonStops,
+    stoppable: (paths: string[]) => {
+      stoppable = () => Promise.resolve(paths);
+    },
+    /** The window's next asks for what can be stopped never end, or fail. */
+    stoppableLater: () => {
+      stoppable = () => new Promise(() => {});
+    },
+    stoppableFails: () => {
+      stoppable = () => Promise.reject(new Error("the process table couldn't be read"));
+    },
     maps,
     shownAreas,
     scans,
@@ -172,6 +200,83 @@ const section = (name: string) => fireEvent.click(screen.getByRole("button", { n
 const hero = () => screen.getByTestId("hero").textContent;
 
 describe("the cleaner window", () => {
+  const build = finding("android · build", `${HOME}/code/android/build`, {
+    group: "projects",
+    picked: false,
+    inUse: "Gradle daemon",
+    emptied: false,
+    project: `${HOME}/code/android`,
+  });
+
+  it("stops the Gradle daemon that alone keeps a build output in use, then looks at the list again", async () => {
+    const driver = fake();
+    driver.stoppable([build.path]);
+    show(driver.backend);
+    found(driver, [build, tool]);
+    section("Developer");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stop Gradle daemon" }));
+    const sheet = within(await screen.findByRole("dialog", { name: "Stop Gradle daemon?" }));
+    expect(sheet.getByText("PID 4242")).toBeTruthy();
+    fireEvent.click(sheet.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(driver.daemonPreviews).toEqual([{ token: 7, path: build.path }]);
+    expect(driver.daemonStops).toEqual([31]);
+    expect(driver.rechecks.map((recheck) => recheck.token)).toEqual([7]);
+  });
+
+  it("offers no stop for what a dev server keeps in use", async () => {
+    const driver = fake();
+    driver.stoppable([build.path]);
+    show(driver.backend);
+    found(driver, [build, tool]);
+    section("Developer");
+
+    await screen.findByRole("button", { name: "Stop Gradle daemon" });
+
+    expect(screen.queryByRole("button", { name: "Stop localhost:3000" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Stop / })).toHaveLength(1);
+  });
+
+  it("offers no stop it was told of for an older list, as a dev server keeps the item in use now", async () => {
+    const driver = fake();
+    driver.stoppable([build.path]);
+    show(driver.backend);
+    found(driver, [build, tool]);
+    section("Developer");
+    await screen.findByRole("button", { name: "Stop Gradle daemon" });
+
+    driver.stoppableLater();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => driver.rechecks[0].answer([{ ...build, inUse: "localhost:8080" }, tool]));
+
+    expect(screen.getByText("In use by localhost:8080")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Stop / })).toBeNull();
+  });
+
+  it("offers no stop when it can't tell what can be stopped now", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const driver = fake();
+    driver.stoppable([build.path]);
+    show(driver.backend);
+    found(driver, [build, tool]);
+    section("Developer");
+    await screen.findByRole("button", { name: "Stop Gradle daemon" });
+
+    driver.stoppableFails();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => driver.rechecks[0].answer([{ ...build }, tool]));
+
+    await waitFor(() => expect(error).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /^Stop / })).toBeNull();
+    error.mockRestore();
+  });
+
   it("says how long a project had sat for the last scan to choose its build outputs", () => {
     const driver = fake();
     show(driver.backend);
