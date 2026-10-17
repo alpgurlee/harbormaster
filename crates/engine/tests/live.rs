@@ -60,7 +60,7 @@ fn tells_how_much_memory_each_app_uses() {
 #[test]
 fn shows_processes_as_a_stop_would_and_leaves_out_the_exited() {
     let own = std::process::id();
-    let mut exited = std::process::Command::new("sleep")
+    let mut exited = std::process::Command::new("/bin/sleep")
         .arg("30")
         .spawn()
         .unwrap();
@@ -130,7 +130,7 @@ fn fake_gradle_daemon(folder: &std::path::Path, options: Option<&str>) -> std::p
     let source = folder.join("main.c");
     std::fs::write(
         &source,
-        "#include <unistd.h>\nint main(void){sleep(30);return 0;}\n",
+        "#include <unistd.h>\nint main(void){char c;while(read(0,&c,1)==1)write(1,&c,1);return 0;}\n",
     )
     .expect("the program's source should be written");
     let java = folder.join("java");
@@ -155,6 +155,7 @@ fn fake_gradle_daemon(folder: &std::path::Path, options: Option<&str>) -> std::p
             "8.14",
         ])
         .current_dir(folder)
+        .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("the program should start")
 }

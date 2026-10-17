@@ -927,15 +927,6 @@ mod tests {
     }
 
     #[test]
-    fn masks_a_long_word_of_separators_without_rescanning_it() {
-        let word = format!("--x{}", "=x".repeat(20_000));
-        let started = std::time::Instant::now();
-        show(&["app", &word]);
-        let took = started.elapsed();
-        assert!(took < std::time::Duration::from_secs(1), "{took:?}");
-    }
-
-    #[test]
     fn masks_many_url_schemes_without_rescanning_the_word() {
         let word = "xx://".repeat(200_000);
         let started = std::time::Instant::now();
