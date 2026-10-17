@@ -1,5 +1,8 @@
+use std::io::{Read, Write};
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Child, Command};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -7,11 +10,49 @@ use harbormaster_platform::{
     Presence, ProcessKey, Signal, SignalOutcome, StartTime, presence, processes, signal,
 };
 
-fn sleeper() -> (Child, ProcessKey) {
-    let child = Command::new("/bin/sleep")
-        .arg("30")
+/// A program of our own that echoes its input until it closes, so a test
+/// can see it still answers.
+fn echo() -> &'static Path {
+    static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        let folder = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        let source = folder.join("echo.c");
+        std::fs::write(
+            &source,
+            "#include <unistd.h>\nint main(void){char c;while(read(0,&c,1)==1)write(1,&c,1);return 0;}\n",
+        )
+        .expect("the program's source should be written");
+        let program = folder.join("echo");
+        let built = Command::new("cc")
+            .arg("-o")
+            .arg(&program)
+            .arg(&source)
+            .status()
+            .expect("cc should run");
+        assert!(built.success());
+        program
+    })
+}
+
+/// Whether `child` still answers: no signal that ends it is waiting for it.
+fn answers(child: &mut Child) -> bool {
+    let mut echo = [0];
+    child
+        .stdin
+        .as_mut()
+        .is_some_and(|stdin| stdin.write_all(b"?").is_ok())
+        && child
+            .stdout
+            .as_mut()
+            .is_some_and(|stdout| stdout.read_exact(&mut echo).is_ok())
+}
+
+fn waiter() -> (Child, ProcessKey) {
+    let child = Command::new(echo())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .spawn()
-        .expect("sleep should start");
+        .expect("the program should start");
     let key = processes()
         .expect("reading the process table should succeed")
         .into_iter()
@@ -23,7 +64,7 @@ fn sleeper() -> (Child, ProcessKey) {
 
 #[test]
 fn terminates_the_process_a_key_names() {
-    let (mut child, key) = sleeper();
+    let (mut child, key) = waiter();
 
     assert_eq!(signal(key, Signal::Terminate), SignalOutcome::Sent);
     assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
@@ -31,11 +72,11 @@ fn terminates_the_process_a_key_names() {
 
 #[test]
 fn never_signals_a_process_that_only_shares_the_pid() {
-    let (mut child, mut key) = sleeper();
+    let (mut child, mut key) = waiter();
     key.start = StartTime(key.start.0 + 1);
 
     let outcome = signal(key, Signal::Kill);
-    let still_running = child.try_wait().unwrap().is_none();
+    let still_running = answers(&mut child);
     child.kill().unwrap();
     child.wait().unwrap();
 
@@ -45,7 +86,7 @@ fn never_signals_a_process_that_only_shares_the_pid() {
 
 #[test]
 fn reports_an_exited_process_as_gone() {
-    let (mut child, key) = sleeper();
+    let (mut child, key) = waiter();
     child.kill().unwrap();
     child.wait().unwrap();
 
@@ -80,7 +121,7 @@ fn zombie(child: &Child) {
 
 #[test]
 fn does_not_count_a_zombie_as_running() {
-    let (mut child, key) = sleeper();
+    let (mut child, key) = waiter();
     assert_eq!(presence(key), Presence::Running);
     child.kill().unwrap();
     zombie(&child);
@@ -93,7 +134,7 @@ fn does_not_count_a_zombie_as_running() {
 
 #[test]
 fn says_when_a_pid_belongs_to_another_process_now() {
-    let (mut child, mut key) = sleeper();
+    let (mut child, mut key) = waiter();
     key.start = StartTime(key.start.0 + 1);
 
     let found = presence(key);
