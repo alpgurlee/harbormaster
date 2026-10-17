@@ -655,7 +655,13 @@ mod tests {
             panic!("no stop offered: {preview:?}");
         };
         let stopped = daemons.stop(approval, |token| (token == 7).then(|| listed.clone()));
-        let exited = daemon.try_wait().unwrap().is_some();
+        // A daemon seen exiting may not be ready to be waited for yet.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut exited = daemon.try_wait().unwrap().is_some();
+        while !exited && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            exited = daemon.try_wait().unwrap().is_some();
+        }
         if !exited {
             daemon.kill().unwrap();
         }
