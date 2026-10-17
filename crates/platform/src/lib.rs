@@ -91,3 +91,9 @@ pub fn memory() -> Option<Memory> {
 pub fn thermal() -> Thermal {
     sys::thermal()
 }
+
+/// The language the user prefers first, as a tag such as `tr-TR`, if the
+/// OS says.
+pub fn preferred_language() -> Option<String> {
+    sys::preferred_language()
+}

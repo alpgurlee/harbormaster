@@ -1,4 +1,5 @@
 mod kinfo;
+mod language;
 mod limits;
 mod memory;
 mod procargs;
@@ -20,6 +21,7 @@ use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 
 use crate::{Listener, SocketId, Whereabouts};
 
+pub(crate) use language::preferred_language;
 pub(crate) use limits::allow_more_open_files;
 pub(crate) use memory::memory;
 pub(crate) use process::{details, executable_of, processes, sets, tracks_exec};
