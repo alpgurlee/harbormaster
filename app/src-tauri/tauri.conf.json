@@ -20,6 +20,7 @@
     "active": true,
     "targets": ["app", "dmg", "nsis"],
     "category": "DeveloperTool",
+    "copyright": "Copyright © 2026 Alp Eren Gürle",
     "shortDescription": "See and stop the dev servers on your machine.",
     "icon": [
       "icons/32x32.png",
