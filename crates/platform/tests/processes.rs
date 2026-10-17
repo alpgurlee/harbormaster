@@ -84,6 +84,7 @@ fn reads_empty_arguments_without_reaching_the_environment() {
         .args(["", "x"])
         .env_clear()
         .env("SECRET", "value")
+        .stdin(Stdio::piped())
         .spawn()
         .unwrap();
 
@@ -157,13 +158,13 @@ fn lists_processes_of_other_users_too() {
     assert_eq!(launchd.name, "launchd");
 }
 
-/// A program of our own that only waits: the system keeps its own
-/// programs' environments from view, but not others'.
+/// A program of our own that waits until its input closes, echoing it: the
+/// system keeps its own programs' environments from view, but not others'.
 fn waiter(folder: &std::path::Path) -> std::path::PathBuf {
     let source = folder.join("main.c");
     std::fs::write(
         &source,
-        "#include <unistd.h>\nint main(void){sleep(30);return 0;}\n",
+        "#include <unistd.h>\nint main(void){char c;while(read(0,&c,1)==1)write(1,&c,1);return 0;}\n",
     )
     .expect("the program's source should be written");
     let program = folder.join("waiter");
@@ -183,10 +184,12 @@ fn tells_whether_a_child_started_with_a_variable_set() {
     let program = waiter(folder.path());
     let mut with = Command::new(&program)
         .env("JDK_JAVA_OPTIONS", "-cp")
+        .stdin(Stdio::piped())
         .spawn()
         .unwrap();
     let mut without = Command::new(&program)
         .env_remove("JDK_JAVA_OPTIONS")
+        .stdin(Stdio::piped())
         .spawn()
         .unwrap();
     let (set, unset) = (find(with.id()).key, find(without.id()).key);

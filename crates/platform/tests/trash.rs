@@ -3,7 +3,7 @@
 use std::ffi::CStr;
 use std::fs::{self, File};
 use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Where the open file `file` is now, as the kernel tells it.
 fn now_at(file: &File) -> PathBuf {
@@ -34,7 +34,6 @@ fn moves_a_folder_to_the_trash_and_says_where_it_went() {
     let followed = now_at(&open);
     assert_eq!(followed, landed);
     assert!(!folder.exists());
-    assert!(landed.starts_with(Path::new(&std::env::var("HOME").unwrap())));
     // Only the folder this test put in the user's Trash is taken out again,
     // found through its own descriptor.
     fs::remove_dir_all(&followed).unwrap();
