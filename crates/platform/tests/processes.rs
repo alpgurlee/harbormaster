@@ -76,12 +76,14 @@ fn reports_gone_for_a_process_that_has_exited() {
 fn reads_empty_arguments_without_reaching_the_environment() {
     use std::os::unix::process::CommandExt;
 
-    let mut child = Command::new("/usr/bin/yes")
+    // A program of our own, which leaves its arguments as they were passed
+    // (some of the system's rewrite theirs) and its environment in view.
+    let folder = tempfile::tempdir().unwrap();
+    let mut child = Command::new(waiter(folder.path()))
         .arg0("")
         .args(["", "x"])
         .env_clear()
         .env("SECRET", "value")
-        .stdout(Stdio::null())
         .spawn()
         .unwrap();
 
