@@ -516,7 +516,7 @@ pub fn recheck(reach: &Reach, findings: &[Finding], usage: &Usage) -> io::Result
 /// Who is using the folder at `path`, a build output of `project` if any: a
 /// dev server running in the project, above it or below it, or else a
 /// process holding a path inside the folder or the project.
-pub(crate) fn in_use(
+pub fn in_use(
     path: &Path,
     project: Option<&Path>,
     busy: &[(PathBuf, String)],
@@ -525,12 +525,15 @@ pub(crate) fn in_use(
     let server = running.iter().find(|(root, _)| {
         project.is_some_and(|project| root.starts_with(project) || project.starts_with(root))
     });
-    let holder = || {
-        busy.iter().find(|(held, _)| {
-            held.starts_with(path) || project.is_some_and(|project| held.starts_with(project))
-        })
-    };
+    let holder = || busy.iter().find(|(held, _)| holds(held, path, project));
     server.or_else(holder).map(|(_, who)| who.clone())
+}
+
+/// Whether a process holding `held` keeps the folder at `path`, a build
+/// output of `project` if any, in use: it holds something inside the folder
+/// or the project.
+pub fn holds(held: &Path, path: &Path, project: Option<&Path>) -> bool {
+    held.starts_with(path) || project.is_some_and(|project| held.starts_with(project))
 }
 
 /// The usual project folders that exist under `home`.
@@ -578,7 +581,7 @@ pub fn account_home() -> io::Result<PathBuf> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{Outcome, Why, in_use};
+    use super::{Outcome, Why, holds, in_use};
 
     #[test]
     fn tells_what_was_left_just_as_the_scan_measured_it() {
@@ -596,6 +599,26 @@ mod tests {
         assert!(!refused(Why::Changed).left_as_it_was());
         assert!(!refused(Why::NotReached { error: error() }).left_as_it_was());
         assert!(!refused(Why::OutsideHome).left_as_it_was());
+    }
+
+    #[test]
+    fn a_process_holding_anything_in_the_folder_or_its_project_keeps_it_in_use() {
+        let web = Path::new("/Users/dev/code/web");
+        let modules = web.join("node_modules");
+
+        assert!(holds(
+            &modules.join("left-pad/index.js"),
+            &modules,
+            Some(web)
+        ));
+        assert!(holds(&web.join("src"), &modules, Some(web)));
+        assert!(holds(&modules, &modules, None));
+        assert!(!holds(
+            Path::new("/Users/dev/code/webb"),
+            &modules,
+            Some(web)
+        ));
+        assert!(!holds(&web.join("src"), &modules, None));
     }
 
     #[test]
