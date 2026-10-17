@@ -446,7 +446,8 @@ pub fn remove(
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
-    remove::all(reach, findings, usage, trash, stop, told)
+    let free = || Ok(space::disk(reach.home)?.free);
+    remove::all(reach, findings, usage, trash, &free, stop, told)
 }
 
 /// A map of `chart.home`: what each folder holds, as the disk counts it,

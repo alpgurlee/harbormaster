@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir, Item};
-use crate::{
-    Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, in_use, space,
-};
+use crate::{Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, in_use};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
@@ -52,16 +50,18 @@ impl<'a> Roots<'a> {
     }
 }
 
+/// `free` reads how much room the disk has, before and after.
 pub(crate) fn all(
     reach: &Reach,
     findings: &[Finding],
     usage: &dyn Fn() -> io::Result<Usage>,
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
+    free: &dyn Fn() -> io::Result<u64>,
     stop: &AtomicBool,
     told: &mut dyn FnMut(&Removal),
 ) -> io::Result<Cleaned> {
     let roots = Roots::open(reach)?;
-    let before = space::disk(reach.home)?.free;
+    let before = free()?;
     // Emptying the Trash comes first, so what goes into it now stays there.
     let mut order: Vec<&Finding> = findings.iter().collect();
     order.sort_by_key(|finding| finding.kind != Kind::Discarded);
@@ -86,7 +86,7 @@ pub(crate) fn all(
         told(&removal);
         removals.push(removal);
     }
-    let after = space::disk(reach.home)?.free;
+    let after = free()?;
     Ok(Cleaned {
         removals,
         freed_bytes: after.saturating_sub(before),
@@ -275,7 +275,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::{Duration, SystemTime};
 
-    use super::{Roots, one};
+    use super::{Roots, all, one};
     use crate::walk::Dir;
     use crate::{Outcome, Reach, Survey, Usage, scan};
 
@@ -351,5 +351,37 @@ mod tests {
 
         assert_eq!(outcome, Outcome::Stopped);
         assert!(archive.join("a").exists());
+    }
+
+    #[test]
+    fn says_how_much_more_room_the_disk_has_after_than_before() {
+        let place = tempfile::tempdir().unwrap();
+        let home = place.path().canonicalize().unwrap();
+        let reach = Reach {
+            home: &home,
+            shared: &home.join("no shared apps"),
+        };
+        let freed = |before: u64, after: u64| {
+            let reads = std::cell::Cell::new(0);
+            let free = || {
+                reads.set(reads.get() + 1);
+                Ok(if reads.get() == 1 { before } else { after })
+            };
+            all(
+                &reach,
+                &[],
+                &|| Ok(Usage::default()),
+                &|_| panic!("nothing may go to the Trash"),
+                &free,
+                &AtomicBool::new(false),
+                &mut |_| {},
+            )
+            .unwrap()
+            .freed_bytes
+        };
+
+        assert_eq!(freed(100, 160), 60);
+        // Others wrote more meanwhile than the removal gave back.
+        assert_eq!(freed(160, 100), 0);
     }
 }

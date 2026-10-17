@@ -448,22 +448,6 @@ fn removes_nothing_once_told_to_stop() {
 }
 
 #[test]
-fn reports_the_room_the_disk_got_back() {
-    let machine = machine();
-    let project = node_project(&machine, "big");
-    write(&project.join("node_modules/big/blob"), &vec![1; 64 * MIB]);
-    age(&project, 60 * DAY);
-
-    let cleaned = removed(&machine, &["big · node_modules"], &never);
-
-    assert!(
-        cleaned.freed_bytes >= 48 * MIB as u64,
-        "{}",
-        cleaned.freed_bytes
-    );
-}
-
-#[test]
 fn reads_what_is_in_use_again_before_each() {
     let machine = machine();
     let first = node_project(&machine, "first");
