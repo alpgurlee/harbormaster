@@ -123,3 +123,86 @@ fn says_nothing_can_be_told_free_once_it_cant_tell_where_it_runs_from() {
 
     assert!(status.success());
 }
+
+/// A program called `java` that only waits, started as a Gradle daemon's JVM
+/// would be, in `folder`, with `JDK_JAVA_OPTIONS` set to `options` if any.
+fn fake_gradle_daemon(folder: &std::path::Path, options: Option<&str>) -> std::process::Child {
+    let source = folder.join("main.c");
+    std::fs::write(
+        &source,
+        "#include <unistd.h>\nint main(void){sleep(30);return 0;}\n",
+    )
+    .expect("the program's source should be written");
+    let java = folder.join("java");
+    let built = std::process::Command::new("cc")
+        .arg("-o")
+        .arg(&java)
+        .arg(&source)
+        .status()
+        .expect("cc should run");
+    assert!(built.success());
+    let mut command = std::process::Command::new(&java);
+    match options {
+        Some(options) => command.env("JDK_JAVA_OPTIONS", options),
+        None => command.env_remove("JDK_JAVA_OPTIONS"),
+    };
+    command
+        .args([
+            "-Xmx64m",
+            "-cp",
+            "gradle-daemon-main-8.14.jar",
+            "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
+            "8.14",
+        ])
+        .current_dir(folder)
+        .spawn()
+        .expect("the program should start")
+}
+
+#[test]
+fn knows_a_gradle_daemon_and_the_folder_it_works_in() {
+    let folder = tempfile::tempdir().unwrap();
+    let real = folder.path().canonicalize().unwrap();
+    let mut daemon = fake_gradle_daemon(&real, None);
+    let pid = daemon.id();
+
+    let holdings = live::holdings();
+    let named = live::held();
+    daemon.kill().unwrap();
+    daemon.wait().unwrap();
+
+    let holding = holdings
+        .unwrap()
+        .into_iter()
+        .find(|holding| holding.key.pid.0 == pid)
+        .expect("the daemon among this user's processes");
+    assert_eq!(holding.daemon, Some(live::Daemon::Gradle));
+    assert_eq!(holding.name, "Gradle daemon");
+    assert!(holding.paths.contains(&real), "{holding:?}");
+    assert!(
+        named
+            .unwrap()
+            .contains(&(real.clone(), "Gradle daemon".to_owned()))
+    );
+}
+
+#[test]
+fn knows_no_daemon_whose_launcher_could_have_taken_more_from_its_environment() {
+    // JDK_JAVA_OPTIONS=-cp makes the daemon's class a class path, and what follows the main class.
+    let folder = tempfile::tempdir().unwrap();
+    let real = folder.path().canonicalize().unwrap();
+    let mut daemon = fake_gradle_daemon(&real, Some("-cp"));
+    let pid = daemon.id();
+
+    let holdings = live::holdings();
+    daemon.kill().unwrap();
+    daemon.wait().unwrap();
+
+    let holding = holdings
+        .unwrap()
+        .into_iter()
+        .find(|holding| holding.key.pid.0 == pid)
+        .expect("the process among this user's");
+    assert_eq!(holding.daemon, None);
+    assert_eq!(holding.name, "java");
+}

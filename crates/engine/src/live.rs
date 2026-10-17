@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use harbormaster_platform::{Error, ProcessKey};
+use harbormaster_platform::{Error, Field, ProcessKey};
 
 use crate::apps::AppUsage;
 use crate::{Input, Member, Scanner, Snapshot, Standing, command, standings};
@@ -29,21 +29,15 @@ pub fn scan(scanner: &mut Scanner, home: &Path) -> Result<Snapshot, Error> {
 /// and this one's own program, so nothing it runs from is taken from it.
 /// Not knowing where that is, it can't say what is free, so it fails.
 pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
-    let own = std::process::id();
     let program = (
         std::env::current_exe().and_then(std::fs::canonicalize)?,
         "Harbormaster".to_owned(),
     );
-    Ok(harbormaster_platform::whereabouts()?
+    Ok(holdings()?
         .into_iter()
-        .filter(|process| process.key.pid.0 != own)
-        .flat_map(|process| {
-            // Only a JVM's arguments are read: `java` alone says little.
-            let args = (process.name == "java")
-                .then(|| harbormaster_platform::details(process.key).args)
-                .and_then(|args| args.known().cloned());
-            let name = holder(&process.name, args.as_deref());
-            process
+        .flat_map(|holding| {
+            let name = holding.name;
+            holding
                 .paths
                 .into_iter()
                 .map(move |path| (path, name.clone()))
@@ -52,32 +46,149 @@ pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
         .collect())
 }
 
-/// The daemons a JVM may run, by the class it starts from, and what they are called.
-const DAEMONS: [(&str, &str); 2] = [
+/// One of this user's processes and the paths it holds.
+#[derive(Debug, Clone)]
+pub struct Holding {
+    pub key: ProcessKey,
+    /// What it is called: a JVM by the daemon it runs.
+    pub name: String,
+    pub daemon: Option<Daemon>,
+    pub paths: Vec<PathBuf>,
+}
+
+/// This user's processes other than this one, each with the paths it holds.
+pub fn holdings() -> Result<Vec<Holding>, Error> {
+    let own = std::process::id();
+    Ok(harbormaster_platform::whereabouts()?
+        .into_iter()
+        .filter(|process| process.key.pid.0 != own)
+        .map(|process| {
+            // Only a JVM's arguments are read: `java` alone says little.
+            let daemon = (process.name == "java")
+                .then(|| jvm_daemon(process.key))
+                .flatten();
+            Holding {
+                key: process.key,
+                name: daemon.map_or(process.name, |daemon| daemon.name().to_owned()),
+                daemon,
+                paths: process.paths,
+            }
+        })
+        .collect())
+}
+
+/// A dev daemon a JVM of this user's may run, which the cleaner may stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Daemon {
+    Gradle,
+    Kotlin,
+}
+
+impl Daemon {
+    pub fn name(self) -> &'static str {
+        match self {
+            Daemon::Gradle => "Gradle daemon",
+            Daemon::Kotlin => "Kotlin daemon",
+        }
+    }
+}
+
+/// The daemons a JVM may run, by the class it starts from.
+const DAEMONS: [(&str, Daemon); 2] = [
     (
         "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
-        "Gradle daemon",
+        Daemon::Gradle,
     ),
     (
         "org.jetbrains.kotlin.daemon.KotlinCompileDaemon",
-        "Kotlin daemon",
+        Daemon::Kotlin,
     ),
 ];
 
-/// What a process holding a folder is called: a JVM by the daemon it runs.
-fn holder(name: &str, args: Option<&[String]>) -> String {
-    let daemon = || {
-        args?.iter().find_map(|arg| {
-            DAEMONS
-                .iter()
-                .find(|(class, _)| arg == class)
-                .map(|(_, daemon)| *daemon)
-        })
-    };
-    match name {
-        "java" => daemon().unwrap_or(name).to_string(),
-        _ => name.to_string(),
+/// Options of the `java` launcher that take the next argument as their value.
+const WITH_VALUE: [&str; 13] = [
+    "-cp",
+    "-classpath",
+    "--class-path",
+    "-p",
+    "--module-path",
+    "--upgrade-module-path",
+    "--add-modules",
+    "--enable-native-access",
+    "--limit-modules",
+    "--add-reads",
+    "--add-exports",
+    "--add-opens",
+    "--patch-module",
+];
+
+/// Options of the `java` launcher that stand alone, by what they start with.
+const ALONE: [&str; 20] = [
+    "-D",
+    "-X",
+    "-javaagent:",
+    "-agentlib:",
+    "-agentpath:",
+    "-splash:",
+    "-verbose",
+    "-ea",
+    "-da",
+    "-esa",
+    "-dsa",
+    "-enableassertions",
+    "-disableassertions",
+    "-enablesystemassertions",
+    "-disablesystemassertions",
+    "-server",
+    "-client",
+    "-showversion",
+    "--show-version",
+    "--enable-preview",
+];
+
+/// The daemon the JVM `key` names runs, if it is one the cleaner knows. Its
+/// launcher puts what `JDK_JAVA_OPTIONS` holds before its arguments, so only
+/// a JVM known to have started without it can be told by them.
+fn jvm_daemon(key: ProcessKey) -> Option<Daemon> {
+    if harbormaster_platform::sets_variable(key, "JDK_JAVA_OPTIONS") != Field::Known(false) {
+        return None;
     }
+    daemon(harbormaster_platform::details(key).args.known()?)
+}
+
+/// The daemon a JVM started with `args` runs, if it is one the cleaner knows.
+fn daemon(args: &[String]) -> Option<Daemon> {
+    let class = started_from(args)?;
+    DAEMONS
+        .iter()
+        .find(|(known, _)| *known == class)
+        .map(|(_, daemon)| *daemon)
+}
+
+/// What a JVM started from, read from its arguments as the `java` launcher
+/// reads them: the first that is neither an option nor an option's value,
+/// a class, or else a source or argument file, which is never a daemon's.
+/// None after a jar, a module, an option it doesn't know, or an option whose
+/// value is an argument file, whose contents the launcher puts in its place:
+/// any of them could hide what really runs.
+fn started_from(args: &[String]) -> Option<&str> {
+    let mut rest = args.iter().skip(1).map(String::as_str);
+    while let Some(arg) = rest.next() {
+        let name = arg.split_once('=').map_or(arg, |(name, _)| name);
+        if WITH_VALUE.contains(&arg) {
+            rest.next().filter(|value| !value.starts_with('@'))?;
+        } else if arg.starts_with("--") && WITH_VALUE.contains(&name) {
+            // `--add-opens=java.base/java.util=ALL-UNNAMED`: the value comes with it.
+        } else if arg.starts_with('-') {
+            ALONE
+                .iter()
+                .any(|alone| arg.starts_with(alone))
+                .then_some(())?;
+        } else {
+            return Some(arg);
+        }
+    }
+    None
 }
 
 /// Where each of `keys` stands right now, read just before a round of signals.
@@ -151,28 +262,77 @@ fn lineage_from(pid: u32, parents: &HashMap<u32, u32>) -> Option<Vec<u32>> {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{holder, lineage_from};
+    use super::{Daemon, daemon, lineage_from};
+
+    fn args(args: &[&str]) -> Vec<String> {
+        args.iter().map(ToString::to_string).collect()
+    }
 
     #[test]
-    fn names_a_java_process_by_the_daemon_it_runs() {
-        let args = |args: &[&str]| args.iter().map(ToString::to_string).collect::<Vec<_>>();
+    fn knows_a_gradle_or_kotlin_daemon_by_the_class_its_jvm_started_from() {
         let gradle = args(&[
-            "/usr/bin/java",
+            "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java",
+            "--add-opens=java.base/java.util=ALL-UNNAMED",
+            "-XX:MaxMetaspaceSize=384m",
+            "-XX:+HeapDumpOnOutOfMemoryError",
+            "-Xms256m",
             "-Xmx512m",
+            "-Dfile.encoding=UTF-8",
+            "-Duser.variant",
+            "-cp",
+            "/Users/dev/.gradle/wrapper/dists/gradle-8.14-bin/x/gradle-8.14/lib/gradle-daemon-main-8.14.jar",
+            "-javaagent:/Users/dev/.gradle/wrapper/dists/gradle-8.14-bin/x/gradle-8.14/lib/agents/gradle-instrumentation-agent-8.14.jar",
             "org.gradle.launcher.daemon.bootstrap.GradleDaemon",
             "8.14",
         ]);
-        let kotlin = args(&["java", "org.jetbrains.kotlin.daemon.KotlinCompileDaemon"]);
+        let kotlin = args(&[
+            "java",
+            "-cp",
+            "/Users/dev/.gradle/caches/kotlin-compiler-embeddable-2.1.0.jar",
+            "-D$java.rmi.server.hostname=127.0.0.1",
+            "-Xmx2048m",
+            "-ea",
+            "-XX:ReservedCodeCacheSize=320m",
+            "org.jetbrains.kotlin.daemon.KotlinCompileDaemon",
+            "--daemon-runFilesPath",
+            "/Users/dev/Library/Application Support/kotlin/daemon",
+        ]);
 
-        assert_eq!(holder("java", Some(&gradle)), "Gradle daemon");
-        assert_eq!(holder("java", Some(&kotlin)), "Kotlin daemon");
-        assert_eq!(
-            holder("java", Some(&args(&["java", "-jar", "app.jar"]))),
-            "java"
-        );
-        assert_eq!(holder("java", None), "java");
-        // Only a JVM is named by what it runs.
-        assert_eq!(holder("node", Some(&gradle)), "node");
+        assert_eq!(daemon(&gradle), Some(Daemon::Gradle));
+        assert_eq!(daemon(&kotlin), Some(Daemon::Kotlin));
+        assert_eq!(Daemon::Gradle.name(), "Gradle daemon");
+    }
+
+    #[test]
+    fn knows_no_daemon_where_its_class_isnt_what_the_jvm_started_from() {
+        let gradle = "org.gradle.launcher.daemon.bootstrap.GradleDaemon";
+        for (why, line) in [
+            (
+                "an option's value",
+                vec!["java", "-cp", gradle, "com.acme.Main"],
+            ),
+            (
+                "a property",
+                vec!["java", &format!("-Dmain={gradle}"), "com.acme.Main"],
+            ),
+            (
+                "an argument of another class",
+                vec!["java", "com.acme.Main", gradle],
+            ),
+            ("after a jar", vec!["java", "-jar", "app.jar", gradle]),
+            ("a module", vec!["java", "-m", &format!("acme/{gradle}")]),
+            ("an argument file", vec!["java", "@options", gradle]),
+            (
+                "an argument file as an option's value",
+                vec!["java", "-cp", "@options", gradle],
+            ),
+            ("an unknown option", vec!["java", "--unknown", gradle]),
+            ("a source file", vec!["java", "GradleDaemon.java", gradle]),
+            ("no class at all", vec!["java", "-Xmx512m"]),
+            ("nothing", vec![]),
+        ] {
+            assert_eq!(daemon(&args(&line)), None, "{why}");
+        }
     }
 
     #[test]
