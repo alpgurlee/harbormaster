@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/alpgurlee/harbormaster/actions/workflows/ci.yml"><img src="https://github.com/alpgurlee/harbormaster/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+</p>
+
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/panel-dark.png">
     <img src="docs/screenshots/panel-light.png" width="388" alt="The Harbormaster panel listing five dev servers, grouped by project">
