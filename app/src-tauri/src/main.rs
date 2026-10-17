@@ -3,6 +3,7 @@
 mod cleaner;
 mod cleaning;
 mod commands;
+mod daemons;
 mod panel;
 mod quitting;
 mod scanning;
@@ -45,6 +46,9 @@ fn main() {
             commands::clean_disk,
             commands::clean_reveal,
             commands::clean_reveal_area,
+            commands::clean_daemons,
+            commands::clean_daemon_preview,
+            commands::clean_daemon_stop,
             commands::resize_panel,
             commands::hide_panel,
             commands::quit,
@@ -56,6 +60,7 @@ fn main() {
             app.manage(panel::Anchor::default());
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
+            app.manage(daemons::Daemons::default());
             app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             app.manage(settings::Store::open(
                 app.path().app_config_dir()?.join("settings.json"),

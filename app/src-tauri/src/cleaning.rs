@@ -352,7 +352,7 @@ impl Cleaning {
         Ok(())
     }
 
-    fn shown(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
+    pub(crate) fn shown(&self, token: u64) -> Result<Vec<Finding>, Refusal> {
         self.lock()
             .shown
             .as_ref()
@@ -624,12 +624,18 @@ fn survey<'a>(
 }
 
 /// The paths this user's other processes hold, and the projects with a dev
-/// server running, each named the same in every language: `localhost:3000`.
+/// server running.
 fn usage_now() -> io::Result<Usage> {
     let busy = live::held().map_err(io::Error::other)?;
-    let snapshot =
-        live::scan(&mut Scanner::default(), &scanning::home()).map_err(io::Error::other)?;
-    let running = snapshot
+    let running = servers_running().map_err(io::Error::other)?;
+    Ok(Usage { busy, running })
+}
+
+/// The projects with a dev server running, each with what to call the
+/// server, named the same in every language: `localhost:3000`.
+pub(crate) fn servers_running() -> Result<Vec<(PathBuf, String)>, harbormaster_platform::Error> {
+    let snapshot = live::scan(&mut Scanner::default(), &scanning::home())?;
+    Ok(snapshot
         .services
         .iter()
         .filter(|service| service.classification == Classification::Dev)
@@ -638,8 +644,7 @@ fn usage_now() -> io::Result<Usage> {
             let port = service.ports.first()?.port;
             Some((root, format!("localhost:{port}")))
         })
-        .collect();
-    Ok(Usage { busy, running })
+        .collect())
 }
 
 fn failed(error: impl Display) -> Refusal {

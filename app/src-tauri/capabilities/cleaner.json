@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "cleaner",
-  "description": "What the cleaner window may ask of the app: to scan, to hunt for large files, to list the user's apps, to map the home folder, to remove, look at again or show in Finder what it listed or mapped, to stop, to read the disk's size, to be told the settings as they change, and to be dragged by its top.",
+  "description": "What the cleaner window may ask of the app: to scan, to hunt for large files, to list the user's apps, to map the home folder, to remove, look at again or show in Finder what it listed or mapped, to stop, to stop the dev daemons that keep a listed item in use, to read the disk's size, to be told the settings as they change, and to be dragged by its top.",
   "windows": ["cleaner"],
   "permissions": [
     "allow-clean-scan",
@@ -14,6 +14,9 @@
     "allow-clean-disk",
     "allow-clean-reveal",
     "allow-clean-reveal-area",
+    "allow-clean-daemons",
+    "allow-clean-daemon-preview",
+    "allow-clean-daemon-stop",
     "allow-settings-subscribe",
     "core:window:allow-start-dragging"
   ]

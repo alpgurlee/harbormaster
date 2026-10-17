@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
+use crate::daemons::{DaemonPreview, Daemons};
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning, Update};
 use crate::settings::{Invalid, Settings, Store};
@@ -113,6 +114,48 @@ pub(crate) async fn quit_app_preview(name: String, app: AppHandle) -> Result<Qui
 #[tauri::command]
 pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || app.state::<Quits>().quit(token)).await
+}
+
+/// Of the items listed under `token` and in use, those only known dev
+/// daemons keep so, which the window may offer to stop.
+#[tauri::command]
+pub(crate) async fn clean_daemons(token: u64, app: AppHandle) -> Result<Vec<PathBuf>, Reason> {
+    blocking(move || {
+        let listed = app
+            .state::<Arc<Cleaning>>()
+            .shown(token)
+            .map_err(|_| Reason::Expired)?;
+        app.state::<Daemons>().stoppable(&listed)
+    })
+    .await
+}
+
+/// What stopping the daemons that keep the item at `path` in use would do.
+#[tauri::command]
+pub(crate) async fn clean_daemon_preview(
+    token: u64,
+    path: PathBuf,
+    app: AppHandle,
+) -> Result<DaemonPreview, Reason> {
+    blocking(move || {
+        let listed = app
+            .state::<Arc<Cleaning>>()
+            .shown(token)
+            .map_err(|_| Reason::Expired)?;
+        Ok(app.state::<Daemons>().preview(token, &path, &listed))
+    })
+    .await
+}
+
+/// Stops the daemons the window was shown and the user agreed to stop.
+#[tauri::command]
+pub(crate) async fn clean_daemon_stop(approval: u64, app: AppHandle) -> Result<Stopped, Reason> {
+    blocking(move || {
+        let cleaning = app.state::<Arc<Cleaning>>();
+        app.state::<Daemons>()
+            .stop(approval, |token| cleaning.shown(token).ok())
+    })
+    .await
 }
 
 #[tauri::command]
