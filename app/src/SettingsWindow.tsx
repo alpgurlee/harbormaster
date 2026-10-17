@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { version } from "../package.json";
 import { settingsGet, settingsSet } from "./api";
@@ -35,24 +35,44 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
   const [settings, setSettings] = useState<Settings | null>(null);
   const [section, setSection] = useState<Section>("general");
   const [refusal, setRefusal] = useState<SettingsRefusal | null>(null);
+  // Changes are kept one at a time, each made to what the one before left in force.
+  const queue = useRef(Promise.resolve(true));
+  const latest = useRef<Settings | null>(null);
   useEffect(() => {
-    backend.get().then(setSettings).catch(console.error);
+    // Only the latest reading counts: one made before the window was mounted again can come back last.
+    let live = true;
+    backend
+      .get()
+      .then((first) => {
+        if (!live) return;
+        latest.current = first;
+        setSettings(first);
+      })
+      .catch(console.error);
+    return () => {
+      live = false;
+    };
   }, [backend]);
   if (settings === null) return null;
 
-  // Whether `next` was kept, so what was typed for it can go.
-  const change = (next: Settings) => {
-    setRefusal(null);
-    return backend.set(next).then(
-      (kept) => {
-        setSettings(kept);
-        return true;
-      },
-      (error: unknown) => {
-        setRefusal(asRefusal(error));
-        return false;
-      },
-    );
+  // Whether the change was kept, so what was typed for it can go.
+  const change = (edit: (current: Settings) => Settings) => {
+    const kept = queue.current.then(() => {
+      setRefusal(null);
+      return backend.set(edit(latest.current ?? settings)).then(
+        (now) => {
+          latest.current = now;
+          setSettings(now);
+          return true;
+        },
+        (error: unknown) => {
+          setRefusal(asRefusal(error));
+          return false;
+        },
+      );
+    });
+    queue.current = kept;
+    return kept;
   };
 
   return (
@@ -86,7 +106,10 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
                 <select
                   className={styles.select}
                   value={settings.language}
-                  onChange={(event) => void change({ ...settings, language: event.target.value as Settings["language"] })}
+                  onChange={(event) => {
+                    const language = event.target.value as Settings["language"];
+                    void change((current) => ({ ...current, language }));
+                  }}
                 >
                   <option value="system">{i18n.t("sameAsSystem")}</option>
                   <option value="en">English</option>
@@ -102,7 +125,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
                         type="radio"
                         name="appearance"
                         checked={settings.appearance === appearance}
-                        onChange={() => void change({ ...settings, appearance })}
+                        onChange={() => void change((current) => ({ ...current, appearance }))}
                       />
                       {i18n.t(name)}
                     </label>
@@ -116,7 +139,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
               hint={i18n.t("hiddenHint")}
               placeholder={i18n.t("programName")}
               entries={settings.hidden}
-              onChange={(hidden) => change({ ...settings, hidden })}
+              onChange={(edit) => change((current) => ({ ...current, hidden: edit(current.hidden) }))}
             />
           ) : section === "cleanup" ? (
             <>
@@ -125,7 +148,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
                 hint={i18n.t("rootsHint")}
                 placeholder={i18n.t("folderPath")}
                 entries={settings.roots}
-                onChange={(roots) => change({ ...settings, roots })}
+                onChange={(edit) => change((current) => ({ ...current, roots: edit(current.roots) }))}
               />
               <label className={styles.field}>
                 <span className={styles.label}>{i18n.t("idleTitle")}</span>
@@ -137,7 +160,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
                   defaultValue={settings.idleDays}
                   onChange={(event) => {
                     const days = Number(event.target.value);
-                    if (Number.isInteger(days) && days >= 1 && days <= 365) void change({ ...settings, idleDays: days });
+                    if (Number.isInteger(days) && days >= 1 && days <= 365) void change((current) => ({ ...current, idleDays: days }));
                   }}
                 />
               </label>
@@ -167,8 +190,8 @@ interface EntriesProps {
   hint: string;
   placeholder: string;
   entries: string[];
-  /** Resolves to whether the new list was kept. */
-  onChange: (entries: string[]) => Promise<boolean>;
+  /** Changes the list as it stands when the change is kept; resolves to whether it was. */
+  onChange: (edit: (entries: string[]) => string[]) => Promise<boolean>;
 }
 
 /** A list of names or folders, each to take out, and a field to add one. */
@@ -179,9 +202,11 @@ function Entries({ title, hint, placeholder, entries, onChange }: EntriesProps) 
     event.preventDefault();
     const entry = draft.trim();
     if (entry === "") return;
-    // What was typed stays until it is kept, so a refused entry can be put right.
-    void onChange([...entries, entry]).then((kept) => {
-      if (kept) setDraft("");
+    // What was typed stays until it is kept, so a refused entry can be put right,
+    // and what was typed after it stays too.
+    const typed = draft;
+    void onChange((list) => [...list, entry]).then((kept) => {
+      if (kept) setDraft((now) => (now === typed ? "" : now));
     });
   };
   return (
@@ -196,7 +221,7 @@ function Entries({ title, hint, placeholder, entries, onChange }: EntriesProps) 
               type="button"
               className={styles.remove}
               aria-label={i18n.t("removeEntry", { name: entry })}
-              onClick={() => void onChange(entries.filter((each) => each !== entry))}
+              onClick={() => void onChange((list) => list.filter((each) => each !== entry))}
             >
               ×
             </button>

@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { I18nProvider } from "./i18n";
@@ -24,6 +25,28 @@ function fake(first: Settings = DEFAULTS) {
     },
   };
   return { backend, kept, refuse: (next: unknown) => (refusal = next) };
+}
+
+/** A backend that keeps each change only when the test lets it, one at a time. */
+function slow(first: Settings = DEFAULTS) {
+  const asked: Settings[] = [];
+  const waiting: (() => void)[] = [];
+  const backend: SettingsBackend = {
+    get: () => Promise.resolve(first),
+    set: (settings) => {
+      asked.push(settings);
+      return new Promise((resolve) => waiting.push(() => resolve(settings)));
+    },
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  // Lets what was asked reach the backend, keeps the oldest change waiting, and lets what that sets off run.
+  const keep = () =>
+    act(async () => {
+      await settle();
+      waiting.shift()?.();
+      await settle();
+    });
+  return { backend, asked, keep };
 }
 
 async function show(backend: SettingsBackend) {
@@ -53,6 +76,48 @@ describe("the settings window", () => {
     ]);
   });
 
+  it("keeps both of two changes, the second made before the first was kept", async () => {
+    const driver = slow();
+    await show(driver.backend);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "tr" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    await driver.keep();
+    await driver.keep();
+
+    expect(driver.asked).toEqual([
+      { ...DEFAULTS, language: "tr" },
+      { ...DEFAULTS, language: "tr", appearance: "dark" },
+    ]);
+  });
+
+  it("is not set back by a first reading that comes back late", async () => {
+    // Mounted twice, as in development, so the settings are read twice; the first reading comes back last.
+    const readings: ((settings: Settings) => void)[] = [];
+    const driver = fake();
+    const backend: SettingsBackend = {
+      get: () => new Promise((resolve) => readings.push(resolve)),
+      set: driver.backend.set,
+    };
+    render(
+      <StrictMode>
+        <I18nProvider locale="en">
+          <SettingsWindow backend={backend} />
+        </I18nProvider>
+      </StrictMode>,
+    );
+    expect(readings).toHaveLength(2);
+    await act(async () => readings[1](DEFAULTS));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "tr" } });
+    await act(async () => {});
+    await act(async () => readings[0](DEFAULTS));
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    await act(async () => {});
+
+    expect(driver.kept.at(-1)).toEqual({ ...DEFAULTS, language: "tr", appearance: "dark" });
+  });
+
   it("adds a program never to list as a dev server, and takes it out again", async () => {
     const driver = fake();
     await show(driver.backend);
@@ -66,6 +131,26 @@ describe("the settings window", () => {
 
     expect(driver.kept.map((settings) => settings.hidden)).toEqual([["serena"], []]);
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Program name" }).value).toBe("");
+  });
+
+  it("adds two programs, the second before the first was kept", async () => {
+    const driver = slow();
+    await show(driver.backend);
+    section("Servers");
+    const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Program name" });
+
+    fireEvent.change(field, { target: { value: "serena" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.change(field, { target: { value: "uvx" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await driver.keep();
+
+    expect(field.value).toBe("uvx");
+
+    await driver.keep();
+
+    expect(driver.asked.map((settings) => settings.hidden)).toEqual([["serena"], ["serena", "uvx"]]);
+    expect(field.value).toBe("");
   });
 
   it("says why a folder was turned down, and keeps what was typed", async () => {
