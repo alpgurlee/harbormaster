@@ -18,29 +18,36 @@ fn take_turn() -> MutexGuard<'static, ()> {
     ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A server of our own: it takes a free loopback port and only then says
-/// which, so it is ready and the port is its own. Then it echoes each byte
-/// it reads, which shows it is still alive. `stubborn` ignores SIGTERM
-/// first, as a hung server would; `bound` binds the port without listening.
+/// A server of our own: it takes a loopback port, a free one unless told
+/// which, and only then says which, so it is ready and the port is its own.
+/// Then it echoes each byte it reads, which shows it is still alive.
+/// `stubborn` ignores SIGTERM first, as a hung server would; `bound` binds
+/// the port without listening; `shared` sets SO_REUSEPORT, so another can
+/// bind the port too.
 const SERVER: &str = r#"
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
-    if (strcmp(mode, "stubborn") == 0) signal(SIGTERM, SIG_IGN);
+    int yes = 1;
+    if (strstr(mode, "stubborn")) signal(SIGTERM, SIG_IGN);
     int s = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in at;
     memset(&at, 0, sizeof at);
     at.sin_family = AF_INET;
     at.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    at.sin_port = htons(argc > 2 ? atoi(argv[2]) : 0);
     socklen_t size = sizeof at;
-    if (s < 0 || bind(s, (struct sockaddr *)&at, size) != 0) return 1;
-    if (strcmp(mode, "bound") != 0 && listen(s, 1) != 0) return 1;
+    if (s < 0) return 1;
+    if (strstr(mode, "shared") && setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof yes) != 0) return 1;
+    if (bind(s, (struct sockaddr *)&at, size) != 0) return 1;
+    if (!strstr(mode, "bound") && listen(s, 1) != 0) return 1;
     if (getsockname(s, (struct sockaddr *)&at, &size) != 0) return 1;
     printf("%d\n", ntohs(at.sin_port));
     fflush(stdout);
@@ -82,9 +89,9 @@ impl Drop for Server {
 }
 
 impl Server {
-    fn start(mode: &str) -> (Self, u16) {
+    fn start(args: &[&str]) -> (Self, u16) {
         let mut child = Command::new(program())
-            .arg(mode)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -162,7 +169,7 @@ fn harbormaster(args: &[&str]) -> Output {
 #[test]
 fn stops_the_server_on_a_port_when_told_yes() {
     let _turn = take_turn();
-    let (mut server, port) = Server::start("");
+    let (mut server, port) = Server::start(&[]);
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes"]);
 
@@ -174,7 +181,7 @@ fn stops_the_server_on_a_port_when_told_yes() {
 #[test]
 fn stops_nothing_without_a_yes() {
     let _turn = take_turn();
-    let (mut server, port) = Server::start("");
+    let (mut server, port) = Server::start(&[]);
 
     let output = harbormaster(&["stop", &port.to_string()]);
 
@@ -185,7 +192,7 @@ fn stops_nothing_without_a_yes() {
 #[test]
 fn stops_the_server_a_process_belongs_to() {
     let _turn = take_turn();
-    let (mut server, _) = Server::start("");
+    let (mut server, _) = Server::start(&[]);
 
     let output = harbormaster(&["stop", "--pid", &server.child.id().to_string(), "--yes"]);
 
@@ -197,7 +204,7 @@ fn stops_the_server_a_process_belongs_to() {
 fn exits_with_3_when_nothing_listens() {
     let _turn = take_turn();
     // Held, so nothing else takes it meanwhile, but not listened on.
-    let (_held, port) = Server::start("bound");
+    let (_held, port) = Server::start(&["bound"]);
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes"]);
 
@@ -205,9 +212,24 @@ fn exits_with_3_when_nothing_listens() {
 }
 
 #[test]
+fn says_a_port_isnt_free_yet_while_something_else_holds_it() {
+    let _turn = take_turn();
+    let (mut server, port) = Server::start(&["shared"]);
+    let (_holder, _) = Server::start(&["shared bound", &port.to_string()]);
+
+    let output = harbormaster(&["stop", &port.to_string(), "--yes"]);
+
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(server.ended().signal(), Some(libc::SIGTERM));
+    assert!(said.contains("isn't free yet"), "{said}");
+    assert!(!said.contains("is free now"), "{said}");
+}
+
+#[test]
 fn reports_a_server_that_outlives_the_grace_period() {
     let _turn = take_turn();
-    let (mut server, port) = Server::start("stubborn");
+    let (mut server, port) = Server::start(&["stubborn"]);
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes", "--wait", "1"]);
 
@@ -219,7 +241,7 @@ fn reports_a_server_that_outlives_the_grace_period() {
 #[test]
 fn ends_a_server_that_ignores_the_request_when_forced() {
     let _turn = take_turn();
-    let (mut server, port) = Server::start("stubborn");
+    let (mut server, port) = Server::start(&["stubborn"]);
 
     let output = harbormaster(&["stop", &port.to_string(), "--yes", "--force", "--wait", "1"]);
 

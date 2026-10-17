@@ -23,6 +23,8 @@ use harbormaster_platform::{ProcessKey, Signal};
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
 /// How long a forced process gets to disappear.
 const KILL_GRACE: Duration = Duration::from_secs(2);
+/// How long apart a stopped server's port is looked at while still taken.
+const FREE_WAIT: Duration = Duration::from_millis(100);
 /// How long a project sits untouched before its build outputs are picked.
 const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
 const COMMAND_WIDTH: usize = 60;
@@ -365,13 +367,13 @@ fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyh
         println!("Run it again with --force to end what is left.");
     }
     if status == 0 {
-        let listening = harbormaster_platform::listeners()?;
-        let free = service
-            .ports
-            .iter()
-            .all(|port| !listening.iter().any(|listener| listener.port == port.port));
-        if free {
-            println!("{} is free now.", format::ports(service));
+        let wait = || sleep(FREE_WAIT);
+        match stop::freed(&service.ports, &harbormaster_platform::probe_bind, &wait) {
+            stop::Freed::Yes => println!("{} is free now.", format::ports(service)),
+            stop::Freed::Taken => {
+                println!("{} isn't free yet.", format::ports(service));
+            }
+            stop::Freed::Unknown => {}
         }
     }
     Ok(status)

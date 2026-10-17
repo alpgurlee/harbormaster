@@ -1,7 +1,7 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use harbormaster_engine::{Outcome, Protection, Refusal, Service, Target};
-use harbormaster_platform::ProcessKey;
+use harbormaster_engine::{Outcome, Port, Protection, Refusal, Service, Target};
+use harbormaster_platform::{BindProbe, ProcessKey};
 
 use crate::format::{label, ports, printable, table};
 
@@ -10,6 +10,56 @@ pub(crate) const NOT_FOUND: u8 = 3;
 pub(crate) const REFUSED: u8 = 4;
 pub(crate) const PARTIAL: u8 = 5;
 pub(crate) const CANCELLED: u8 = 130;
+
+/// How often a port still taken is looked at: a server on its way out may
+/// hold it a moment longer.
+pub(crate) const FREE_LOOKS: usize = 10;
+
+/// Whether a stopped server's ports can be taken again.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Freed {
+    Yes,
+    /// One of them can't be bound yet: a process may still hold it, or
+    /// connections it closed are still winding down.
+    Taken,
+    /// The system wouldn't say, as for a port only root may take.
+    Unknown,
+}
+
+/// Whether `ports` can be taken again, as binding each says, which sees
+/// what a list of listeners misses: a server on its way out, or a socket
+/// bound without listening. `wait` comes between looks at a taken port.
+pub(crate) fn freed(
+    ports: &[Port],
+    probe: &dyn Fn(IpAddr, u16) -> BindProbe,
+    wait: &dyn Fn(),
+) -> Freed {
+    for look in 1..=FREE_LOOKS {
+        let mut taken = false;
+        for port in ports {
+            // A listener on [::] may have taken the port for IPv4 too, which
+            // the probe, kept to IPv6, wouldn't see: both have to be free.
+            let ipv4 = (port.address == IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+                .then_some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            for address in std::iter::once(port.address).chain(ipv4) {
+                match probe(address, port.port) {
+                    BindProbe::Free => {}
+                    BindProbe::InUse => taken = true,
+                    BindProbe::Denied | BindProbe::Unavailable | BindProbe::Failed(_) => {
+                        return Freed::Unknown;
+                    }
+                }
+            }
+        }
+        if !taken {
+            return Freed::Yes;
+        }
+        if look < FREE_LOOKS {
+            wait();
+        }
+    }
+    Freed::Taken
+}
 
 /// What the user is asked to approve.
 pub(crate) fn preview(service: &Service) -> Vec<String> {
@@ -223,9 +273,73 @@ mod tests {
     use harbormaster_engine::{
         Classification, Holder, Member, Outcome, Port, Protection, Refusal, Service, Target,
     };
-    use harbormaster_platform::{Pid, ProcessKey, StartTime};
+    use std::cell::Cell;
 
-    use super::{confirmed, preview, refusal, report, untracked_exec};
+    use harbormaster_platform::{BindProbe, Pid, ProcessKey, StartTime};
+
+    use super::{FREE_LOOKS, Freed, confirmed, freed, preview, refusal, report, untracked_exec};
+
+    /// How `freed` answers when binding answers each look with `looks`, and
+    /// how often it waited between them.
+    fn freed_after(looks: &[BindProbe]) -> (Freed, usize) {
+        let ports = [Port {
+            port: 3000,
+            address: "127.0.0.1".parse().unwrap(),
+        }];
+        let (look, waits) = (Cell::new(0), Cell::new(0));
+        let probe = |_: IpAddr, _: u16| {
+            let answer = looks[look.get().min(looks.len() - 1)].clone();
+            look.set(look.get() + 1);
+            answer
+        };
+        let answer = freed(&ports, &probe, &|| waits.set(waits.get() + 1));
+        (answer, waits.get())
+    }
+
+    #[test]
+    fn calls_a_port_free_once_binding_it_works() {
+        assert_eq!(freed_after(&[BindProbe::Free]), (Freed::Yes, 0));
+        // A server on its way out may hold the port a moment longer.
+        assert_eq!(
+            freed_after(&[BindProbe::InUse, BindProbe::Free]),
+            (Freed::Yes, 1)
+        );
+    }
+
+    #[test]
+    fn calls_a_port_taken_while_something_still_holds_it() {
+        assert_eq!(
+            freed_after(&[BindProbe::InUse]),
+            (Freed::Taken, FREE_LOOKS - 1)
+        );
+    }
+
+    #[test]
+    fn looks_at_both_families_a_dual_stack_port_takes() {
+        let ports = [Port {
+            port: 3000,
+            address: "::".parse().unwrap(),
+        }];
+        // Something kept the port on IPv4, which an IPv6-only probe misses.
+        let probe = |address: IpAddr, _: u16| {
+            if address.is_ipv4() {
+                BindProbe::InUse
+            } else {
+                BindProbe::Free
+            }
+        };
+
+        assert_eq!(freed(&ports, &probe, &|| {}), Freed::Taken);
+    }
+
+    #[test]
+    fn says_nothing_of_a_port_the_system_wont_tell_about() {
+        assert_eq!(freed_after(&[BindProbe::Denied]), (Freed::Unknown, 0));
+        assert_eq!(
+            freed_after(&[BindProbe::InUse, BindProbe::Failed("odd".into())]),
+            (Freed::Unknown, 1)
+        );
+    }
 
     fn member(pid: u32, command: &str) -> Member {
         Member {
