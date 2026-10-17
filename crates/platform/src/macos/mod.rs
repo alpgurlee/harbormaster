@@ -21,7 +21,7 @@ use crate::{Listener, SocketId, Whereabouts};
 
 pub(crate) use limits::allow_more_open_files;
 pub(crate) use memory::memory;
-pub(crate) use process::{details, executable_of, processes, tracks_exec};
+pub(crate) use process::{details, executable_of, processes, sets, tracks_exec};
 pub(crate) use signal::{presence, signal};
 pub(crate) use trash::trash;
 

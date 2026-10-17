@@ -125,6 +125,23 @@ pub(crate) fn details(key: ProcessKey) -> ProcessDetails {
     }
 }
 
+/// Whether the process `key` names started with `name` set in its
+/// environment; `Gone` if the pid now names another process.
+pub(crate) fn sets(key: ProcessKey, name: &str) -> Field<bool> {
+    let Ok(pid) = libc::pid_t::try_from(key.pid.0) else {
+        return Field::Gone;
+    };
+    if let Some(missing) = identity_problem(pid, key) {
+        return missing.field();
+    }
+    let set = procargs::sets(pid, name);
+    // The pid may have been reused while we were reading.
+    match identity_problem(pid, key) {
+        Some(missing) => missing.field(),
+        None => set,
+    }
+}
+
 /// The executable alone, cheaper than every detail, for telling apps apart.
 pub(crate) fn executable_of(key: ProcessKey) -> Field<PathBuf> {
     let Ok(pid) = libc::pid_t::try_from(key.pid.0) else {

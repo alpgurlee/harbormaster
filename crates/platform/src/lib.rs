@@ -52,6 +52,12 @@ pub fn executable(key: ProcessKey) -> Field<std::path::PathBuf> {
     sys::executable_of(key)
 }
 
+/// Whether the process `key` names started with the environment variable
+/// `name` set to something. Nothing else in its environment is read out.
+pub fn sets_variable(key: ProcessKey, name: &str) -> Field<bool> {
+    sys::sets(key, name)
+}
+
 /// Sends `signal` only if `key` still names the same process.
 pub fn signal(key: ProcessKey, signal: Signal) -> SignalOutcome {
     sys::signal(key, signal)

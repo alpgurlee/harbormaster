@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
 
 use harbormaster_platform::{
-    Field, Owner, Pid, ProcessEntry, details, executable, processes, tracks_exec,
+    Field, Owner, Pid, ProcessEntry, details, executable, processes, sets_variable, tracks_exec,
 };
 
 fn find(pid: u32) -> ProcessEntry {
@@ -144,4 +144,51 @@ fn lists_processes_of_other_users_too() {
 
     assert_eq!(launchd.owner, Owner::System);
     assert_eq!(launchd.name, "launchd");
+}
+
+/// A program of our own that only waits: the system keeps its own
+/// programs' environments from view, but not others'.
+fn waiter(folder: &std::path::Path) -> std::path::PathBuf {
+    let source = folder.join("main.c");
+    std::fs::write(
+        &source,
+        "#include <unistd.h>\nint main(void){sleep(30);return 0;}\n",
+    )
+    .expect("the program's source should be written");
+    let program = folder.join("waiter");
+    let built = Command::new("cc")
+        .arg("-o")
+        .arg(&program)
+        .arg(&source)
+        .status()
+        .expect("cc should run");
+    assert!(built.success());
+    program
+}
+
+#[test]
+fn tells_whether_a_child_started_with_a_variable_set() {
+    let folder = tempfile::tempdir().unwrap();
+    let program = waiter(folder.path());
+    let mut with = Command::new(&program)
+        .env("JDK_JAVA_OPTIONS", "-cp")
+        .spawn()
+        .unwrap();
+    let mut without = Command::new(&program)
+        .env_remove("JDK_JAVA_OPTIONS")
+        .spawn()
+        .unwrap();
+    let (set, unset) = (find(with.id()).key, find(without.id()).key);
+
+    let answers = (
+        sets_variable(set, "JDK_JAVA_OPTIONS"),
+        sets_variable(unset, "JDK_JAVA_OPTIONS"),
+    );
+    for child in [&mut with, &mut without] {
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    assert_eq!(answers, (Field::Known(true), Field::Known(false)));
+    assert_eq!(sets_variable(set, "JDK_JAVA_OPTIONS"), Field::Gone);
 }
