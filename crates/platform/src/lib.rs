@@ -9,7 +9,7 @@ use macos as sys;
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
     Field, Listener, Memory, Owner, Pid, Presence, ProcessDetails, ProcessEntry, ProcessKey,
-    Signal, SignalOutcome, SocketId, StartTime, Whereabouts,
+    Signal, SignalOutcome, SocketId, StartTime, Thermal, Whereabouts,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -85,4 +85,9 @@ pub fn allow_more_open_files() -> Result<u64, Error> {
 /// Used and total memory of the machine, if the OS says.
 pub fn memory() -> Option<Memory> {
     sys::memory()
+}
+
+/// How hard the system is working to cool the machine down right now.
+pub fn thermal() -> Thermal {
+    sys::thermal()
 }

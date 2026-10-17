@@ -125,6 +125,19 @@ pub enum Presence {
     Unknown,
 }
 
+/// How hard the system is working to cool the machine down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Thermal {
+    Nominal,
+    /// A little warm: the system may take small steps.
+    Fair,
+    /// Performance is being reduced to cool down.
+    Serious,
+    /// Performance is reduced a lot until it cools down.
+    Critical,
+    Unknown,
+}
+
 /// The machine's memory the way its own monitor counts it: Activity
 /// Monitor's "Memory Used", Task Manager's "In use".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
