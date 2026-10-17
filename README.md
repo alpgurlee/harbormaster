@@ -28,9 +28,9 @@ How a stop works:
 
 - It first shows which processes will stop and which stay open, then asks the server to exit. If it is
   still running five seconds later, you're offered a forced stop.
-- Right before each signal it checks again that every process is the one you approved, by PID and start
-  time. The check and the signal are two calls, so this narrows the window for a reused PID rather than
-  closing it.
+- Right before each signal it checks again that every process is the one you approved: the same PID and
+  start time, and no other program started since. The check and the signal are separate steps, so this
+  narrows the window for a reused PID or a newly started program rather than closing it.
 - It refuses system processes, other users' processes, the databases it recognizes, processes it couldn't
   fully read, anything Harbormaster itself runs under, and a server whose socket your shell, terminal or
   coding agent holds too. When a program outside the server holds the socket, it says so instead, since
