@@ -9,6 +9,7 @@ vi.mock("./api", async (importOriginal) => ({
   inApp: true,
   resizePanel: vi.fn(async () => {}),
   hidePanel: vi.fn(async () => {}),
+  settingsSubscribe: vi.fn(async () => {}),
 }));
 
 afterEach(() => {

@@ -33,6 +33,7 @@ fn main() {
             commands::open_cleaner,
             commands::open_settings,
             commands::settings_get,
+            commands::settings_subscribe,
             commands::settings_set,
             commands::clean_scan,
             commands::clean_hunt,
@@ -58,6 +59,7 @@ fn main() {
             app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             app.manage(settings::Store::open(
                 app.path().app_config_dir()?.join("settings.json"),
+                harbormaster_cleaner::account_home()?,
             ));
             panel::create(app.handle())?;
             tray::create(app.handle())?;

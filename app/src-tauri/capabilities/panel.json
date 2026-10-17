@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "panel",
-  "description": "What the tray panel may ask of the app: its own commands, to open the cleaner and the settings, to read the settings and hear when they change, nothing else.",
+  "description": "What the tray panel may ask of the app: its own commands, to open the cleaner and the settings, to be told the settings as they change, nothing else.",
   "windows": ["panel"],
   "permissions": [
     "allow-subscribe",
@@ -14,9 +14,7 @@
     "allow-quit-app",
     "allow-open-cleaner",
     "allow-open-settings",
-    "allow-settings-get",
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
+    "allow-settings-subscribe",
     "allow-resize-panel",
     "allow-hide-panel",
     "allow-quit"

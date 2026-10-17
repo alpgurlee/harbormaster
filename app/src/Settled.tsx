@@ -1,39 +1,32 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { inApp, onSettings, settingsGet } from "./api";
+import { inApp, settingsSubscribe } from "./api";
 import { I18nProvider, localeOf, type Locale } from "./i18n";
 import type { Language, Settings } from "./types";
 
-/** Where a window reads the settings, and hears when they change. */
+/** Where a window is told the settings. */
 export interface SettingsSource {
-  get: () => Promise<Settings>;
-  /** Calls `told` with each change; resolves to what stops it. */
-  listen: (told: (settings: Settings) => void) => Promise<() => void>;
+  /** Calls `told` with the settings in force, then with each change. */
+  subscribe: (told: (settings: Settings) => void) => Promise<void>;
 }
 
-const APP: SettingsSource | null = inApp ? { get: settingsGet, listen: onSettings } : null;
+const APP: SettingsSource | null = inApp ? { subscribe: settingsSubscribe } : null;
 
-/** The settings in force, read once and then kept up with; none outside the app. */
+/** The settings in force, kept up with as they change; none outside the app. */
 export function useSettings(source: SettingsSource | null = APP): Settings | null {
   const [settings, setSettings] = useState<Settings | null>(null);
   useEffect(() => {
     if (source === null) return;
+    // A window that subscribes again is told the new way only, but what was already on its way
+    // to the old one can still arrive after the new one's news.
     let live = true;
-    // A change heard first is newer than what the first reading brings back.
-    let heard = false;
-    const stop = source.listen((next) => {
-      heard = true;
-      if (live) setSettings(next);
-    });
     source
-      .get()
-      .then((first) => {
-        if (live && !heard) setSettings(first);
+      .subscribe((next) => {
+        if (live) setSettings(next);
       })
       .catch(console.error);
     return () => {
       live = false;
-      stop.then((unlisten) => unlisten()).catch(console.error);
     };
   }, [source]);
   return settings;

@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { useI18n } from "./i18n";
@@ -12,20 +13,18 @@ afterEach(() => {
 
 const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30 };
 
-/** Settings the test hands out, first read when `first` settles, and changes it tells of. */
-function source(first: Promise<Settings>) {
-  let told: (settings: Settings) => void = () => {};
-  let stops = 0;
+/** Settings the test tells the window of, as the app does: what is in force first, then each change. */
+function source() {
+  const listeners: ((settings: Settings) => void)[] = [];
   const settings: SettingsSource = {
-    get: () => first,
-    listen: (listener) => {
-      told = listener;
-      return Promise.resolve(() => {
-        stops += 1;
-      });
+    subscribe: (listener) => {
+      listeners.push(listener);
+      return Promise.resolve();
     },
   };
-  return { settings, change: (next: Settings) => act(() => told(next)), stops: () => stops };
+  // Through the latest subscription unless told which.
+  const tell = (next: Settings, through = listeners.length - 1) => act(() => listeners[through](next));
+  return { settings, tell, subscriptions: () => listeners.length };
 }
 
 function Word() {
@@ -33,49 +32,52 @@ function Word() {
 }
 
 describe("a window's settings", () => {
-  it("speaks the language and wears the appearance chosen, and follows a change", async () => {
-    const { settings, change } = source(Promise.resolve({ ...DEFAULTS, language: "tr", appearance: "dark" }));
+  it("speaks the system's language until it is told the settings", () => {
+    const { settings } = source();
     render(
       <Settled source={settings}>
         <Word />
       </Settled>,
     );
-
-    expect(await screen.findByText("Genel Bakış")).toBeTruthy();
-    expect(document.documentElement.dataset.theme).toBe("dark");
-
-    change({ ...DEFAULTS, language: "en" });
 
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it("keeps a change heard before the first reading came back", async () => {
-    let answer: (settings: Settings) => void = () => {};
-    const { settings, change } = source(new Promise((resolve) => (answer = resolve)));
+  it("speaks the language and wears the appearance chosen, and follows a change", () => {
+    const { settings, tell } = source();
     render(
       <Settled source={settings}>
         <Word />
       </Settled>,
     );
 
-    change({ ...DEFAULTS, language: "tr" });
-    await act(async () => answer({ ...DEFAULTS, language: "en" }));
+    tell({ ...DEFAULTS, language: "tr", appearance: "dark" });
 
     expect(screen.getByText("Genel Bakış")).toBeTruthy();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    tell({ ...DEFAULTS, language: "en" });
+
+    expect(screen.getByText("Overview")).toBeTruthy();
+    expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it("stops hearing of changes once it is gone", async () => {
-    const { settings, stops } = source(Promise.resolve(DEFAULTS));
-    const { unmount } = render(
-      <Settled source={settings}>
-        <Word />
-      </Settled>,
+  it("ignores what still reaches a subscription it gave up", () => {
+    const { settings, tell, subscriptions } = source();
+    // Mounted twice, as in development: the first subscription is given up for the second.
+    render(
+      <StrictMode>
+        <Settled source={settings}>
+          <Word />
+        </Settled>
+      </StrictMode>,
     );
+    expect(subscriptions()).toBe(2);
 
-    unmount();
-    await act(async () => {});
+    tell({ ...DEFAULTS, language: "tr" }, 1);
+    tell({ ...DEFAULTS, language: "en" }, 0);
 
-    expect(stops()).toBe(1);
+    expect(screen.getByText("Genel Bakış")).toBeTruthy();
   });
 });

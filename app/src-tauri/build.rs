@@ -13,6 +13,7 @@ fn main() {
         "open_cleaner",
         "open_settings",
         "settings_get",
+        "settings_subscribe",
         "settings_set",
         "clean_scan",
         "clean_hunt",

@@ -1,13 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "What the settings window may ask of the app: to read and change the settings, to hear when they change, and to be dragged by its top.",
+  "description": "What the settings window may ask of the app: to read and change the settings, to be told them as they change, and to be dragged by its top.",
   "windows": ["settings"],
   "permissions": [
     "allow-settings-get",
+    "allow-settings-subscribe",
     "allow-settings-set",
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
     "core:window:allow-start-dragging"
   ]
 }
