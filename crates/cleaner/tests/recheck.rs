@@ -33,7 +33,9 @@ fn leaves_out_what_went_or_was_made_again_since_the_scan() {
     let roots = [machine.home.join("code")];
     let findings = scanned(&machine.home, &roots, &[]);
     fs::remove_dir_all(gone.join("node_modules")).expect("removed by hand");
-    fs::remove_dir_all(again.join("node_modules")).expect("removed by hand");
+    // Moved aside rather than removed, so the new folder can't get its inode.
+    fs::rename(again.join("node_modules"), again.join("node_modules.old"))
+        .expect("moved aside by hand");
     write(&again.join("node_modules/left-pad/index.js"), b"x");
 
     let now = recheck(&reach(&machine.home), &findings, &Usage::default())

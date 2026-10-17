@@ -196,7 +196,8 @@ fn refuses_a_file_made_again_or_turned_into_a_folder_since() {
     write(&again, &vec![1; 2 * MIB]);
     write(&folder, &vec![1; 2 * MIB]);
     let found = hunted(&machine.home, &[]);
-    fs::remove_file(&again).expect("removed by hand");
+    // Moved aside rather than removed, so the new file can't get its inode.
+    fs::rename(&again, machine.home.join("Movies/again old.mov")).expect("moved aside by hand");
     write(&again, &vec![2; 2 * MIB]);
     fs::remove_file(&folder).expect("removed by hand");
     write(&folder.join("inside"), b"x");

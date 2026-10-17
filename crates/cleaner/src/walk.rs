@@ -365,7 +365,8 @@ mod tests {
         let (name, seen) = parent.entries_while(|| true).unwrap().pop().unwrap();
         assert!(parent.child_if_same(&name, &seen).unwrap().is_some());
 
-        fs::remove_dir(real.join("cache")).unwrap();
+        // Moved aside rather than removed, so the new one can't get its inode.
+        fs::rename(real.join("cache"), real.join("cache old")).unwrap();
         fs::create_dir(real.join("cache")).unwrap();
 
         assert!(parent.child_if_same(&name, &seen).unwrap().is_none());
