@@ -1559,6 +1559,7 @@ dependencies = [
  "harbormaster-cleaner",
  "harbormaster-engine",
  "harbormaster-platform",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "serde",

@@ -298,8 +298,10 @@ fn still_fits(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::io::{Read, Write};
+    use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command};
+    use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
     use harbormaster_cleaner::{Finding, Group, Identity, Kind};
@@ -609,11 +611,25 @@ mod tests {
 
     /// A program called `java` that only waits, started as a Gradle daemon's
     /// JVM would be, in `folder`.
+    /// Whether the fake daemon still answers: no signal that ends it is
+    /// waiting for it.
+    fn answers(daemon: &mut Child) -> bool {
+        let mut echo = [0];
+        daemon
+            .stdin
+            .as_mut()
+            .is_some_and(|stdin| stdin.write_all(b"?").is_ok())
+            && daemon
+                .stdout
+                .as_mut()
+                .is_some_and(|stdout| stdout.read_exact(&mut echo).is_ok())
+    }
+
     fn fake_gradle_daemon(folder: &Path) -> Child {
         let source = folder.join("main.c");
         std::fs::write(
             &source,
-            "#include <unistd.h>\nint main(void){sleep(30);return 0;}\n",
+            "#include <unistd.h>\nint main(void){char c;while(read(0,&c,1)==1)write(1,&c,1);return 0;}\n",
         )
         .expect("the program's source should be written");
         let java = folder.join("java");
@@ -634,6 +650,8 @@ mod tests {
             ])
             .env_remove("JDK_JAVA_OPTIONS")
             .current_dir(folder)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .expect("the program should start")
     }
@@ -657,15 +675,15 @@ mod tests {
         let stopped = daemons.stop(approval, |token| (token == 7).then(|| listed.clone()));
         // A daemon seen exiting may not be ready to be waited for yet.
         let deadline = Instant::now() + Duration::from_secs(5);
-        let mut exited = daemon.try_wait().unwrap().is_some();
-        while !exited && Instant::now() < deadline {
+        let mut ended = daemon.try_wait().unwrap();
+        while ended.is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
-            exited = daemon.try_wait().unwrap().is_some();
+            ended = daemon.try_wait().unwrap();
         }
-        if !exited {
+        if ended.is_none() {
             daemon.kill().unwrap();
+            daemon.wait().unwrap();
         }
-        daemon.wait().unwrap();
 
         assert_eq!(stoppable.unwrap(), [project.join("build")]);
         assert_eq!(
@@ -680,7 +698,11 @@ mod tests {
             stopped["outcomes"][0]["outcome"],
             serde_json::to_value(Outcome::Stopped).unwrap()
         );
-        assert!(exited);
+        // Ended by the stop's request, not on its own.
+        assert_eq!(
+            ended.and_then(|status| status.signal()),
+            Some(libc::SIGTERM)
+        );
     }
 
     #[test]
@@ -697,7 +719,7 @@ mod tests {
             DaemonPreview::Ready { approval, .. } => daemons.stop(approval, |_| None).err(),
             DaemonPreview::Refused { reason } => Some(reason),
         };
-        let running = daemon.try_wait().unwrap().is_none();
+        let running = answers(&mut daemon);
         daemon.kill().unwrap();
         daemon.wait().unwrap();
 
