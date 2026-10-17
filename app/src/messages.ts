@@ -114,6 +114,7 @@ export interface Messages {
   groupDocuments: string;
   groupOtherFiles: string;
   aboutProjects: string;
+  projectsChosen: Plural;
   aboutPackages: string;
   aboutXcode: string;
   aboutApps: string;
@@ -359,7 +360,11 @@ export const en: Messages = {
   groupImages: "Images",
   groupDocuments: "Documents",
   groupOtherFiles: "Other files",
-  aboutProjects: "Build outputs of projects left alone for 30 days. npm install or cargo build makes them again.",
+  aboutProjects: "Build outputs of your projects. npm install or cargo build makes them again.",
+  projectsChosen: {
+    one: "Chosen once their project has been left alone for {count} day.",
+    other: "Chosen once their project has been left alone for {count} days.",
+  },
   aboutPackages: "Downloads your package managers keep. They come back when needed.",
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
@@ -608,7 +613,11 @@ export const tr: Messages = {
   groupImages: "Görseller",
   groupDocuments: "Belgeler",
   groupOtherFiles: "Diğer dosyalar",
-  aboutProjects: "30 gündür dokunulmayan projelerin derleme çıktıları. npm install ya da cargo build onları yeniden oluşturur.",
+  aboutProjects: "Projelerinin derleme çıktıları. npm install ya da cargo build onları yeniden oluşturur.",
+  projectsChosen: {
+    one: "Projesine {count} gündür dokunulmadıysa seçili gelir.",
+    other: "Projesine {count} gündür dokunulmadıysa seçili gelir.",
+  },
   aboutPackages: "Paket yöneticilerinin sakladığı indirmeler. Gerektiğinde yeniden iner.",
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",

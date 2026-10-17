@@ -18,6 +18,8 @@ export interface ReviewProps {
   findings: Finding[];
   home: string;
   chosen: Set<string>;
+  /** How long a project had to sit for the last scan to choose its build outputs; none before a scan. */
+  idleDays: number | null;
   /** Milliseconds since the Unix epoch, for how long projects have sat. */
   now: number;
   onChoose: (next: Set<string>) => void;
@@ -25,7 +27,7 @@ export interface ReviewProps {
 }
 
 /** A section's groups on the left, the one looked at on the right, item by item. */
-export function Review({ findings, home, chosen, now, onChoose, onReveal }: ReviewProps) {
+export function Review({ findings, home, chosen, idleDays, now, onChoose, onReveal }: ReviewProps) {
   const i18n = useI18n();
   const groups = groupsOf(findings, chosen);
   const [current, setCurrent] = useState<CleanGroup | null>(null);
@@ -68,7 +70,10 @@ export function Review({ findings, home, chosen, now, onChoose, onReveal }: Revi
       </ul>
       <section className={styles.detail} aria-label={i18n.t(NAMES[view.group])}>
         <div className={styles.intro}>
-          <p className={styles.about}>{i18n.t(ABOUT[view.group])}</p>
+          <p className={styles.about}>
+            {i18n.t(ABOUT[view.group])}
+            {view.group === "projects" && idleDays !== null ? ` ${i18n.plural("projectsChosen", idleDays)}` : null}
+          </p>
           {view.findings.every(selectable) ? null : <p className={styles.held}>{i18n.t("heldHint")}</p>}
         </div>
         <div className={styles.toolbar}>

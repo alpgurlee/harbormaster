@@ -18,8 +18,6 @@ use serde::Serialize;
 
 use crate::scanning;
 
-/// How long a project sits untouched before its build outputs are picked.
-const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
 /// The least room a file takes to be listed as large: 50 MB, as the window says.
 const LARGE_FROM: u64 = 50 * 1024 * 1024;
 
@@ -37,6 +35,9 @@ pub(crate) enum ScanEvent {
         home: PathBuf,
         #[serde(flatten)]
         listed: Listed,
+        /// How long a project had to sit for this scan to pick its build
+        /// outputs; none for a hunt or a listing of apps.
+        idle_days: Option<u32>,
     },
 }
 
@@ -415,20 +416,31 @@ impl Cleaning {
 }
 
 impl Working {
-    /// Scans this user's home folder, telling `told` as it goes.
-    pub(crate) fn scan(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
+    /// Scans this user's home folder, telling `told` as it goes: projects
+    /// in `roots`, or the usual folders when there are none, their build
+    /// outputs picked once left alone for `idle_days`.
+    pub(crate) fn scan(
+        &self,
+        roots: &[PathBuf],
+        idle_days: u32,
+        told: &(dyn Fn(ScanEvent) + Sync),
+    ) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
-        let roots = harbormaster_cleaner::usual_roots(&home);
+        let roots = roots_or_usual(&home, roots);
         let usage = usage_now().map_err(failed)?;
-        let survey = survey(&home, &roots, &usage);
+        let survey = survey(&home, &roots, idle_after(idle_days), &usage);
         let mut findings = harbormaster_cleaner::scan_with(&survey, &cleaning.stop, &|measured| {
             told(ScanEvent::Measured(measured));
         })
         .map_err(failed)?;
         findings.retain(showable);
         let listed = cleaning.show(Search::Scan, findings).into();
-        told(ScanEvent::Done { home, listed });
+        told(ScanEvent::Done {
+            home,
+            listed,
+            idle_days: Some(idle_days),
+        });
         Ok(())
     }
 
@@ -448,7 +460,11 @@ impl Working {
         .map_err(failed)?;
         findings.retain(showable);
         let listed = cleaning.show(Search::Hunt, findings).into();
-        told(ScanEvent::Done { home, listed });
+        told(ScanEvent::Done {
+            home,
+            listed,
+            idle_days: None,
+        });
         Ok(())
     }
 
@@ -482,7 +498,11 @@ impl Working {
             .map_err(failed)?;
         findings.retain(showable);
         let listed = cleaning.show(Search::Apps, findings).into();
-        told(ScanEvent::Done { home, listed });
+        told(ScanEvent::Done {
+            home,
+            listed,
+            idle_days: None,
+        });
         Ok(())
     }
 
@@ -573,13 +593,32 @@ fn showable(finding: &Finding) -> bool {
     serde_json::to_value(finding).is_ok()
 }
 
-fn survey<'a>(home: &'a Path, roots: &'a [PathBuf], usage: &'a Usage) -> Survey<'a> {
+/// Where the user said their projects are, or the usual folders when they
+/// said nowhere.
+fn roots_or_usual(home: &Path, chosen: &[PathBuf]) -> Vec<PathBuf> {
+    if chosen.is_empty() {
+        harbormaster_cleaner::usual_roots(home)
+    } else {
+        chosen.to_vec()
+    }
+}
+
+fn idle_after(days: u32) -> Duration {
+    Duration::from_secs(u64::from(days) * 86_400)
+}
+
+fn survey<'a>(
+    home: &'a Path,
+    roots: &'a [PathBuf],
+    idle_after: Duration,
+    usage: &'a Usage,
+) -> Survey<'a> {
     Survey {
         home,
         roots,
         busy: &usage.busy,
         running: &usage.running,
-        idle_after: IDLE_AFTER,
+        idle_after,
         now: SystemTime::now(),
     }
 }
@@ -623,7 +662,12 @@ mod tests {
         Why,
     };
 
-    use super::{Cleaning, Listed, MapEvent, Refusal, RunEvent, ScanEvent, Search, stayed};
+    use std::time::Duration;
+
+    use super::{
+        Cleaning, Listed, MapEvent, Refusal, RunEvent, ScanEvent, Search, idle_after,
+        roots_or_usual, stayed,
+    };
 
     fn finding(path: &str) -> Finding {
         Finding {
@@ -1151,6 +1195,7 @@ mod tests {
                 hunted: false,
                 apps_listed: false,
             },
+            idle_days: Some(14),
         };
         let removed = RunEvent::Removed(Removal {
             path: PathBuf::from("/Users/dev/.npm/_cacache"),
@@ -1220,7 +1265,7 @@ mod tests {
         );
         assert_eq!(
             json(serde_json::to_value(found)),
-            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": [], "scanned": true, "hunted": false, "appsListed": false})
+            serde_json::json!({"kind": "done", "token": 3, "home": "/Users/dev", "findings": [], "scanned": true, "hunted": false, "appsListed": false, "idleDays": 14})
         );
         assert_eq!(
             json(serde_json::to_value(removed)),
@@ -1239,5 +1284,20 @@ mod tests {
             json(serde_json::to_value(Refusal::Unlisted)),
             serde_json::json!({"code": "unlisted"})
         );
+    }
+
+    #[test]
+    fn looks_for_projects_where_the_user_said_or_else_in_the_usual_folders() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join("code")).unwrap();
+        let chosen = vec![home.path().join("work")];
+
+        assert_eq!(roots_or_usual(home.path(), &[]), [home.path().join("code")]);
+        assert_eq!(roots_or_usual(home.path(), &chosen), chosen);
+    }
+
+    #[test]
+    fn chooses_build_outputs_after_the_days_the_user_set() {
+        assert_eq!(idle_after(14), Duration::from_secs(14 * 86_400));
     }
 }

@@ -21,8 +21,8 @@
 The panel lists the dev servers listening on TCP ports, grouped by project when it can find one, with the
 framework, the git branch or worktree, what started it (your terminal, a script such as `npm run dev`, a
 coding agent), how long it has been running, its memory and a CPU trend. Other listeners that aren't
-part of macOS are one click away. From a row you can open a server in the browser, show its project in
-Finder, or stop it.
+part of macOS are one click away, along with any program you told it in Settings never to count as a dev
+server. From a row you can open a server in the browser, show its project in Finder, or stop it.
 
 How a stop works:
 
@@ -50,7 +50,7 @@ A scan looks for:
 - **Build outputs** in your projects: `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo` and
   `.parcel-cache` next to a `package.json`, and any folder tagged with a `CACHEDIR.TAG`, such as Cargo's
   `target`. Projects are looked for up to six folders deep in `~/Developer`, `~/Projects`, `~/code`,
-  `~/src`, `~/dev`, `~/workspace`, `~/repos` and `~/work`.
+  `~/src`, `~/dev`, `~/workspace`, `~/repos` and `~/work`, or in the folders you name in Settings.
 - **Package caches** of npm, pnpm, Yarn, Bun, pip, uv, Poetry, Cargo, Go, Composer, Dart, Deno, SwiftPM,
   Carthage, Gradle, Maven, NuGet, CocoaPods, Homebrew and Playwright.
 - **Xcode data**: DerivedData, simulator caches, device support files and archives.
@@ -66,7 +66,7 @@ What gets chosen, and what happens to it:
 
 - Caches and logs are chosen for you. Build outputs are listed whatever their age, and chosen when
   neither the project folder, anything directly in it, nor anything directly in its `.git` folder has
-  changed for 30 days. Device support
+  changed for 30 days, or for as many days as you set in Settings. Device support
   files are chosen except the most recently changed one for iOS and for watchOS. Once you confirm, what
   is chosen is deleted for good.
 - Things that may be yours to keep are listed but never chosen for you, and go to the Trash instead of

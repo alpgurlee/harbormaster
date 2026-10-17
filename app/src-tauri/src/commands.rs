@@ -159,11 +159,13 @@ pub(crate) async fn clean_scan(
     channel: Channel<ScanEvent>,
     window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
+    store: State<'_, Store>,
 ) -> Result<(), Refusal> {
+    let settings = store.get();
     // Taken before the work is queued, so closing the window stops it from here on.
     let working = cleaning.begin(|| open(&window))?;
     tauri::async_runtime::spawn_blocking(move || {
-        working.scan(&|event| {
+        working.scan(&settings.roots, settings.idle_days, &|event| {
             // A closed window stops the scan itself.
             let _ = channel.send(event);
         })

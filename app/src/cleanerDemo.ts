@@ -163,7 +163,7 @@ export const demo: CleanerBackend = {
       onEvent({ kind: "measured", done: index + 1, total: FINDINGS.length, bytes: each.bytes });
     }
     scanned = true;
-    onEvent({ kind: "done", token: 1, home: HOME, findings: shown(), scanned, hunted, appsListed });
+    onEvent({ kind: "done", token: 1, home: HOME, findings: shown(), scanned, hunted, appsListed, idleDays: 30 });
   },
   async hunt(onEvent: (event: ScanEvent) => void) {
     const folders = ["Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures", "code"];
@@ -173,7 +173,7 @@ export const demo: CleanerBackend = {
       onEvent({ kind: "measured", done: index + 1, total: folders.length, bytes });
     }
     hunted = true;
-    onEvent({ kind: "done", token: 2, home: HOME, findings: shown(), scanned, hunted, appsListed });
+    onEvent({ kind: "done", token: 2, home: HOME, findings: shown(), scanned, hunted, appsListed, idleDays: null });
   },
   async apps(onEvent: (event: ScanEvent) => void) {
     for (const [index, app] of APPS.entries()) {
@@ -181,7 +181,7 @@ export const demo: CleanerBackend = {
       onEvent({ kind: "measured", done: index + 1, total: APPS.length, bytes: app.bytes });
     }
     appsListed = true;
-    onEvent({ kind: "done", token: 4, home: HOME, findings: shown(), scanned, hunted, appsListed });
+    onEvent({ kind: "done", token: 4, home: HOME, findings: shown(), scanned, hunted, appsListed, idleDays: null });
   },
   async run(_token: number, paths: string[], onEvent: (event: RunEvent) => void) {
     let freed = 0;

@@ -128,11 +128,20 @@ function show(backend: CleanerBackend, locale: "en" | "tr" = "en") {
 
 const scanButton = () => screen.getByRole("button", { name: "Scan" });
 
-/** Asks for a scan, and lists `findings` as it ends. */
-function found(driver: ReturnType<typeof fake>, findings = FINDINGS) {
+/** Asks for a scan, and lists `findings` as it ends, chosen after `idleDays`. */
+function found(driver: ReturnType<typeof fake>, findings = FINDINGS, idleDays = 30) {
   if (driver.scans.length === 0) fireEvent.click(scanButton());
   act(() =>
-    driver.scans[driver.scans.length - 1]({ kind: "done", token: 7, home: HOME, findings, scanned: true, hunted: false, appsListed: false }),
+    driver.scans[driver.scans.length - 1]({
+      kind: "done",
+      token: 7,
+      home: HOME,
+      findings,
+      scanned: true,
+      hunted: false,
+      appsListed: false,
+      idleDays,
+    }),
   );
 }
 
@@ -147,7 +156,9 @@ const film = finding("trip.mov", `${HOME}/Movies/trip.mov`, {
 
 /** Ends the latest hunt with `findings`, as the app sends them: a scan's too, when one came first. */
 function hunted(driver: ReturnType<typeof fake>, findings: Finding[], scanned = false) {
-  act(() => driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true, appsListed: false }));
+  act(() =>
+    driver.hunts[driver.hunts.length - 1]({ kind: "done", token: 8, home: HOME, findings, scanned, hunted: true, appsListed: false, idleDays: null }),
+  );
 }
 
 /** Ends a removal as the app does: what it did, and what is shown from then on. */
@@ -161,6 +172,26 @@ const section = (name: string) => fireEvent.click(screen.getByRole("button", { n
 const hero = () => screen.getByTestId("hero").textContent;
 
 describe("the cleaner window", () => {
+  it("says how long a project had sat for the last scan to choose its build outputs", () => {
+    const driver = fake();
+    show(driver.backend);
+    found(driver, FINDINGS, 14);
+    section("Large files");
+    fireEvent.click(scanButton());
+    hunted(driver, [...FINDINGS, film], true);
+
+    section("Developer");
+
+    expect(screen.getByText(/left alone for 14 days/)).toBeTruthy();
+
+    section("Overview");
+    fireEvent.click(screen.getByRole("button", { name: "Scan again" }));
+    found(driver, FINDINGS, 90);
+    section("Developer");
+
+    expect(screen.getByText(/left alone for 90 days/)).toBeTruthy();
+  });
+
   it("shows the disk, and scans only when asked", async () => {
     const driver = fake();
     show(driver.backend);
@@ -400,6 +431,7 @@ describe("the cleaner window", () => {
         scanned: true,
         hunted: true,
         appsListed: false,
+        idleDays: 30,
       }),
     );
     expect(screen.getByText("2 items")).toBeTruthy();
@@ -445,6 +477,7 @@ describe("the cleaner window", () => {
         scanned: false,
         hunted: false,
         appsListed: true,
+        idleDays: null,
       }),
     );
   }

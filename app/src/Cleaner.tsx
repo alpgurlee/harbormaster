@@ -113,6 +113,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
   const [step, setStep] = useState<Step>({ kind: "ready" });
   const [view, setView] = useState<View>("overview");
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  // How long a project had to sit for the last scan to choose its build outputs.
+  const [idleDays, setIdleDays] = useState<number | null>(null);
   const [disk, setDisk] = useState<Disk | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [mapping, setMapping] = useState<Mapping>({ kind: "ready" });
@@ -156,8 +158,9 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               : current,
           );
         } else {
-          setChosen((current) => rechosen(current, event.findings, kind));
-          const { kind: _, ...found } = event;
+          const { kind: _, idleDays: days, ...found } = event;
+          setChosen((current) => rechosen(current, found.findings, kind));
+          if (days !== null) setIdleDays(days);
           setStep({ kind: "found", ...found });
         }
       }).catch((error: unknown) => setStep({ kind: "refused", refusal: asRefusal(error) }));
@@ -419,6 +422,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               findings={found.findings.filter((finding) => MODULES[view].includes(finding.group))}
               home={found.home}
               chosen={chosen}
+              idleDays={idleDays}
               now={now}
               onChoose={setChosen}
               onReveal={(finding) => backend.reveal(finding.path).catch(console.error)}

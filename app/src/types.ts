@@ -148,6 +148,8 @@ export type ScanEvent =
       scanned: boolean;
       hunted: boolean;
       appsListed: boolean;
+      /** How long a project had to sit for this scan to choose its build outputs; none for a hunt or a listing of apps. */
+      idleDays: number | null;
     };
 
 /** What is shown once a removal is over: what wasn't chosen, and what was left as it was. */

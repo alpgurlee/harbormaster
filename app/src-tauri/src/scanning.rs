@@ -7,9 +7,10 @@ use harbormaster_engine::apps::AppUsage;
 use harbormaster_engine::{Classification, Scanner, Service, Snapshot, live};
 use harbormaster_platform::ProcessKey;
 use serde::Serialize;
-use tauri::AppHandle;
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager};
 
+use crate::settings::Store;
 use crate::tray;
 
 /// Scans come this often while the panel shows, and less often while it doesn't.
@@ -75,7 +76,10 @@ impl Scanning {
         let mut counted = None;
         loop {
             match live::scan(&mut scanner, &home) {
-                Ok(snapshot) => {
+                Ok(mut snapshot) => {
+                    if let Some(store) = app.try_state::<Store>() {
+                        hide(&mut snapshot.services, &store.get().hidden);
+                    }
                     let count = snapshot
                         .services
                         .iter()
@@ -161,6 +165,21 @@ impl Scanning {
     }
 }
 
+/// Takes out of the dev servers those any of whose processes runs a
+/// program the user hid; they are listed with the other listeners.
+fn hide(services: &mut [Service], hidden: &[String]) {
+    for service in services {
+        if service.classification == Classification::Dev
+            && service
+                .processes
+                .iter()
+                .any(|member| hidden.contains(&member.name))
+        {
+            service.classification = Classification::Other;
+        }
+    }
+}
+
 /// The dev servers' processes, which the breakdown counts on their own.
 pub(crate) fn servers(services: &[Service]) -> HashSet<ProcessKey> {
     services
@@ -187,8 +206,67 @@ fn apps(services: &[Service]) -> Option<Vec<AppUsage>> {
 #[cfg(test)]
 mod tests {
     use harbormaster_engine::apps::AppUsage;
+    use harbormaster_engine::{Classification, Member, Service};
+    use harbormaster_platform::{Pid, ProcessKey, StartTime};
 
-    use super::{Memory, Update};
+    use super::{Memory, Update, hide};
+
+    /// A service whose processes are named `names`, its root first.
+    fn service(classification: Classification, names: &[&str]) -> Service {
+        Service {
+            id: format!("{}-1", names.len()),
+            classification,
+            protected: None,
+            ports: Vec::new(),
+            project: None,
+            command: None,
+            started_at: 0,
+            memory_bytes: None,
+            cpu_percent: None,
+            processes: names
+                .iter()
+                .zip(1..)
+                .map(|(name, pid)| Member {
+                    key: ProcessKey {
+                        pid: Pid(pid),
+                        start: StartTime(1),
+                        exec: 0,
+                    },
+                    pid,
+                    name: (*name).into(),
+                    command: None,
+                    memory_bytes: None,
+                    cpu_percent: None,
+                })
+                .collect(),
+            holders: Vec::new(),
+            ancestors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lists_what_a_hidden_program_runs_with_the_other_listeners() {
+        let mut services = vec![
+            service(Classification::Dev, &["npm", "node"]),
+            service(Classification::Dev, &["python3"]),
+            service(Classification::System, &["node"]),
+        ];
+
+        hide(&mut services, &["node".into()]);
+
+        let classes: Vec<Classification> = services
+            .iter()
+            .map(|service| service.classification)
+            .collect();
+        assert_eq!(
+            classes,
+            [
+                Classification::Other,
+                Classification::Dev,
+                Classification::System
+            ]
+        );
+    }
 
     #[test]
     fn tells_the_panel_what_it_expects() {
