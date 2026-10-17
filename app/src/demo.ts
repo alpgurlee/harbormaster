@@ -86,6 +86,7 @@ export function sample(now: number): Update {
     memory: { used: 14.9 * GIB, total: 32 * GIB },
     apps: APPS.map(([name, memoryMib]) => ({ name, memoryBytes: memoryMib * MIB, system: false })),
     scannedAt: now,
+    thermal: "nominal",
   };
 }
 

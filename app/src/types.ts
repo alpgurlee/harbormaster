@@ -69,6 +69,9 @@ export interface AppUsage {
   system: boolean;
 }
 
+/** How hard the system is working to cool the machine down. */
+export type Thermal = "nominal" | "fair" | "serious" | "critical" | "unknown";
+
 export interface Update {
   services: Service[];
   memory: Memory | null;
@@ -76,6 +79,7 @@ export interface Update {
   apps: AppUsage[] | null;
   /** Milliseconds since the Unix epoch. */
   scannedAt: number;
+  thermal: Thermal;
 }
 
 /** The cleaner's groups, in the order it lists them. */

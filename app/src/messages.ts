@@ -46,6 +46,8 @@ export interface Messages {
   memory: string;
   memoryMac: string;
   memoryWindows: string;
+  slowedByHeat: string;
+  busiestServer: string;
   processes: string;
   stopEllipsis: string;
   stopNamed: string;
@@ -297,6 +299,8 @@ export const en: Messages = {
   memory: "Memory",
   memoryMac: "as Activity Monitor counts it",
   memoryWindows: "as Task Manager counts it",
+  slowedByHeat: "Your Mac is reducing performance to cool down.",
+  busiestServer: "{name} is using {percent} CPU.",
   processes: "Processes",
   stopEllipsis: "Stop…",
   stopNamed: "Stop {name}",
@@ -555,6 +559,8 @@ export const tr: Messages = {
   memory: "Bellek",
   memoryMac: "Etkinlik Monitörü'ndeki gibi",
   memoryWindows: "Görev Yöneticisi'ndeki gibi",
+  slowedByHeat: "Mac'in soğumak için performansını düşürüyor.",
+  busiestServer: "{name}, {percent} CPU kullanıyor.",
   processes: "Süreçler",
   stopEllipsis: "Durdur…",
   stopNamed: "Durdur: {name}",

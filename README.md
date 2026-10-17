@@ -26,7 +26,9 @@ The panel lists the dev servers listening on TCP ports, grouped by project when 
 framework, the git branch or worktree, what started it (your terminal, a script such as `npm run dev`, a
 coding agent), how long it has been running, its memory and a CPU trend. Other listeners that aren't
 part of macOS are one click away, along with any program you told it in Settings never to count as a dev
-server. From a row you can open a server in the browser, show its project in Finder, or stop it.
+server. From a row you can open a server in the browser, show its project in Finder, or stop it. When
+macOS slows the Mac down to cool it, the panel says so, and names the dev server using the most CPU if
+one uses half a core or more.
 
 How a stop works:
 

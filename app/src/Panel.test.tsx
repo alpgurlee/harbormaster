@@ -59,7 +59,22 @@ const update: Update = {
     { name: "Slack", memoryBytes: 640 * MIB, system: false },
   ],
   scannedAt: NOW,
+  thermal: "nominal",
 };
+
+/** The update, with the Mac cooling down as `thermal` says and each dev server using `cpu` of one core. */
+function heated(thermal: Update["thermal"], cpu: Record<number, number | null>): Update {
+  return {
+    ...update,
+    thermal,
+    services: update.services.map((service) => {
+      const port = service.ports[0].port;
+      return port in cpu ? { ...service, cpuPercent: cpu[port] } : service;
+    }),
+  };
+}
+
+const cooling = "Your Mac is reducing performance to cool down.";
 
 function show(props: Partial<Parameters<typeof Panel>[0]> = {}, locale: "en" | "tr" = "en") {
   const handlers = { onShow: vi.fn(), onOpen: vi.fn(), onStop: vi.fn(), onQuit: vi.fn() };
@@ -298,6 +313,33 @@ describe("Panel", () => {
     expect(screen.getByText("Looking for servers…")).toBeTruthy();
   });
 
+  it("says when the Mac slows down to cool off, and which dev server uses the most CPU", () => {
+    show({ update: heated("serious", { 3000: 85, 8000: 120 }) });
+
+    expect(screen.getByText(`${cooling} fix/webhooks (:8000) is using 120% CPU.`)).toBeTruthy();
+  });
+
+  it("says nothing of heat while the Mac isn't slowing down", () => {
+    for (const thermal of ["nominal", "fair", "unknown"] as const) {
+      show({ update: heated(thermal, { 3000: 300 }) });
+
+      expect(screen.queryByText(new RegExp(cooling))).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("names no server using under half a core, nor anything but a dev server", () => {
+    show({ update: heated("critical", { 3000: 49.9, 8000: null, 5432: 400 }) });
+
+    expect(screen.getByText(cooling)).toBeTruthy();
+  });
+
+  it("names the first of two dev servers using as much", () => {
+    show({ update: heated("serious", { 3000: 50, 8000: 50 }) });
+
+    expect(screen.getByText(`${cooling} main (:3000) is using 50% CPU.`)).toBeTruthy();
+  });
+
   it("speaks Turkish with Turkish numbers", () => {
     show({}, "tr");
 
@@ -306,5 +348,11 @@ describe("Panel", () => {
     const items = within(screen.getByRole("list", { name: "Uygulamalara göre bellek" })).getAllByRole("listitem");
     expect(parts(items)).toEqual(["Dev sunucuları998 MB", "Google Chrome3,2 GB", "Slack640 MB"]);
     expect(screen.getByText("Değerler Etkinlik Monitörü'ndeki gibi")).toBeTruthy();
+  });
+
+  it("says in Turkish when the Mac slows down to cool off", () => {
+    show({ update: heated("serious", { 3000: 85 }) }, "tr");
+
+    expect(screen.getByText("Mac'in soğumak için performansını düşürüyor. main (:3000), %85 CPU kullanıyor.")).toBeTruthy();
   });
 });

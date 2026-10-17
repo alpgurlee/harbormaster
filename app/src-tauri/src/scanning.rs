@@ -5,8 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use harbormaster_engine::apps::AppUsage;
 use harbormaster_engine::{Classification, Scanner, Service, Snapshot, live};
-use harbormaster_platform::ProcessKey;
-use serde::Serialize;
+use harbormaster_platform::{ProcessKey, Thermal};
+use serde::{Serialize, Serializer};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
@@ -30,6 +30,19 @@ pub(crate) struct Update {
     apps: Option<Vec<AppUsage>>,
     /// Milliseconds since the Unix epoch.
     scanned_at: u64,
+    #[serde(serialize_with = "named")]
+    thermal: Thermal,
+}
+
+/// How hard the Mac is cooling down, by the panel's name for it.
+fn named<S: Serializer>(thermal: &Thermal, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(match thermal {
+        Thermal::Nominal => "nominal",
+        Thermal::Fair => "fair",
+        Thermal::Serious => "serious",
+        Thermal::Critical => "critical",
+        Thermal::Unknown => "unknown",
+    })
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -111,6 +124,7 @@ impl Scanning {
                 .map_or(0, |since| {
                     u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
                 }),
+            thermal: harbormaster_platform::thermal(),
         };
         let mut state = self.lock();
         // A panel that reloaded subscribes again; its old channel goes.
@@ -207,7 +221,7 @@ fn apps(services: &[Service]) -> Option<Vec<AppUsage>> {
 mod tests {
     use harbormaster_engine::apps::AppUsage;
     use harbormaster_engine::{Classification, Member, Service};
-    use harbormaster_platform::{Pid, ProcessKey, StartTime};
+    use harbormaster_platform::{Pid, ProcessKey, StartTime, Thermal};
 
     use super::{Memory, Update, hide};
 
@@ -280,6 +294,7 @@ mod tests {
                 members: Vec::new(),
             }]),
             scanned_at: 42,
+            thermal: Thermal::Serious,
         };
 
         assert_eq!(
@@ -288,8 +303,35 @@ mod tests {
                 "services": [],
                 "memory": { "used": 1, "total": 2 },
                 "apps": [{ "name": "Google Chrome", "memoryBytes": 3, "system": false }],
-                "scannedAt": 42
+                "scannedAt": 42,
+                "thermal": "serious"
             })
+        );
+    }
+
+    #[test]
+    fn names_each_thermal_state_as_the_panel_reads_it() {
+        let named = |thermal| {
+            let update = Update {
+                services: Vec::new(),
+                memory: None,
+                apps: None,
+                scanned_at: 0,
+                thermal,
+            };
+            serde_json::to_value(update).unwrap()["thermal"].clone()
+        };
+
+        assert_eq!(
+            [
+                Thermal::Nominal,
+                Thermal::Fair,
+                Thermal::Serious,
+                Thermal::Critical,
+                Thermal::Unknown,
+            ]
+            .map(named),
+            ["nominal", "fair", "serious", "critical", "unknown"]
         );
     }
 }

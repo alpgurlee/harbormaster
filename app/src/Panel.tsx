@@ -8,7 +8,7 @@ import { platform } from "./platform";
 import { agentOf, displayName } from "./session";
 import { trendOf } from "./store";
 import { Trend } from "./Trend";
-import type { AppUsage, Memory, Service, Update } from "./types";
+import type { AppUsage, Memory, Service, Thermal, Update } from "./types";
 import styles from "./Panel.module.css";
 
 /** A scan younger than this reads as now. */
@@ -108,7 +108,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   return (
     <div className={styles.panel} hidden={hidden}>
       <Header onClean={onClean} onSettings={onSettings} />
-      <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} onQuit={onQuit} />
+      <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} thermal={update.thermal} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
         <input
@@ -202,10 +202,11 @@ interface SummaryProps {
   tints: Map<string, number>;
   memory: Memory | null;
   apps: AppUsage[] | null;
+  thermal: Thermal;
   onQuit: (app: AppUsage) => void;
 }
 
-function Summary({ dev, tints, memory, apps, onQuit }: SummaryProps) {
+function Summary({ dev, tints, memory, apps, thermal, onQuit }: SummaryProps) {
   const i18n = useI18n();
   const [open, setOpen] = useState(false);
   const sum = totals(dev);
@@ -255,6 +256,7 @@ function Summary({ dev, tints, memory, apps, onQuit }: SummaryProps) {
           </button>
         ) : null}
       </div>
+      {thermal === "serious" || thermal === "critical" ? <Heat dev={dev} /> : null}
       {memory && open ? (
         <Breakdown servers={servers} projects={projects} apps={apps} total={memory.total} onQuit={onQuit} />
       ) : null}
@@ -348,11 +350,44 @@ interface RowProps {
   onStop: () => void;
 }
 
+/** What a row is called: its branch, else what runs, else its project. */
+function titleOf(service: Service): string {
+  return service.project?.branch ?? service.processes[0]?.name ?? service.project?.name ?? "";
+}
+
+/** A dev server is named by the heat note once it uses this much of one core. */
+const BUSY_CPU_PERCENT = 50;
+
+/** The Mac slowing down to cool off, and the dev server using the most CPU meanwhile, which needn't be why. */
+function Heat({ dev }: { dev: Service[] }) {
+  const i18n = useI18n();
+  let busiest: { service: Service; percent: number } | null = null;
+  for (const service of dev) {
+    const percent = service.cpuPercent;
+    if (percent === null || !Number.isFinite(percent) || percent < BUSY_CPU_PERCENT) continue;
+    if (busiest === null || percent > busiest.percent || (percent === busiest.percent && service.id < busiest.service.id)) {
+      busiest = { service, percent };
+    }
+  }
+  const port = busiest?.service.ports[0]?.port;
+  return (
+    <p className={styles.heat}>
+      {i18n.t("slowedByHeat")}
+      {busiest
+        ? ` ${i18n.t("busiestServer", {
+            name: port === undefined ? titleOf(busiest.service) : `${titleOf(busiest.service)} (:${port})`,
+            percent: i18n.percent(busiest.percent),
+          })}`
+        : null}
+    </p>
+  );
+}
+
 function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps) {
   const i18n = useI18n();
   const port = service.ports[0]?.port;
   const project = service.project;
-  const title = project?.branch ?? service.processes[0]?.name ?? project?.name ?? "";
+  const title = titleOf(service);
   const details = [
     project?.worktree ? i18n.t("worktree") : null,
     service.command,
