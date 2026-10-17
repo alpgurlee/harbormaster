@@ -1,12 +1,13 @@
 use std::sync::OnceLock;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont, VariableFont, point};
-use tauri::AppHandle;
 use tauri::image::Image;
 use tauri::menu::{Menu, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Wry};
 
 use crate::panel;
+use crate::settings::{Language, Store};
 
 pub(crate) const ID: &str = "harbormaster";
 
@@ -19,8 +20,7 @@ const TEXT_SIZE: f32 = 19.0;
 
 /// A click opens the panel; the icon's menu only quits.
 pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
-    let quit = PredefinedMenuItem::quit(app, Some("Quit Harbormaster"))?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = menu(app, Language::System)?;
     TrayIconBuilder::with_id(ID)
         .icon(image(0))
         .icon_as_template(true)
@@ -40,6 +40,43 @@ pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+/// Keeps the icon's menu in the language the settings choose.
+pub(crate) fn speak(app: &AppHandle, store: &Store) {
+    let app = app.clone();
+    store.subscribe("tray", move |settings| {
+        let language = settings.language;
+        let handle = app.clone();
+        // Told under the settings' lock: the menu changes on the main thread.
+        let _ = app.run_on_main_thread(move || {
+            if let (Some(tray), Ok(menu)) = (handle.tray_by_id(ID), menu(&handle, language)) {
+                let _ = tray.set_menu(Some(menu));
+            }
+        });
+        true
+    });
+}
+
+fn menu(app: &AppHandle, language: Language) -> tauri::Result<Menu<Wry>> {
+    let system = harbormaster_platform::preferred_language();
+    let quit = PredefinedMenuItem::quit(app, Some(quit_text(language, system.as_deref())))?;
+    Menu::with_items(app, &[&quit])
+}
+
+/// The quit item in the language the windows speak: the one chosen, or else
+/// the user's first preferred `system` language.
+fn quit_text(language: Language, system: Option<&str>) -> &'static str {
+    let turkish = match language {
+        Language::Tr => true,
+        Language::En => false,
+        Language::System => system.is_some_and(|tag| tag.to_ascii_lowercase().starts_with("tr")),
+    };
+    if turkish {
+        "Harbormaster'dan Çık"
+    } else {
+        "Quit Harbormaster"
+    }
 }
 
 pub(crate) fn show_count(app: &AppHandle, count: usize) {
@@ -167,7 +204,30 @@ const FONT_FILES: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::render;
+    use super::{quit_text, render};
+    use crate::settings::Language;
+
+    #[test]
+    fn says_quit_in_the_language_the_windows_speak() {
+        assert_eq!(quit_text(Language::En, Some("tr-TR")), "Quit Harbormaster");
+        assert_eq!(
+            quit_text(Language::Tr, Some("en-US")),
+            "Harbormaster'dan Çık"
+        );
+        assert_eq!(
+            quit_text(Language::System, Some("tr-TR")),
+            "Harbormaster'dan Çık"
+        );
+        assert_eq!(
+            quit_text(Language::System, Some("TR")),
+            "Harbormaster'dan Çık"
+        );
+        assert_eq!(
+            quit_text(Language::System, Some("en-TR")),
+            "Quit Harbormaster"
+        );
+        assert_eq!(quit_text(Language::System, None), "Quit Harbormaster");
+    }
 
     fn alpha(icon: &(Vec<u8>, u32, u32), x: u32, y: u32) -> u8 {
         icon.0[((y * icon.1 + x) * 4 + 3) as usize]

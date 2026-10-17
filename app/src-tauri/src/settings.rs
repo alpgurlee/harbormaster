@@ -144,11 +144,11 @@ impl Settings {
     }
 }
 
-/// Tells a window what is in force, and says whether it still can be told.
+/// Tells a subscriber what is in force, and says whether it still can be told.
 type Told = Box<dyn Fn(&Settings) -> bool + Send>;
 
-/// The settings in force, the file they are kept in, and the windows told
-/// of each change.
+/// The settings in force, the file they are kept in, and the subscribers
+/// told of each change: the windows, and the menu bar icon's menu.
 pub(crate) struct Store {
     file: PathBuf,
     home: PathBuf,
@@ -157,7 +157,7 @@ pub(crate) struct Store {
 
 struct State {
     current: Settings,
-    /// Each window's way to be told, by its label.
+    /// Each subscriber's way to be told, by its key.
     told: Vec<(String, Told)>,
 }
 
@@ -185,8 +185,8 @@ impl Store {
     }
 
     /// Checks `settings`, writes them down, puts them in force and tells
-    /// every window, handing back what is in force now. Nothing changes if
-    /// they can't be written.
+    /// every subscriber, handing back what is in force now. Nothing changes
+    /// if they can't be written.
     pub(crate) fn set(&self, settings: Settings) -> Result<Settings, Invalid> {
         let settings = settings.checked(&self.home)?;
         let mut state = self.lock();
@@ -198,19 +198,16 @@ impl Store {
         Ok(settings)
     }
 
-    /// Tells the window labelled `window` what is in force now and then each
-    /// change, for as long as `told` says it could be told. Told under the
-    /// same lock as a change, so none falls between. A window that
-    /// subscribes again, as one that reloaded does, is told the new way only.
-    pub(crate) fn subscribe(
-        &self,
-        window: &str,
-        told: impl Fn(&Settings) -> bool + Send + 'static,
-    ) {
+    /// Tells the subscriber identified by `key` what is in force now and
+    /// then each change, for as long as `told` says it could be told.
+    /// Told under the same lock as a change, so none falls between. One that
+    /// subscribes again, as a window that reloaded does, is told the new way
+    /// only.
+    pub(crate) fn subscribe(&self, key: &str, told: impl Fn(&Settings) -> bool + Send + 'static) {
         let mut state = self.lock();
-        state.told.retain(|(label, _)| label != window);
+        state.told.retain(|(subscriber, _)| subscriber != key);
         if told(&state.current) {
-            state.told.push((window.to_owned(), Box::new(told)));
+            state.told.push((key.to_owned(), Box::new(told)));
         }
     }
 

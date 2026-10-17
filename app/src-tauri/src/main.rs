@@ -68,6 +68,7 @@ fn main() {
             ));
             panel::create(app.handle())?;
             tray::create(app.handle())?;
+            tray::speak(app.handle(), &app.state::<settings::Store>());
             app.manage(scanning::start(app.handle().clone()));
             Ok(())
         })
