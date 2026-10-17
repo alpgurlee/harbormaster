@@ -530,7 +530,7 @@ describe("the cleaner window", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Package caches" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Package caches" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Xcode" }));
-    section("System junk");
+    section("Leftovers");
     // The Trash's group comes first, its one item after.
     fireEvent.click(screen.getAllByRole("checkbox", { name: "Trash" })[0]);
 
