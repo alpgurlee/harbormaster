@@ -308,6 +308,7 @@ fn offers_maven_and_nuget_downloads_as_the_users_own_and_never_their_settings() 
             .join(".m2/repository/org/acme/lib/1.0/lib-1.0.jar"),
         2 * MIB,
     );
+    write(&home.path().join(".m2/settings.xml"), 2 * MIB);
     write(&home.path().join(".m2/settings-security.xml"), 2 * MIB);
     write(
         &home
@@ -321,16 +322,21 @@ fn offers_maven_and_nuget_downloads_as_the_users_own_and_never_their_settings() 
     for (name, place) in [("Maven", ".m2/repository"), ("NuGet", ".nuget/packages")] {
         let found = named(&findings, name).unwrap_or_else(|| panic!("{name} in {findings:?}"));
         assert_eq!(
-            (found.group, found.kind, found.picked),
-            (Group::Packages, Kind::Personal, false)
+            (found.group, found.kind, found.picked, found.emptied),
+            (Group::Packages, Kind::Personal, false, false)
         );
         assert!(found.path.ends_with(place), "{found:?}");
     }
-    assert!(
-        findings
-            .iter()
-            .all(|finding| !finding.path.ends_with(".m2"))
-    );
+    let real = home.path().canonicalize().unwrap();
+    for name in [".m2/settings.xml", ".m2/settings-security.xml"] {
+        let kept = real.join(name);
+        assert!(
+            findings
+                .iter()
+                .all(|finding| !kept.starts_with(&finding.path)),
+            "{name}: {findings:?}"
+        );
+    }
 }
 
 #[test]

@@ -873,6 +873,22 @@ describe("the space map", () => {
     expect(driver.maps.map((map) => map.others)).toEqual([false, true]);
   });
 
+  it("offers no map with other apps' data while a scan runs", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked();
+    const containers = { ...mapped(4, "Containers", 0), folder: true, short: "skipped" as const };
+    const root = { ...ROOT, short: "skipped" as const, inside: [...ROOT.inside, containers] };
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: root }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    fireEvent.click(scanButton());
+    fireEvent.click(section());
+
+    expect(screen.queryByRole("button", { name: "Map with other apps' data" })).toBeNull();
+    expect(driver.maps).toHaveLength(1);
+  });
+
   it("maps again as it was asked the first time", () => {
     const driver = fake();
     show(driver.backend);
