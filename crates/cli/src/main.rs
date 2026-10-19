@@ -1,32 +1,25 @@
+// Stopping and cleaning are macOS's alone for now.
+#[cfg(target_os = "macos")]
 mod clean;
 mod format;
+#[cfg(target_os = "macos")]
 mod stop;
 mod why;
 
-use std::io::{self, BufRead, IsTerminal, Write};
+#[cfg(target_os = "macos")]
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use harbormaster_cleaner::{Survey, Usage};
-use harbormaster_engine::{
-    Classification, Outcome, Scanner, Service, Signals, Snapshot, Standing, Target, live,
-};
-use harbormaster_platform::{ProcessKey, Signal};
+#[cfg(target_os = "macos")]
+use harbormaster_engine::Target;
+use harbormaster_engine::{Classification, Scanner, Service, Snapshot, live};
 
 /// How long to wait between the two samples a CPU reading needs.
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
-/// How long a forced process gets to disappear.
-const KILL_GRACE: Duration = Duration::from_secs(2);
-/// How long apart a stopped server's port is looked at while still taken.
-const FREE_WAIT: Duration = Duration::from_millis(100);
-/// How long a project sits untouched before its build outputs are picked.
-const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -56,6 +49,7 @@ enum Command {
         port: u16,
     },
     /// Stop the server on a port, after showing what will stop
+    #[cfg(target_os = "macos")]
     Stop {
         /// The port the server listens on
         #[arg(
@@ -80,6 +74,7 @@ enum Command {
         wait: u64,
     },
     /// Show the build outputs, caches and other leftovers that could go
+    #[cfg(target_os = "macos")]
     Clean {
         /// Print machine-readable JSON
         #[arg(long)]
@@ -115,7 +110,9 @@ fn main() -> ExitCode {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),
         Some(Command::Why { port }) => explain(port),
-        Some(Command::Clean { json, yes }) => survey(json, yes),
+        #[cfg(target_os = "macos")]
+        Some(Command::Clean { json, yes }) => clean::run(json, yes),
+        #[cfg(target_os = "macos")]
         Some(Command::Stop {
             port,
             pid,
@@ -126,8 +123,8 @@ fn main() -> ExitCode {
         }) => {
             let grace = Duration::from_secs(wait);
             match (port, pid) {
-                (Some(port), _) => halt(Target::Port { port, address }, yes, force, grace),
-                (None, Some(pid)) => halt(Target::Pid(pid), yes, force, grace),
+                (Some(port), _) => stop::run(Target::Port { port, address }, yes, force, grace),
+                (None, Some(pid)) => stop::run(Target::Pid(pid), yes, force, grace),
                 (None, None) => Ok(2),
             }
         }
@@ -201,74 +198,6 @@ fn row(service: &Service, now: u64, all: bool) -> Vec<String> {
     row
 }
 
-fn survey(json: bool, yes: bool) -> anyhow::Result<u8> {
-    let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
-    let roots = harbormaster_cleaner::usual_roots(&home);
-    let usage = in_use_now(&home)?;
-    let now = SystemTime::now();
-    let survey = Survey {
-        home: &home,
-        roots: &roots,
-        busy: &usage.busy,
-        running: &usage.running,
-        idle_after: IDLE_AFTER,
-        now,
-    };
-    let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
-        .with_context(|| format!("could not look through {}", home.display()))?;
-    let mut out = io::stdout().lock();
-    if !json {
-        let now = now.duration_since(UNIX_EPOCH)?.as_secs();
-        for line in clean::lines(&findings, &home, now, yes) {
-            writeln!(out, "{line}")?;
-        }
-    }
-    if !yes {
-        if json {
-            writeln!(out, "{}", clean::document(&findings, None)?)?;
-        }
-        return Ok(0);
-    }
-    clean::remove_picked(&findings, json, &mut out, |picked, stop, told| {
-        let reach = harbormaster_cleaner::Reach {
-            home: &home,
-            shared: Path::new(harbormaster_cleaner::SHARED_APPS),
-        };
-        harbormaster_cleaner::remove(
-            &reach,
-            picked,
-            &|| in_use_now(&home).map_err(io::Error::other),
-            &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
-            stop,
-            told,
-        )
-        .with_context(|| format!("could not remove anything under {}", home.display()))
-    })
-}
-
-/// The paths this user's other processes hold, and the projects with a dev
-/// server running, as they are now.
-fn in_use_now(home: &Path) -> anyhow::Result<Usage> {
-    Ok(Usage {
-        busy: live::held().context("could not tell which folders are in use")?,
-        running: running_projects(home)?,
-    })
-}
-
-/// The projects with a dev server running, each with what to call the server.
-fn running_projects(home: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
-    let snapshot = live::scan(&mut Scanner::default(), home)?;
-    Ok(snapshot
-        .services
-        .iter()
-        .filter(|service| service.classification == Classification::Dev)
-        .filter_map(|service| {
-            let root = service.project.as_ref()?.root.clone();
-            Some((root, format!("the server on {}", format::ports(service))))
-        })
-        .collect())
-}
-
 fn explain(port: u16) -> anyhow::Result<u8> {
     let home = std::env::home_dir().context("could not find the home folder")?;
     let snapshot = live::scan(&mut Scanner::default(), &home)?;
@@ -278,130 +207,6 @@ fn explain(port: u16) -> anyhow::Result<u8> {
         println!("{line}");
     }
     Ok(why::status(&report))
-}
-
-fn halt(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
-    when_exec_tracked(harbormaster_platform::tracks_exec(), || {
-        halt_tracked(target, yes, force, grace)
-    })
-}
-
-/// Every check before a signal relies on keys that change on exec. Without
-/// them, nothing is scanned, asked or signalled.
-fn when_exec_tracked(
-    tracked: bool,
-    proceed: impl FnOnce() -> anyhow::Result<u8>,
-) -> anyhow::Result<u8> {
-    if !tracked {
-        return Ok(refuse(stop::untracked_exec()));
-    }
-    proceed()
-}
-
-fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
-    let home = std::env::home_dir().context("could not find the home folder")?;
-    let snapshot = live::scan(&mut Scanner::default(), &home)?;
-    let own = live::lineage()?.context("could not trace which processes started Harbormaster")?;
-    let service = match harbormaster_engine::choose(&snapshot, &target, &own) {
-        Ok(service) => service,
-        Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
-    };
-    for line in stop::preview(service) {
-        println!("{line}");
-    }
-    let count = service.processes.len();
-    let noun = if count == 1 { "process" } else { "processes" };
-    if !yes && !ask(&format!("Stop {count} {noun}? [y/N] "))? {
-        println!("Nothing was stopped.");
-        return Ok(stop::CANCELLED);
-    }
-
-    // What was approved is checked against a fresh look right before any signal.
-    let approved: Vec<ProcessKey> = service.processes.iter().map(|member| member.key).collect();
-    let current = live::scan(&mut Scanner::default(), &home)?;
-    let guard = live::guards(&home, &approved)?;
-    let targets = match harbormaster_engine::recheck(service, &current, &|key| {
-        guard.get(&key).copied().unwrap_or(Standing::Unknown)
-    }) {
-        Ok(targets) => targets,
-        Err(refused) => return Ok(refuse(stop::refusal(&refused, &target))),
-    };
-    let signals = Signals {
-        send: &harbormaster_platform::signal,
-        presence: &harbormaster_platform::presence,
-        sleep: &sleep,
-    };
-    let mut outcomes = harbormaster_engine::stop(&targets, Signal::Terminate, grace, &signals);
-    let left: Vec<ProcessKey> = outcomes
-        .iter()
-        .filter(|(_, outcome)| *outcome == Outcome::StillRunning)
-        .map(|(key, _)| *key)
-        .collect();
-    let forced = !left.is_empty()
-        && (force
-            || (!yes
-                && std::io::stdin().is_terminal()
-                && ask(&format!(
-                    "{} still running after {} s. End them now? [y/N] ",
-                    left.len(),
-                    grace.as_secs()
-                ))?));
-    if forced {
-        // The wait, and the question, gave the server time to change.
-        let current = live::scan(&mut Scanner::default(), &home)?;
-        let guard = live::guards(&home, &approved)?;
-        if let Err(refused) = harbormaster_engine::recheck(service, &current, &|key| {
-            guard.get(&key).copied().unwrap_or(Standing::Unknown)
-        }) {
-            for line in stop::report(service, &outcomes).0 {
-                println!("{line}");
-            }
-            return Ok(refuse(stop::refusal(&refused, &target)));
-        }
-        for (key, outcome) in harbormaster_engine::stop(&left, Signal::Kill, KILL_GRACE, &signals) {
-            if let Some(slot) = outcomes.iter_mut().find(|(target, _)| *target == key) {
-                slot.1 = outcome;
-            }
-        }
-    }
-
-    let (lines, status) = stop::report(service, &outcomes);
-    for line in lines {
-        println!("{line}");
-    }
-    if status == stop::PARTIAL && !forced && !left.is_empty() {
-        println!("Run it again with --force to end what is left.");
-    }
-    if status == 0 {
-        let wait = || sleep(FREE_WAIT);
-        match stop::freed(&service.ports, &harbormaster_platform::probe_bind, &wait) {
-            stop::Freed::Yes => println!("{} is free now.", format::ports(service)),
-            stop::Freed::Taken => {
-                println!("{} isn't free yet.", format::ports(service));
-            }
-            stop::Freed::Unknown => {}
-        }
-    }
-    Ok(status)
-}
-
-fn refuse((lines, status): (Vec<String>, u8)) -> u8 {
-    for line in lines {
-        eprintln!("{line}");
-    }
-    status
-}
-
-/// Asks on the terminal; anything but a clear yes, or no answer at all, is a no.
-fn ask(question: &str) -> anyhow::Result<bool> {
-    print!("{question}");
-    std::io::stdout().flush()?;
-    let mut answer = String::new();
-    if std::io::stdin().lock().read_line(&mut answer)? == 0 {
-        // No answer is coming; end the prompt's line.
-        println!();
-    }
-    Ok(stop::confirmed(&answer))
 }
 
 /// Two scans a moment apart, so CPU use can be measured.
@@ -419,14 +224,7 @@ mod tests {
 
     use harbormaster_engine::{Classification, Project, Service};
 
-    use super::{Cli, Command, NAME_WIDTH, row, stop, when_exec_tracked};
-
-    #[test]
-    fn refuses_before_anything_is_scanned_when_keys_cant_follow_an_exec() {
-        let refused = when_exec_tracked(false, || panic!("nothing may be scanned or asked"));
-        assert_eq!(refused.unwrap(), stop::REFUSED);
-        assert_eq!(when_exec_tracked(true, || Ok(17)).unwrap(), 17);
-    }
+    use super::{Cli, Command, NAME_WIDTH, row};
 
     #[test]
     fn takes_the_list_flags_without_naming_the_list_command() {
@@ -466,6 +264,7 @@ mod tests {
         assert_eq!(row[2].chars().count(), NAME_WIDTH);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn removes_only_when_told_to() {
         let dry = Cli::try_parse_from(["harbormaster", "clean"]).unwrap();

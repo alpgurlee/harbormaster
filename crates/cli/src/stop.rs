@@ -1,7 +1,13 @@
+use std::io::{BufRead, IsTerminal, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::thread::sleep;
+use std::time::Duration;
 
-use harbormaster_engine::{Outcome, Port, Protection, Refusal, Service, Target};
-use harbormaster_platform::{BindProbe, ProcessKey};
+use anyhow::Context;
+use harbormaster_engine::{
+    Outcome, Port, Protection, Refusal, Scanner, Service, Signals, Standing, Target, live,
+};
+use harbormaster_platform::{BindProbe, ProcessKey, Signal};
 
 use crate::format::{label, ports, printable, table};
 
@@ -14,6 +20,136 @@ pub(crate) const CANCELLED: u8 = 130;
 /// How often a port still taken is looked at: a server on its way out may
 /// hold it a moment longer.
 pub(crate) const FREE_LOOKS: usize = 10;
+/// How long apart a stopped server's port is looked at while still taken.
+const FREE_WAIT: Duration = Duration::from_millis(100);
+/// How long a forced process gets to disappear.
+const KILL_GRACE: Duration = Duration::from_secs(2);
+
+/// `harbormaster stop`: shows what will stop, asks unless told yes, then
+/// asks the server to exit, rechecking before each signal.
+pub(crate) fn run(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
+    when_exec_tracked(harbormaster_platform::tracks_exec(), || {
+        halt_tracked(target, yes, force, grace)
+    })
+}
+
+/// Every check before a signal relies on keys that change on exec. Without
+/// them, nothing is scanned, asked or signalled.
+fn when_exec_tracked(
+    tracked: bool,
+    proceed: impl FnOnce() -> anyhow::Result<u8>,
+) -> anyhow::Result<u8> {
+    if !tracked {
+        return Ok(refuse(untracked_exec()));
+    }
+    proceed()
+}
+
+fn halt_tracked(target: Target, yes: bool, force: bool, grace: Duration) -> anyhow::Result<u8> {
+    let home = std::env::home_dir().context("could not find the home folder")?;
+    let snapshot = live::scan(&mut Scanner::default(), &home)?;
+    let own = live::lineage()?.context("could not trace which processes started Harbormaster")?;
+    let service = match harbormaster_engine::choose(&snapshot, &target, &own) {
+        Ok(service) => service,
+        Err(refused) => return Ok(refuse(refusal(&refused, &target))),
+    };
+    for line in preview(service) {
+        println!("{line}");
+    }
+    let count = service.processes.len();
+    let noun = if count == 1 { "process" } else { "processes" };
+    if !yes && !ask(&format!("Stop {count} {noun}? [y/N] "))? {
+        println!("Nothing was stopped.");
+        return Ok(CANCELLED);
+    }
+
+    // What was approved is checked against a fresh look right before any signal.
+    let approved: Vec<ProcessKey> = service.processes.iter().map(|member| member.key).collect();
+    let current = live::scan(&mut Scanner::default(), &home)?;
+    let guard = live::guards(&home, &approved)?;
+    let targets = match harbormaster_engine::recheck(service, &current, &|key| {
+        guard.get(&key).copied().unwrap_or(Standing::Unknown)
+    }) {
+        Ok(targets) => targets,
+        Err(refused) => return Ok(refuse(refusal(&refused, &target))),
+    };
+    let signals = Signals {
+        send: &harbormaster_platform::signal,
+        presence: &harbormaster_platform::presence,
+        sleep: &sleep,
+    };
+    let mut outcomes = harbormaster_engine::stop(&targets, Signal::Terminate, grace, &signals);
+    let left: Vec<ProcessKey> = outcomes
+        .iter()
+        .filter(|(_, outcome)| *outcome == Outcome::StillRunning)
+        .map(|(key, _)| *key)
+        .collect();
+    let forced = !left.is_empty()
+        && (force
+            || (!yes
+                && std::io::stdin().is_terminal()
+                && ask(&format!(
+                    "{} still running after {} s. End them now? [y/N] ",
+                    left.len(),
+                    grace.as_secs()
+                ))?));
+    if forced {
+        // The wait, and the question, gave the server time to change.
+        let current = live::scan(&mut Scanner::default(), &home)?;
+        let guard = live::guards(&home, &approved)?;
+        if let Err(refused) = harbormaster_engine::recheck(service, &current, &|key| {
+            guard.get(&key).copied().unwrap_or(Standing::Unknown)
+        }) {
+            for line in report(service, &outcomes).0 {
+                println!("{line}");
+            }
+            return Ok(refuse(refusal(&refused, &target)));
+        }
+        for (key, outcome) in harbormaster_engine::stop(&left, Signal::Kill, KILL_GRACE, &signals) {
+            if let Some(slot) = outcomes.iter_mut().find(|(target, _)| *target == key) {
+                slot.1 = outcome;
+            }
+        }
+    }
+
+    let (lines, status) = report(service, &outcomes);
+    for line in lines {
+        println!("{line}");
+    }
+    if status == PARTIAL && !forced && !left.is_empty() {
+        println!("Run it again with --force to end what is left.");
+    }
+    if status == 0 {
+        let wait = || sleep(FREE_WAIT);
+        match freed(&service.ports, &harbormaster_platform::probe_bind, &wait) {
+            Freed::Yes => println!("{} is free now.", ports(service)),
+            Freed::Taken => {
+                println!("{} isn't free yet.", ports(service));
+            }
+            Freed::Unknown => {}
+        }
+    }
+    Ok(status)
+}
+
+fn refuse((lines, status): (Vec<String>, u8)) -> u8 {
+    for line in lines {
+        eprintln!("{line}");
+    }
+    status
+}
+
+/// Asks on the terminal; anything but a clear yes, or no answer at all, is a no.
+fn ask(question: &str) -> anyhow::Result<bool> {
+    print!("{question}");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    if std::io::stdin().lock().read_line(&mut answer)? == 0 {
+        // No answer is coming; end the prompt's line.
+        println!();
+    }
+    Ok(confirmed(&answer))
+}
 
 /// Whether a stopped server's ports can be taken again.
 #[derive(Debug, PartialEq, Eq)]
@@ -268,6 +404,13 @@ fn bracketed(address: IpAddr) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refuses_before_anything_is_scanned_when_keys_cant_follow_an_exec() {
+        let refused = super::when_exec_tracked(false, || panic!("nothing may be scanned or asked"));
+        assert_eq!(refused.unwrap(), super::REFUSED);
+        assert_eq!(super::when_exec_tracked(true, || Ok(17)).unwrap(), 17);
+    }
+
     use std::net::IpAddr;
 
     use harbormaster_engine::{

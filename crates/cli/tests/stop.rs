@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};

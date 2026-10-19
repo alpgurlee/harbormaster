@@ -1,16 +1,89 @@
 //! The cleaner in the terminal: what could go, how much room it would make,
 //! and, with `--yes`, what removing what is picked did.
 
-use std::io::Write;
-use std::path::Path;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use harbormaster_cleaner::{Cleaned, Finding, Group, Kind, Outcome, Removal};
+use anyhow::Context;
+use harbormaster_cleaner::{Cleaned, Finding, Group, Kind, Outcome, Removal, Survey, Usage};
+use harbormaster_engine::{Classification, Scanner, live};
 
 use crate::{format, stop};
 
 const NAME_WIDTH: usize = 32;
+/// How long a project sits untouched before its build outputs are picked.
+const IDLE_AFTER: Duration = Duration::from_secs(30 * 86_400);
+
+/// `harbormaster clean`: what could go, and with `yes`, removing what is picked.
+pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
+    let home = harbormaster_cleaner::account_home().context("could not find the home folder")?;
+    let roots = harbormaster_cleaner::usual_roots(&home);
+    let usage = in_use_now(&home)?;
+    let now = SystemTime::now();
+    let survey = Survey {
+        home: &home,
+        roots: &roots,
+        busy: &usage.busy,
+        running: &usage.running,
+        idle_after: IDLE_AFTER,
+        now,
+    };
+    let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
+        .with_context(|| format!("could not look through {}", home.display()))?;
+    let mut out = io::stdout().lock();
+    if !json {
+        let now = now.duration_since(UNIX_EPOCH)?.as_secs();
+        for line in lines(&findings, &home, now, yes) {
+            writeln!(out, "{line}")?;
+        }
+    }
+    if !yes {
+        if json {
+            writeln!(out, "{}", document(&findings, None)?)?;
+        }
+        return Ok(0);
+    }
+    remove_picked(&findings, json, &mut out, |picked, stop, told| {
+        let reach = harbormaster_cleaner::Reach {
+            home: &home,
+            shared: Path::new(harbormaster_cleaner::SHARED_APPS),
+        };
+        harbormaster_cleaner::remove(
+            &reach,
+            picked,
+            &|| in_use_now(&home).map_err(io::Error::other),
+            &|path| harbormaster_platform::trash(path).map_err(io::Error::other),
+            stop,
+            told,
+        )
+        .with_context(|| format!("could not remove anything under {}", home.display()))
+    })
+}
+
+/// The paths this user's other processes hold, and the projects with a dev
+/// server running, as they are now.
+fn in_use_now(home: &Path) -> anyhow::Result<Usage> {
+    Ok(Usage {
+        busy: live::held().context("could not tell which folders are in use")?,
+        running: running_projects(home)?,
+    })
+}
+
+/// The projects with a dev server running, each with what to call the server.
+fn running_projects(home: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
+    let snapshot = live::scan(&mut Scanner::default(), home)?;
+    Ok(snapshot
+        .services
+        .iter()
+        .filter(|service| service.classification == Classification::Dev)
+        .filter_map(|service| {
+            let root = service.project.as_ref()?.root.clone();
+            Some((root, format!("the server on {}", format::ports(service))))
+        })
+        .collect())
+}
 
 /// The findings, and what removing did when it ran, as the JSON a script
 /// reads; fails on a path JSON can't hold.
@@ -183,7 +256,7 @@ fn note(finding: &Finding, now: u64) -> String {
     match (finding.kind, finding.touched) {
         (Kind::Rebuildable, Some(touched)) => {
             let idle = Duration::from_secs(now.saturating_sub(touched));
-            format!("last touched {}", format::ago(idle))
+            format!("last touched {}", ago(idle))
         }
         (Kind::Rebuildable, None) if finding.picked => String::new(),
         (Kind::Rebuildable, None) => "used last".into(),
@@ -200,6 +273,16 @@ fn shown(path: &Path, home: &Path) -> String {
     )
 }
 
+/// How long ago, in days or months: `today`, `3 days ago`, `2 months ago`.
+pub(crate) fn ago(elapsed: Duration) -> String {
+    match elapsed.as_secs() / 86_400 {
+        0 => "today".into(),
+        1 => "yesterday".into(),
+        days @ 2..60 => format!("{days} days ago"),
+        days => format!("{} months ago", days / 30),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -209,7 +292,17 @@ mod tests {
 
     use harbormaster_cleaner::{Cleaned, Finding, Group, Identity, Kind, Outcome, Removal, Why};
 
-    use super::lines;
+    use super::{ago, lines};
+
+    #[test]
+    fn says_how_long_ago_in_days_then_months() {
+        use std::time::Duration;
+
+        assert_eq!(ago(Duration::from_secs(3600)), "today");
+        assert_eq!(ago(Duration::from_secs(86_400)), "yesterday");
+        assert_eq!(ago(Duration::from_secs(12 * 86_400)), "12 days ago");
+        assert_eq!(ago(Duration::from_secs(61 * 86_400)), "2 months ago");
+    }
 
     const GIB: u64 = 1024 * 1024 * 1024;
     const DAY: u64 = 86_400;

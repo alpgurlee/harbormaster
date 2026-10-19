@@ -15,10 +15,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-harbormaster-cleaner.workspace = true
 harbormaster-engine.workspace = true
 harbormaster-platform.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+harbormaster-cleaner.workspace = true
 
 [dev-dependencies]
 libc.workspace = true
