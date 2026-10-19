@@ -573,14 +573,16 @@ mod tests {
     #[test]
     fn lets_one_of_two_racing_quits_through() {
         let quits = Arc::new(Quits::default());
-        let token = quits.approve(approval(Instant::now()));
+        // Both take at the instant it was approved: only the race decides.
+        let now = Instant::now();
+        let token = quits.approve(approval(now));
         let barrier = Arc::new(Barrier::new(2));
         let racers: Vec<_> = (0..2)
             .map(|_| {
                 let (quits, barrier) = (Arc::clone(&quits), Arc::clone(&barrier));
                 std::thread::spawn(move || {
                     barrier.wait();
-                    quits.take(token, Instant::now()).is_ok()
+                    quits.take(token, now).is_ok()
                 })
             })
             .collect();

@@ -86,14 +86,15 @@ pub(crate) fn show_count(app: &AppHandle, count: usize) {
 }
 
 fn image(count: usize) -> Image<'static> {
-    let (rgba, width, height) = render(count);
+    let (rgba, width, height) = draw(count, font());
     Image::new_owned(rgba, width, height)
 }
 
 /// The menu bar icon: a port plate like those in the panel, holding the
-/// number of dev servers, or empty and dimmed when there are none. Black with
-/// alpha, for macOS to tint as a template image.
-pub(crate) fn render(count: usize) -> (Vec<u8>, u32, u32) {
+/// number of dev servers in `font`, or empty and dimmed when there are none.
+/// Without a font only the plate shows. Black with alpha, for macOS to tint
+/// as a template image.
+fn draw(count: usize, font: Option<&FontVec>) -> (Vec<u8>, u32, u32) {
     let label = match count {
         0 => None,
         1..=9 => Some(count.to_string()),
@@ -118,7 +119,7 @@ pub(crate) fn render(count: usize) -> (Vec<u8>, u32, u32) {
             alpha[(y * width + x) as usize] = (STROKE / 2.0 + 0.5 - distance.abs()).clamp(0.0, 1.0);
         }
     }
-    if let (Some(label), Some(font)) = (label, font()) {
+    if let (Some(label), Some(font)) = (label, font) {
         draw_text(&mut alpha, width, font, &label);
     }
     let dim = if count == 0 { 0.45 } else { 1.0 };
@@ -204,7 +205,9 @@ const FONT_FILES: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{quit_text, render};
+    use ab_glyph::FontVec;
+
+    use super::{draw, font, quit_text};
     use crate::settings::Language;
 
     #[test]
@@ -243,9 +246,14 @@ mod tests {
             .unwrap_or(0)
     }
 
+    /// The face the tray reads from the system, which a supported OS has.
+    fn system_font() -> &'static FontVec {
+        font().expect("the system should have a face for the tray's digits")
+    }
+
     #[test]
     fn shows_a_dim_empty_plate_when_nothing_runs() {
-        let icon = render(0);
+        let icon = draw(0, Some(system_font()));
 
         assert!(max_alpha(&icon) > 0, "the plate should show");
         assert!(max_alpha(&icon) < 128, "and be dimmed");
@@ -256,7 +264,7 @@ mod tests {
 
     #[test]
     fn writes_the_count_inside_the_plate() {
-        let five = render(5);
+        let five = draw(5, Some(system_font()));
 
         assert_eq!(max_alpha(&five), 255);
         let center_rows = (five.2 / 2 - 4)..(five.2 / 2 + 4);
@@ -265,12 +273,23 @@ mod tests {
             .filter(|&(x, y)| x > 8 && x < five.1 - 8 && alpha(&five, x, y) > 128)
             .count();
         assert!(inked > 10, "the digit should be drawn in the middle");
-        assert_ne!(five.0, render(6).0);
+        assert_ne!(five.0, draw(6, Some(system_font())).0);
+    }
+
+    #[test]
+    fn shows_a_bright_empty_plate_for_running_servers_without_a_font() {
+        let five = draw(5, None);
+
+        assert_eq!(max_alpha(&five), 255, "the plate should show servers run");
+        let center = (five.1 / 2, five.2 / 2);
+        assert_eq!(alpha(&five, center.0, center.1), 0, "with nothing inside");
+        assert_eq!(five.1, draw(5, Some(system_font())).1);
     }
 
     #[test]
     fn widens_the_plate_for_ten_or_more() {
-        assert!(render(12).1 > render(5).1);
-        assert_eq!(render(12).0, render(40).0, "both read 9+");
+        let font = Some(system_font());
+        assert!(draw(12, font).1 > draw(5, font).1);
+        assert_eq!(draw(12, font).0, draw(40, font).0, "both read 9+");
     }
 }
