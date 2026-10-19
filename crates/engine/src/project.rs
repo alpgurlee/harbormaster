@@ -689,6 +689,7 @@ mod tests {
         assert_eq!(project.framework, None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn does_not_hang_on_a_fifo_posing_as_a_manifest() {
         let home = tempfile::tempdir().unwrap();

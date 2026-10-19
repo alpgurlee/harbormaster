@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use std::collections::HashSet;
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
