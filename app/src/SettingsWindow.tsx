@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { version } from "../package.json";
 import { settingsGet, settingsSet } from "./api";
 import { useI18n, type TextKey, type Translator } from "./i18n";
+import { acts, platform } from "./platform";
 import type { Appearance, Settings, SettingsRefusal } from "./types";
 import styles from "./SettingsWindow.module.css";
 
@@ -30,7 +31,8 @@ const APPEARANCES: [Appearance, TextKey][] = [
 ];
 
 /** What the user can set, each kept as soon as it is changed. */
-export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBackend }) {
+/** `cleans` says whether this platform has the cleaner its section sets up. */
+export function SettingsWindow({ backend = BACKEND, cleans = acts }: { backend?: SettingsBackend; cleans?: boolean }) {
   const i18n = useI18n();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [section, setSection] = useState<Section>("general");
@@ -79,7 +81,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
     <div className={styles.window}>
       <nav className={styles.side} aria-label={i18n.t("settings")}>
         <div className={styles.sideTop} data-tauri-drag-region />
-        {SECTIONS.map((each) => (
+        {SECTIONS.filter((each) => cleans || each !== "cleanup").map((each) => (
           <button
             key={each}
             type="button"
@@ -169,7 +171,7 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
             <div className={styles.about}>
               <p className={styles.name}>Harbormaster</p>
               <p className={styles.hint}>{i18n.t("version", { version })}</p>
-              <p>{i18n.t("aboutText")}</p>
+              <p>{i18n.t(platform === "windows" ? "aboutTextWindows" : "aboutText")}</p>
               <p className={styles.hint}>{i18n.t("aboutLicense")}</p>
               <p className={styles.hint}>github.com/alpgurlee/harbormaster</p>
             </div>

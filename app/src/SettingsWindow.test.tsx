@@ -49,10 +49,10 @@ function slow(first: Settings = DEFAULTS) {
   return { backend, asked, keep };
 }
 
-async function show(backend: SettingsBackend) {
+async function show(backend: SettingsBackend, cleans = true) {
   render(
     <I18nProvider locale="en">
-      <SettingsWindow backend={backend} />
+      <SettingsWindow backend={backend} cleans={cleans} />
     </I18nProvider>,
   );
   await screen.findByRole("heading", { name: "General" });
@@ -176,6 +176,13 @@ describe("the settings window", () => {
     await act(async () => {});
 
     expect(driver.kept).toEqual([{ ...DEFAULTS, idleDays: 45 }]);
+  });
+
+  it("leaves out setting up a cleaner the platform doesn't have", async () => {
+    await show(fake().backend, false);
+
+    const sections = within(screen.getByRole("navigation", { name: "Settings" })).getAllByRole("button");
+    expect(sections.map((button) => button.textContent)).toEqual(["General", "Servers", "About"]);
   });
 
   it("says what it is", async () => {

@@ -241,6 +241,7 @@ export interface Messages {
   folderPath: string;
   idleTitle: string;
   aboutText: string;
+  aboutTextWindows: string;
   aboutLicense: string;
   version: string;
   invalidIdleDays: string;
@@ -501,6 +502,7 @@ export const en: Messages = {
   folderPath: "Folder, such as ~/code",
   idleTitle: "Days a project sits untouched before its build outputs are chosen",
   aboutText: "A menu bar app for the dev servers on your Mac, and a cleaner for what your tools leave behind.",
+  aboutTextWindows: "A tray app for the dev servers on your PC.",
   aboutLicense: "Free and open source, under the MIT License.",
   version: "Version {version}",
   invalidIdleDays: "Days must be from 1 to 365.",
@@ -761,6 +763,7 @@ export const tr: Messages = {
   folderPath: "Klasör, örneğin ~/code",
   idleTitle: "Derleme çıktıları seçilmeden önce bir projenin dokunulmadan kalacağı gün",
   aboutText: "Mac'indeki dev sunucuları için bir menü çubuğu uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",
+  aboutTextWindows: "Bilgisayarındaki dev sunucuları için bir sistem tepsisi uygulaması.",
   aboutLicense: "Ücretsiz ve açık kaynak; MIT Lisansı ile.",
   version: "Sürüm {version}",
   invalidIdleDays: "Gün sayısı 1 ile 365 arasında olmalı.",
