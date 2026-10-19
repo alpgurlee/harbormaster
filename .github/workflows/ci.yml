@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows]
   pull_request:
 
 permissions:
@@ -51,3 +51,48 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      # Listens on every address, which a desktop's firewall may ask about.
+      - name: Test binding every address
+        run: cargo test -p harbormaster-platform --test bind --locked -- --ignored
+
+  windows:
+    name: Windows
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: app/.node-version
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # The app embeds the built panel; macOS checks the frontend itself.
+      - name: Frontend
+        working-directory: app
+        run: |
+          npm ci --ignore-scripts
+          npx vite build
+
+      # The version comes from rust-toolchain.toml.
+      - name: Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # The cleaner is macOS's alone for now.
+      - name: Lint
+        run: cargo clippy --workspace --exclude harbormaster-cleaner --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --exclude harbormaster-cleaner --locked
+
+      - name: Test binding every address
+        run: cargo test -p harbormaster-platform --test bind --locked -- --ignored
