@@ -93,6 +93,16 @@ fn processes_one_by_one(own_uid: libc::uid_t) -> io::Result<Vec<ProcessEntry>> {
     Ok(entries)
 }
 
+pub(crate) fn runs_as_root() -> bool {
+    // SAFETY: getuid and geteuid have no failure mode.
+    let (real, effective) = unsafe { (libc::getuid(), libc::geteuid()) };
+    is_root(real, effective)
+}
+
+fn is_root(real: libc::uid_t, effective: libc::uid_t) -> bool {
+    real == 0 || effective == 0
+}
+
 fn owner(uid: libc::uid_t, own_uid: libc::uid_t) -> Owner {
     match uid {
         uid if uid == own_uid => Owner::CurrentUser,
@@ -382,7 +392,14 @@ fn mach_to_nanos(ticks: u64) -> u64 {
 mod tests {
     use std::io;
 
-    use super::{c_string, verdict};
+    use super::{c_string, is_root, verdict};
+
+    #[test]
+    fn counts_as_root_when_either_user_it_runs_as_is() {
+        assert!(!is_root(501, 501));
+        assert!(is_root(0, 501));
+        assert!(is_root(501, 0));
+    }
 
     #[test]
     fn reads_the_slow_way_only_when_the_table_is_unsound() {

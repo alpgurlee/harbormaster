@@ -103,6 +103,12 @@ struct ListArgs {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if harbormaster_platform::runs_as_root() {
+        eprintln!(
+            "harbormaster: won't run as root, since it judges what is safe to stop or remove by your own user. Run it without sudo."
+        );
+        return ExitCode::FAILURE;
+    }
     // More open files let more places be measured at once; without, fewer are.
     let _ = harbormaster_platform::allow_more_open_files();
     let outcome = match cli.command {

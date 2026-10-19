@@ -68,6 +68,13 @@ pub fn presence(key: ProcessKey) -> Presence {
     sys::presence(key)
 }
 
+/// Whether this process runs as root, as its real or its effective user.
+/// What a stop or a removal may reach is judged by the user it runs as, so
+/// those checks hold only for an ordinary one.
+pub fn runs_as_root() -> bool {
+    sys::runs_as_root()
+}
+
 /// Whether a `ProcessKey` also changes when its process execs another
 /// program. Without that, the pid and start time are all that tell two
 /// processes apart.

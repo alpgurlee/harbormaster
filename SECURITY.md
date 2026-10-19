@@ -9,9 +9,10 @@ steps that show the problem.
 
 ## What Harbormaster can do
 
-Harbormaster runs as you, with no administrator rights and no helper tool. It makes no network
-connections of its own: there is no telemetry and no update check. Opening a server in the browser
-hands its address to your browser.
+Harbormaster runs as you, with no administrator rights and no helper tool, and it won't run as root:
+its checks judge what is safe to stop or remove by your own user. It makes no network connections of
+its own: there is no telemetry and no update check. Opening a server in the browser hands its address
+to your browser.
 
 It can end processes and delete files, so both go through checks first:
 

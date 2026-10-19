@@ -14,6 +14,12 @@ mod tray;
 use tauri::Manager;
 
 fn main() {
+    if harbormaster_platform::runs_as_root() {
+        eprintln!(
+            "Harbormaster won't run as root, since it judges what is safe to stop or remove by your own user."
+        );
+        std::process::exit(1);
+    }
     // More open files let the cleaner measure more places at once; without, fewer are.
     let _ = harbormaster_platform::allow_more_open_files();
     tauri::Builder::default()
