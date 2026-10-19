@@ -3,7 +3,9 @@ name: Windows preview
 # An unsigned build to try on a Windows PC: the installer and the CLI.
 on:
   push:
-    branches: [windows]
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
 
 permissions:
   contents: read
