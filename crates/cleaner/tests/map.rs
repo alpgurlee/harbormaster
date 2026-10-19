@@ -1,11 +1,11 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use common::{MIB, machine, write};
+use common::{MIB, machine, set_mode, write};
 use harbormaster_cleaner::{Area, Chart, Short, map, still_there};
 
 fn mapped(home: &Path, others: bool) -> Area {
@@ -131,11 +131,11 @@ fn says_where_it_could_not_look() {
     let machine = machine();
     let locked = machine.home.join("Documents/locked");
     write(&locked.join("secret"), &vec![1; 2 * MIB]);
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("locked");
+    let mode = set_mode(&locked, 0o000);
 
     let root = mapped(&machine.home, false);
 
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlocked");
+    drop(mode);
     assert_eq!(
         at(&root, &["Documents", "locked"]).short,
         Some(Short::Denied)

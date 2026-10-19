@@ -152,6 +152,12 @@ fn keys_follow_an_exec_on_this_macos() {
 
 #[test]
 fn lists_processes_of_other_users_too() {
+    // SAFETY: getuid has no preconditions.
+    let user = unsafe { libc::getuid() };
+    assert_ne!(
+        user, 0,
+        "run the tests as an ordinary user: to root, launchd is its own"
+    );
     let launchd = find(1);
 
     assert_eq!(launchd.owner, Owner::System);

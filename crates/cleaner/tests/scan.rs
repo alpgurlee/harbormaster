@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs::{self, File};
 use std::os::unix::fs::symlink;
 use std::path::Path;
@@ -363,36 +365,30 @@ fn leaves_out_a_place_too_deep_to_measure_in_full() {
 
 #[test]
 fn leaves_out_a_place_with_an_unreadable_subfolder() {
-    use std::os::unix::fs::PermissionsExt;
-
     let home = tempfile::tempdir().unwrap();
     let cache = home.path().join(".npm/_cacache");
     let blocked = cache.join("blocked");
     write(&cache.join("top"), 2 * MIB);
     write(&blocked.join("bottom"), 2 * MIB);
-    let original = fs::metadata(&blocked).unwrap().permissions();
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+    let locked = common::set_mode(&blocked, 0o000);
 
     let findings = scanned(home.path());
-    fs::set_permissions(&blocked, original).unwrap();
+    drop(locked);
 
     assert!(named(&findings, "npm").is_none(), "{findings:?}");
 }
 
 #[test]
 fn leaves_out_a_place_whose_entries_it_cannot_look_up() {
-    use std::os::unix::fs::PermissionsExt;
-
     let home = tempfile::tempdir().unwrap();
     let cache = home.path().join(".npm/_cacache");
     let listed_only = cache.join("listed-only");
     write(&cache.join("top"), 2 * MIB);
     write(&listed_only.join("inside"), 2 * MIB);
-    let original = fs::metadata(&listed_only).unwrap().permissions();
-    fs::set_permissions(&listed_only, fs::Permissions::from_mode(0o444)).unwrap();
+    let locked = common::set_mode(&listed_only, 0o444);
 
     let findings = scanned(home.path());
-    fs::set_permissions(&listed_only, original).unwrap();
+    drop(locked);
 
     assert!(named(&findings, "npm").is_none(), "{findings:?}");
 }

@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -67,4 +68,33 @@ pub fn node_project(machine: &Machine, name: &str) -> PathBuf {
     );
     write(&project.join(".next/cache/a"), &vec![1; 2 * MIB]);
     project
+}
+
+/// A folder's mode, set until the guard drops.
+pub struct Mode {
+    path: PathBuf,
+    original: fs::Permissions,
+}
+
+/// Sets `path` to `mode`. Root reads past a folder's mode, so a test that
+/// relies on one needs an ordinary user.
+pub fn set_mode(path: &Path, mode: u32) -> Mode {
+    // SAFETY: geteuid has no preconditions.
+    let user = unsafe { libc::geteuid() };
+    assert_ne!(
+        user, 0,
+        "run the tests as an ordinary user: root reads past a folder's mode"
+    );
+    let original = fs::metadata(path).expect("the folder").permissions();
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("the mode");
+    Mode {
+        path: path.to_path_buf(),
+        original,
+    }
+}
+
+impl Drop for Mode {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(&self.path, self.original.clone());
+    }
 }

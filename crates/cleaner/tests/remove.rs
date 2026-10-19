@@ -2,12 +2,12 @@ mod common;
 
 use std::fs;
 use std::io;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, MIB, Machine, age, machine, node_project, reach, write};
+use common::{DAY, MIB, Machine, age, machine, node_project, reach, set_mode, write};
 use harbormaster_cleaner::{
     Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, Usage, Why, remove, scan,
 };
@@ -390,8 +390,7 @@ fn goes_on_with_the_rest_when_one_fails_and_tells_of_each() {
     let mut chosen = chosen(&survey, &["fine · node_modules", "npm"]);
     // The one that fails goes first, so going on after it shows.
     chosen.sort_by_key(|finding| finding.path != cache);
-    let original = fs::metadata(&blocked).expect("the folder").permissions();
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).expect("locked");
+    let locked = set_mode(&blocked, 0o000);
 
     let mut told = Vec::new();
     let cleaned = remove(
@@ -402,7 +401,7 @@ fn goes_on_with_the_rest_when_one_fails_and_tells_of_each() {
         &AtomicBool::new(false),
         &mut |removal| told.push(removal.path.clone()),
     );
-    fs::set_permissions(&blocked, original).expect("unlocked");
+    drop(locked);
     let cleaned = cleaned.expect("removal should run");
 
     assert!(
