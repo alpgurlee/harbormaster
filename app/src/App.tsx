@@ -4,6 +4,7 @@ import { hidePanel, inApp, openCleaner, openInBrowser, openSettings, resizePanel
 import { Detail } from "./Detail";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
+import { acts } from "./platform";
 import { QuitSheet } from "./QuitSheet";
 import { Settled } from "./Settled";
 import { StopSheet } from "./StopSheet";
@@ -127,9 +128,10 @@ export function App() {
             now={now}
             onShow={(chosen) => setShown(chosen.id)}
             onOpen={open}
-            onStop={askStop}
-            onQuit={askQuit}
+            onStop={acts ? askStop : undefined}
+            onQuit={acts ? askQuit : undefined}
             onClean={inApp ? clean : undefined}
+            cleans={acts}
             onSettings={inApp ? settle : undefined}
           />
           {shown === null ? null : (
@@ -141,7 +143,7 @@ export function App() {
               onOpen={open}
               onCopy={copy}
               onReveal={reveal}
-              onStop={askStop}
+              onStop={acts ? askStop : undefined}
             />
           )}
         </div>

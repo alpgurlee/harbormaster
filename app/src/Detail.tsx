@@ -20,7 +20,8 @@ export interface DetailProps {
   /** Settles once the URL is on the clipboard. */
   onCopy: (url: string) => Promise<void>;
   onReveal: (service: Service) => void;
-  onStop: (service: Service) => void;
+  /** Asks to stop the server; without it, the page offers no stop. */
+  onStop?: (service: Service) => void;
   /** Its project's color. */
   tint?: number;
 }
@@ -86,11 +87,11 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop,
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || back(event)) return;
-    if (event.key === "o" && port) {
+    if (event.key === "o" && url !== null) {
       onOpen(service);
     } else if (event.key === "c") {
       void copy();
-    } else if (event.key === "s" && stoppable) {
+    } else if (event.key === "s" && stoppable && onStop) {
       onStop(service);
     }
   };
@@ -114,7 +115,7 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop,
           <div className={styles.muted}>{i18n.list([...new Set(service.ports.map((each) => each.address))])}</div>
         </div>
       </div>
-      {port ? (
+      {port && url !== null ? (
         <div className={styles.actions}>
           <button type="button" className={styles.primary} onClick={() => onOpen(service)}>
             <OpenOut />
@@ -155,16 +156,18 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop,
       </ul>
 
       <footer className={styles.footer}>
-        <button type="button" className={styles.stop} disabled={!stoppable} onClick={() => onStop(service)}>
-          {i18n.t("stopEllipsis")}
-        </button>
+        {onStop ? (
+          <button type="button" className={styles.stop} disabled={!stoppable} onClick={() => onStop(service)}>
+            {i18n.t("stopEllipsis")}
+          </button>
+        ) : null}
         {project ? (
           <button type="button" className={styles.link} onClick={() => onReveal(service)}>
             {i18n.t("revealFolder")}
           </button>
         ) : null}
       </footer>
-      {service.protected === null ? null : <p className={styles.why}>{whyProtected(i18n, service.protected)}</p>}
+      {service.protected === null || !onStop ? null : <p className={styles.why}>{whyProtected(i18n, service.protected)}</p>}
     </section>
   );
 }

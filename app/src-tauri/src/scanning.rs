@@ -86,7 +86,7 @@ impl Scanning {
     fn run(&self, app: &AppHandle) {
         let home = home();
         let mut scanner = Scanner::default();
-        let mut counted = None;
+        let mut shown = None;
         loop {
             match live::scan(&mut scanner, &home) {
                 Ok(mut snapshot) => {
@@ -98,9 +98,11 @@ impl Scanning {
                         .iter()
                         .filter(|service| service.classification == Classification::Dev)
                         .count();
-                    if counted != Some(count) {
-                        tray::show_count(app, count);
-                        counted = Some(count);
+                    // Drawn again when the count changes, or on Windows the taskbar's colour.
+                    let face = tray::face(count);
+                    if shown != Some(face) {
+                        tray::show(app, face);
+                        shown = Some(face);
                     }
                     self.publish(snapshot);
                 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
+import { urlOf } from "./address";
 import { useI18n } from "./i18n";
 import { Chevron, Gear, Mark, OpenOut, Search, Square, Sweep } from "./icons";
 import { groupByProject, projectOf, totals } from "./model";
@@ -24,14 +25,18 @@ export interface PanelProps {
   now: number;
   onShow: (service: Service) => void;
   onOpen: (service: Service) => void;
-  onStop: (service: Service) => void;
-  onQuit: (app: AppUsage) => void;
+  /** Asks to stop a server; without it, no row offers to. */
+  onStop?: (service: Service) => void;
+  /** Asks to quit an app; without it, the breakdown only shows. */
+  onQuit?: (app: AppUsage) => void;
   /** Opens the cleaner; its button stays off without it. */
   onClean?: () => void;
+  /** Whether this platform has a cleaner at all; without one, no button shows. */
+  cleans?: boolean;
   onSettings?: () => void;
 }
 
-export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit, onClean, onSettings }: PanelProps) {
+export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit, onClean, cleans = true, onSettings }: PanelProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -46,7 +51,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   if (update === null) {
     return (
       <div className={styles.panel} hidden={hidden}>
-        <Header onClean={onClean} onSettings={onSettings} />
+        <Header onClean={onClean} cleans={cleans} onSettings={onSettings} />
         <p className={styles.note}>{i18n.t("looking")}</p>
       </div>
     );
@@ -96,7 +101,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
         onShow(service);
       }}
       onOpen={() => onOpen(service)}
-      onStop={() => onStop(service)}
+      onStop={onStop && (() => onStop(service))}
     />
   );
 
@@ -107,7 +112,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
 
   return (
     <div className={styles.panel} hidden={hidden}>
-      <Header onClean={onClean} onSettings={onSettings} />
+      <Header onClean={onClean} cleans={cleans} onSettings={onSettings} />
       <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} thermal={update.thermal} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
@@ -171,17 +176,19 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   );
 }
 
-function Header({ onClean, onSettings }: { onClean?: () => void; onSettings?: () => void }) {
+function Header({ onClean, cleans, onSettings }: { onClean?: () => void; cleans: boolean; onSettings?: () => void }) {
   const i18n = useI18n();
   return (
     <header className={styles.header}>
       <Mark className={styles.mark} />
       Harbormaster
       <span className={styles.tools}>
-        <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
-          <Sweep />
-          {i18n.t("clean")}
-        </button>
+        {cleans ? (
+          <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
+            <Sweep />
+            {i18n.t("clean")}
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.tool}
@@ -203,7 +210,7 @@ interface SummaryProps {
   memory: Memory | null;
   apps: AppUsage[] | null;
   thermal: Thermal;
-  onQuit: (app: AppUsage) => void;
+  onQuit?: (app: AppUsage) => void;
 }
 
 function Summary({ dev, tints, memory, apps, thermal, onQuit }: SummaryProps) {
@@ -288,7 +295,7 @@ interface BreakdownProps {
   projects: ProjectShare[];
   apps: AppUsage[] | null;
   total: number;
-  onQuit: (app: AppUsage) => void;
+  onQuit?: (app: AppUsage) => void;
 }
 
 function Breakdown({ servers, projects, apps, total, onQuit }: BreakdownProps) {
@@ -313,7 +320,7 @@ function Breakdown({ servers, projects, apps, total, onQuit }: BreakdownProps) {
             <span className={styles.partSide}>
               <span className={styles.partAmount}>{i18n.bytes(bytes)}</span>
               {/* The dev servers stop from their own rows; the system is never quit. */}
-              {app && !app.system ? (
+              {app && !app.system && onQuit ? (
                 <button
                   type="button"
                   className={styles.partQuit}
@@ -347,7 +354,7 @@ interface RowProps {
   now: number;
   onShow: () => void;
   onOpen: () => void;
-  onStop: () => void;
+  onStop?: () => void;
 }
 
 /** What a row is called: its branch, else what runs, else its project. */
@@ -386,6 +393,7 @@ function Heat({ dev }: { dev: Service[] }) {
 function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps) {
   const i18n = useI18n();
   const port = service.ports[0]?.port;
+  const openable = service.ports[0] !== undefined && urlOf(service.ports[0]) !== null;
   const project = service.project;
   const title = titleOf(service);
   const details = [
@@ -432,6 +440,7 @@ function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps)
             className={styles.action}
             aria-label={i18n.t("openInBrowser")}
             title={i18n.t("openInBrowser")}
+            disabled={!openable}
             onClick={(event) => {
               event.stopPropagation();
               onOpen();
@@ -439,20 +448,22 @@ function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps)
           >
             <OpenOut />
           </button>
-          <button
-            type="button"
-            tabIndex={-1}
-            className={`${styles.action} ${styles.danger}`}
-            aria-label={i18n.t("stop")}
-            title={i18n.t("stop")}
-            disabled={service.protected !== null}
-            onClick={(event) => {
-              event.stopPropagation();
-              onStop();
-            }}
-          >
-            <Square />
-          </button>
+          {onStop ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              className={`${styles.action} ${styles.danger}`}
+              aria-label={i18n.t("stop")}
+              title={i18n.t("stop")}
+              disabled={service.protected !== null}
+              onClick={(event) => {
+                event.stopPropagation();
+                onStop();
+              }}
+            >
+              <Square />
+            </button>
+          ) : null}
         </span>
       </div>
     </div>

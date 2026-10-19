@@ -121,10 +121,14 @@ impl Settings {
                 Ok(rest) => home.join(rest),
                 Err(_) => root.clone(),
             };
-            // `..` would lead out of the home folder whatever the path starts with.
-            let plain = root
-                .components()
-                .all(|part| matches!(part, Component::RootDir | Component::Normal(_)));
+            // `..` would lead out of the home folder whatever the path starts
+            // with. A drive or share, on Windows, must still be the home's.
+            let plain = root.components().all(|part| {
+                matches!(
+                    part,
+                    Component::Prefix(_) | Component::RootDir | Component::Normal(_)
+                )
+            });
             if root.as_os_str().len() > LONGEST_PATH
                 || !root.is_absolute()
                 || !plain
@@ -270,7 +274,14 @@ mod tests {
 
     use super::{Appearance, Invalid, Language, Settings, Store};
 
+    #[cfg(unix)]
     const HOME: &str = "/Users/dev";
+    #[cfg(windows)]
+    const HOME: &str = r"C:\Users\dev";
+
+    fn home() -> PathBuf {
+        PathBuf::from(HOME)
+    }
 
     fn place() -> (tempfile::TempDir, PathBuf) {
         let folder = tempfile::tempdir().unwrap();
@@ -304,7 +315,7 @@ mod tests {
             language: Language::Tr,
             appearance: Appearance::Dark,
             hidden: vec!["serena".into()],
-            roots: vec![PathBuf::from("/Users/dev/work")],
+            roots: vec![home().join("work")],
             idle_days: 14,
         };
 
@@ -388,19 +399,13 @@ mod tests {
     fn takes_a_project_folder_written_from_the_home_folder() {
         let (_folder, file) = place();
         let written = Settings {
-            roots: vec![PathBuf::from("~/work"), PathBuf::from("/Users/dev/code")],
+            roots: vec![PathBuf::from("~/work"), home().join("code")],
             ..Settings::default()
         };
 
         let kept = open(file).set(written).unwrap();
 
-        assert_eq!(
-            kept.roots,
-            [
-                PathBuf::from("/Users/dev/work"),
-                PathBuf::from("/Users/dev/code")
-            ]
-        );
+        assert_eq!(kept.roots, [home().join("work"), home().join("code")]);
     }
 
     #[test]
@@ -408,18 +413,19 @@ mod tests {
         let (_folder, file) = place();
         let written = Settings {
             roots: vec![
-                PathBuf::from("/Users/dev/work/"),
+                PathBuf::from(format!("{HOME}/work/")),
                 PathBuf::from("~/code"),
-                PathBuf::from("/Users/dev//work"),
-                PathBuf::from("/Users/dev/code"),
+                PathBuf::from(format!("{HOME}//work")),
+                home().join("code"),
             ],
             ..Settings::default()
         };
 
         let kept = open(file).set(written).unwrap();
 
-        let spelled: Vec<&str> = kept.roots.iter().filter_map(|root| root.to_str()).collect();
-        assert_eq!(spelled, ["/Users/dev/work", "/Users/dev/code"]);
+        let spelled: Vec<_> = kept.roots.iter().map(|root| root.as_os_str()).collect();
+        let (work, code) = (home().join("work"), home().join("code"));
+        assert_eq!(spelled, [work.as_os_str(), code.as_os_str()]);
     }
 
     #[test]
@@ -447,7 +453,7 @@ mod tests {
             Err(Invalid::Root { .. })
         ));
         assert!(matches!(
-            with(|s| s.roots = vec![PathBuf::from("/Users/dev/../../etc")]),
+            with(|s| s.roots = vec![PathBuf::from(format!("{HOME}/../../etc"))]),
             Err(Invalid::Root { .. })
         ));
         assert!(matches!(
@@ -462,6 +468,19 @@ mod tests {
             with(|s| s.roots = vec![PathBuf::from(format!("{HOME}/{}", "a".repeat(1100)))]),
             Err(Invalid::Root { .. })
         ));
+        // Another share, drive or way of writing the drive isn't the home's.
+        #[cfg(windows)]
+        for elsewhere in [
+            r"\\server\share\code",
+            r"\\?\C:\Users\dev\work",
+            r"D:\Users\dev\work",
+        ] {
+            let settings = Settings {
+                roots: vec![PathBuf::from(elsewhere)],
+                ..Settings::default()
+            };
+            assert!(matches!(store.set(settings), Err(Invalid::Root { .. })));
+        }
         assert!(matches!(
             with(|s| s.hidden = vec!["a\u{1b}b".into()]),
             Err(Invalid::Name { .. })

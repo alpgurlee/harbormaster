@@ -8,3 +8,10 @@ it("points at a listener where it answers, as the app opens it", () => {
   expect(urlOf({ port: 8080, address: "192.168.1.5" })).toBe("http://192.168.1.5:8080");
   expect(urlOf({ port: 8080, address: "fd00::5" })).toBe("http://[fd00::5]:8080");
 });
+
+it("gives no URL for a link-local listener, which answers only on an interface it doesn't name", () => {
+  expect(urlOf({ port: 3000, address: "fe80::1" })).toBeNull();
+  expect(urlOf({ port: 3000, address: "FEBF::a:1" })).toBeNull();
+  expect(urlOf({ port: 3000, address: "fec0::1" })).toBe("http://[fec0::1]:3000");
+  expect(urlOf({ port: 3000, address: "::ffff:192.168.1.5" })).toBe("http://[::ffff:192.168.1.5]:3000");
+});

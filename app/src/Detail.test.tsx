@@ -110,6 +110,28 @@ describe("Detail", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
+  it("offers no stop, nor says why one is refused, where the platform can't stop", () => {
+    render(
+      <I18nProvider locale="en">
+        <Detail service={{ ...server, protected: "database" }} now={NOW} onBack={vi.fn()} onOpen={vi.fn()} onCopy={vi.fn()} onReveal={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Stop…" })).toBeNull();
+    expect(screen.queryByText(/runs a database/)).toBeNull();
+    // Nor does its key, which mustn't throw for want of a handler.
+    fireEvent.keyDown(screen.getByRole("region", { name: "acme-store" }), { key: "s" });
+  });
+
+  it("offers neither to open nor to copy a link-local listener, which no URL reaches", () => {
+    const { onOpen } = show({ ...server, ports: [{ port: 3000, address: "fe80::1" }] });
+
+    expect(screen.queryByRole("button", { name: /Open/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy URL" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("region", { name: "acme-store" }), { key: "o" });
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it("says so when the server has stopped meanwhile, and Escape still goes back", () => {
     const { onBack } = show(null);
 

@@ -7,6 +7,14 @@ export function hostOf(address: string): string {
   return address.includes(":") ? `[${address}]` : address;
 }
 
-export function urlOf(port: Port): string {
+/** fe80::/10 answers only on the interface its listener named, which isn't known here. */
+function linkLocal(address: string): boolean {
+  const first = address.split(":")[0];
+  return address.includes(":") && first !== "" && (Number.parseInt(first, 16) & 0xffc0) === 0xfe80;
+}
+
+/** Where a listener answers, or null where no URL can reach it. */
+export function urlOf(port: Port): string | null {
+  if (linkLocal(port.address)) return null;
   return `http://${hostOf(port.address)}:${port.port}`;
 }

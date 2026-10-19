@@ -1,20 +1,14 @@
 use std::net::IpAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use harbormaster_cleaner::Finding;
 use harbormaster_engine::Port;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
-use crate::daemons::{DaemonPreview, Daemons};
-use crate::quitting::{QuitPreview, Quits};
-use crate::scanning::{self, Scanning, Update};
+use crate::scanning::{Scanning, Update};
 use crate::settings::{Invalid, Settings, Store};
-use crate::stopping::{Approvals, Preview, Reason, Stopped};
-use crate::{cleaner, panel, settings};
+use crate::{panel, settings};
 
 #[tauri::command]
 pub(crate) fn subscribe(channel: Channel<Update>, scanning: State<'_, Arc<Scanning>>) {
@@ -37,19 +31,24 @@ pub(crate) fn open_in_browser(
         .flat_map(|service| &service.ports)
         .find(|candidate| candidate.port == port)
         .ok_or("that server no longer listens there")?;
+    let url =
+        url(listening).ok_or("that server answers only on a network interface it doesn't name")?;
     app.opener()
-        .open_url(url(listening), None::<&str>)
+        .open_url(url, None::<&str>)
         .map_err(|error| error.to_string())
 }
 
-/// A listener on loopback or on every address answers on localhost.
-fn url(port: &Port) -> String {
+/// A listener on loopback or on every address answers on localhost. One on
+/// a link-local IPv6 address answers only on the interface it named, which
+/// isn't known here, so no URL reaches it.
+fn url(port: &Port) -> Option<String> {
     match port.address {
         address if address.is_loopback() || address.is_unspecified() => {
-            format!("http://localhost:{}", port.port)
+            Some(format!("http://localhost:{}", port.port))
         }
-        IpAddr::V4(address) => format!("http://{address}:{}", port.port),
-        IpAddr::V6(address) => format!("http://[{address}]:{}", port.port),
+        IpAddr::V4(address) => Some(format!("http://{address}:{}", port.port)),
+        IpAddr::V6(address) if address.is_unicast_link_local() => None,
+        IpAddr::V6(address) => Some(format!("http://[{address}]:{}", port.port)),
     }
 }
 
@@ -70,97 +69,6 @@ pub(crate) fn reveal_folder(
     app.opener()
         .reveal_item_in_dir(root)
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(crate) async fn stop_preview(id: String, app: AppHandle) -> Result<Preview, Reason> {
-    blocking(move || {
-        Ok(match app.state::<Arc<Scanning>>().snapshot() {
-            Some(snapshot) => app.state::<Approvals>().preview(&snapshot, &id),
-            None => Preview::Refused {
-                reason: Reason::NotFound,
-            },
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().stop(token)).await
-}
-
-#[tauri::command]
-pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().force(token)).await
-}
-
-/// `name` is an app as the breakdown lists it.
-#[tauri::command]
-pub(crate) async fn quit_app_preview(name: String, app: AppHandle) -> Result<QuitPreview, Reason> {
-    blocking(move || {
-        Ok(match app.state::<Arc<Scanning>>().snapshot() {
-            Some(snapshot) => app
-                .state::<Quits>()
-                .preview(&scanning::servers(&snapshot.services), &name),
-            None => QuitPreview::Refused {
-                reason: Reason::NotFound,
-            },
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Quits>().quit(token)).await
-}
-
-/// Of the items listed under `token` and in use, those only known dev
-/// daemons keep so, which the window may offer to stop.
-#[tauri::command]
-pub(crate) async fn clean_daemons(token: u64, app: AppHandle) -> Result<Vec<PathBuf>, Reason> {
-    blocking(move || {
-        let listed = app
-            .state::<Arc<Cleaning>>()
-            .shown(token)
-            .map_err(|_| Reason::Expired)?;
-        app.state::<Daemons>().stoppable(&listed)
-    })
-    .await
-}
-
-/// What stopping the daemons that keep the item at `path` in use would do.
-#[tauri::command]
-pub(crate) async fn clean_daemon_preview(
-    token: u64,
-    path: PathBuf,
-    app: AppHandle,
-) -> Result<DaemonPreview, Reason> {
-    blocking(move || {
-        let listed = app
-            .state::<Arc<Cleaning>>()
-            .shown(token)
-            .map_err(|_| Reason::Expired)?;
-        Ok(app.state::<Daemons>().preview(token, &path, &listed))
-    })
-    .await
-}
-
-/// Stops the daemons the window was shown and the user agreed to stop.
-#[tauri::command]
-pub(crate) async fn clean_daemon_stop(approval: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || {
-        let cleaning = app.state::<Arc<Cleaning>>();
-        app.state::<Daemons>()
-            .stop(approval, |token| cleaning.shown(token).ok())
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
-    cleaner::show(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -197,195 +105,6 @@ pub(crate) fn settings_set(
 
 /// Looks through this user's home for what could go; the findings come
 /// last, under the token removing some of them takes.
-#[tauri::command]
-pub(crate) async fn clean_scan(
-    channel: Channel<ScanEvent>,
-    window: WebviewWindow,
-    cleaning: State<'_, Arc<Cleaning>>,
-    store: State<'_, Store>,
-) -> Result<(), Refusal> {
-    let settings = store.get();
-    // Taken before the work is queued, so closing the window stops it from here on.
-    let working = cleaning.begin(|| open(&window))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        working.scan(&settings.roots, settings.idle_days, &|event| {
-            // A closed window stops the scan itself.
-            let _ = channel.send(event);
-        })
-    })
-    .await
-    .map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?
-}
-
-/// Hunts for this user's large files, telling the window as it goes.
-#[tauri::command]
-pub(crate) async fn clean_hunt(
-    channel: Channel<ScanEvent>,
-    window: WebviewWindow,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        working.hunt(&|event| {
-            let _ = channel.send(event);
-        })
-    })
-    .await
-    .map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?
-}
-
-/// Removes the findings at `paths`, which the scan under `token` listed;
-/// any other path refuses the whole request.
-#[tauri::command]
-pub(crate) async fn clean_run(
-    token: u64,
-    paths: Vec<PathBuf>,
-    channel: Channel<RunEvent>,
-    window: WebviewWindow,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        working.run(token, &paths, &mut |event| {
-            let _ = channel.send(event);
-        })
-    })
-    .await
-    .map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?
-}
-
-/// Whether `window` is still there to see the work through; a closed one
-/// can't be asked, and a minimized one still counts.
-fn open(window: &WebviewWindow) -> bool {
-    window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
-}
-
-/// Lists this user's own apps, telling the window as it goes; they come
-/// last with what else is shown, under the token removing some takes.
-#[tauri::command]
-pub(crate) async fn clean_apps(
-    channel: Channel<ScanEvent>,
-    window: WebviewWindow,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        working.apps(&|event| {
-            let _ = channel.send(event);
-        })
-    })
-    .await
-    .map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?
-}
-
-/// Maps this user's home folder, telling the window as it goes; the map
-/// comes last, under the token showing its places in Finder takes.
-#[tauri::command]
-pub(crate) async fn clean_map(
-    others: bool,
-    channel: Channel<MapEvent>,
-    window: WebviewWindow,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        working.map(others, &mut |event| {
-            let _ = channel.send(event);
-        })
-    })
-    .await
-    .map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?
-}
-
-/// The findings the scan under `token` listed, as they stand now.
-#[tauri::command]
-pub(crate) async fn clean_recheck(
-    token: u64,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<Vec<Finding>, Refusal> {
-    let cleaning = Arc::clone(&cleaning);
-    tauri::async_runtime::spawn_blocking(move || cleaning.recheck(token))
-        .await
-        .map_err(|error| Refusal::Failed {
-            message: error.to_string(),
-        })?
-}
-
-#[tauri::command]
-pub(crate) fn clean_stop(cleaning: State<'_, Arc<Cleaning>>) {
-    cleaning.stop();
-}
-
-/// The home folder's disk: how large it is and how much is free.
-#[tauri::command]
-pub(crate) fn clean_disk() -> Result<harbormaster_cleaner::Disk, Refusal> {
-    let home = harbormaster_cleaner::account_home().map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })?;
-    harbormaster_cleaner::disk(&home).map_err(|error| Refusal::Failed {
-        message: error.to_string(),
-    })
-}
-
-/// Shows a finding in Finder; only one the scan listed.
-#[tauri::command]
-pub(crate) fn clean_reveal(
-    path: PathBuf,
-    app: AppHandle,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    if !cleaning.lists(&path) {
-        return Err(Refusal::Unlisted);
-    }
-    app.opener()
-        .reveal_item_in_dir(path)
-        .map_err(|error| Refusal::Failed {
-            message: error.to_string(),
-        })
-}
-
-/// Shows a place of the last map in Finder, if it is still what the map found.
-#[tauri::command]
-pub(crate) async fn clean_reveal_area(
-    token: u64,
-    id: u32,
-    app: AppHandle,
-    cleaning: State<'_, Arc<Cleaning>>,
-) -> Result<(), Refusal> {
-    let cleaning = Arc::clone(&cleaning);
-    let path = tauri::async_runtime::spawn_blocking(move || cleaning.mapped(token, id))
-        .await
-        .map_err(|error| Refusal::Failed {
-            message: error.to_string(),
-        })??;
-    app.opener()
-        .reveal_item_in_dir(path)
-        .map_err(|error| Refusal::Failed {
-            message: error.to_string(),
-        })
-}
-
-/// Scans and waits for processes to exit run off the thread that draws.
-async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, Reason> + Send + 'static,
-) -> Result<T, Reason> {
-    tauri::async_runtime::spawn_blocking(work)
-        .await
-        .map_err(|error| Reason::Failed {
-            message: error.to_string(),
-        })?
-}
-
 #[tauri::command]
 pub(crate) fn resize_panel(
     height: f64,
@@ -425,9 +144,16 @@ mod tests {
 
     #[test]
     fn opens_a_listener_where_it_answers() {
-        assert_eq!(url(&at("127.0.0.1", 3000)), "http://localhost:3000");
-        assert_eq!(url(&at("::", 5173)), "http://localhost:5173");
-        assert_eq!(url(&at("192.168.1.5", 8080)), "http://192.168.1.5:8080");
-        assert_eq!(url(&at("fd00::5", 8080)), "http://[fd00::5]:8080");
+        let url = |address, port| url(&at(address, port));
+        assert_eq!(url("127.0.0.1", 3000).unwrap(), "http://localhost:3000");
+        assert_eq!(url("::", 5173).unwrap(), "http://localhost:5173");
+        assert_eq!(url("192.168.1.5", 8080).unwrap(), "http://192.168.1.5:8080");
+        assert_eq!(url("fd00::5", 8080).unwrap(), "http://[fd00::5]:8080");
+    }
+
+    #[test]
+    fn opens_no_link_local_listener_whose_interface_it_cant_name() {
+        assert_eq!(url(&at("fe80::1", 3000)), None);
+        assert_eq!(url(&at("febf::a:1", 3000)), None);
     }
 }
