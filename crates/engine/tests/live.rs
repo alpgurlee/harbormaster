@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::net::TcpListener;
+use std::time::{Duration, Instant};
 
 use harbormaster_engine::{Scanner, Standing, live};
 
@@ -23,7 +24,16 @@ fn finds_the_server_this_process_runs() {
 
 #[test]
 fn traces_this_process_up_to_launchd() {
-    let lineage = live::lineage().unwrap().expect("an unbroken chain");
+    // An ancestor that exits while the table is read leaves a gap, which
+    // refuses a stop; a later read sees the chain whole.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let lineage = loop {
+        if let Some(lineage) = live::lineage().unwrap() {
+            break lineage;
+        }
+        assert!(Instant::now() < deadline, "no unbroken chain within 10 s");
+        std::thread::sleep(Duration::from_millis(50));
+    };
 
     assert_eq!(lineage.first(), Some(&std::process::id()));
     assert_eq!(lineage.last(), Some(&1));
