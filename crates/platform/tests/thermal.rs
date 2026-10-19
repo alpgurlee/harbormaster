@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use harbormaster_platform::{Thermal, thermal};
 
 #[test]

@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use std::net::TcpListener;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

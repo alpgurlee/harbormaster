@@ -33,6 +33,8 @@ pub enum Owner {
     CurrentUser,
     OtherUser,
     System,
+    /// The OS wouldn't say whose it is.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,8 +140,8 @@ pub enum Thermal {
     Unknown,
 }
 
-/// The machine's memory the way its own monitor counts it: Activity
-/// Monitor's "Memory Used", Task Manager's "In use".
+/// The machine's memory in use: Activity Monitor's "Memory Used" on macOS,
+/// the physical memory that isn't available on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Memory {
     pub used: u64,

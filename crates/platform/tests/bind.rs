@@ -34,3 +34,12 @@ fn reports_an_address_this_machine_does_not_have_as_unavailable() {
 
     assert_eq!(probe_bind(address, 3000), BindProbe::Unavailable);
 }
+
+#[test]
+#[ignore = "listens on every address, which can raise the firewall's prompt; CI runs it"]
+fn reports_a_port_held_on_every_address_as_in_use_on_loopback_too() {
+    let socket = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+    let port = socket.local_addr().unwrap().port();
+
+    assert_eq!(probe_bind(LOOPBACK, port), BindProbe::InUse);
+}

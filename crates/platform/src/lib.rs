@@ -5,6 +5,10 @@ mod types;
 mod macos;
 #[cfg(target_os = "macos")]
 use macos as sys;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as sys;
 
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
@@ -68,9 +72,10 @@ pub fn presence(key: ProcessKey) -> Presence {
     sys::presence(key)
 }
 
-/// Whether this process runs as root, as its real or its effective user.
-/// What a stop or a removal may reach is judged by the user it runs as, so
-/// those checks hold only for an ordinary one.
+/// Whether this process runs as the system's own account: root, as its
+/// real or effective user, or Windows' LocalSystem. What a stop or a removal
+/// may reach is judged by the user it runs as, so those checks hold only
+/// for an ordinary one.
 pub fn runs_as_root() -> bool {
     sys::runs_as_root()
 }
@@ -97,6 +102,12 @@ pub fn memory() -> Option<Memory> {
 /// How hard the system is working to cool the machine down right now.
 pub fn thermal() -> Thermal {
     sys::thermal()
+}
+
+/// Whether Windows' taskbar is light, for an icon to stand out on it. `None`
+/// where the OS tints the icon itself, as macOS does, or doesn't say.
+pub fn light_taskbar() -> Option<bool> {
+    sys::light_taskbar()
 }
 
 /// The language the user prefers first, as a tag such as `tr-TR`, if the

@@ -29,6 +29,11 @@ pub(crate) use signal::{presence, signal};
 pub(crate) use thermal::thermal;
 pub(crate) use trash::trash;
 
+/// macOS tints the menu bar icon itself.
+pub(crate) fn light_taskbar() -> Option<bool> {
+    None
+}
+
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;
 const INI_IPV6: u8 = 0x2;
