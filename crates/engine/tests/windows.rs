@@ -2,7 +2,7 @@
 
 use std::net::TcpListener;
 
-use harbormaster_engine::{Protection, Scanner, Standing, live};
+use harbormaster_engine::{Scanner, Standing, live};
 
 #[test]
 fn finds_the_server_this_process_runs() {
@@ -23,7 +23,7 @@ fn finds_the_server_this_process_runs() {
 }
 
 #[test]
-fn refuses_to_clear_a_stop_it_cannot_check_without_a_command_line() {
+fn finds_nothing_against_stopping_a_plain_process_of_this_user() {
     let own = std::process::id();
     let key = harbormaster_platform::processes()
         .unwrap()
@@ -35,10 +35,7 @@ fn refuses_to_clear_a_stop_it_cannot_check_without_a_command_line() {
 
     let guards = live::guards(home.path(), &[key]).unwrap();
 
-    assert_eq!(
-        guards.get(&key),
-        Some(&Standing::Protected(Protection::Unverified))
-    );
+    assert_eq!(guards.get(&key), Some(&Standing::Clear));
 }
 
 #[test]

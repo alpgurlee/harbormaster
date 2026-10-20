@@ -36,6 +36,13 @@ pub(crate) fn display(args: &[String]) -> String {
             &rest[1..]
         }
         "python" if rest.len() >= 2 && rest[0] == "-m" => &rest[1..],
+        // cmd's command may come split into words; it is one command string.
+        "cmd" if let Some(at) = rest.iter().position(|arg| is_cmd_command(arg)) => {
+            words.push(file_name(program));
+            words.extend(rest[..=at].iter().map(|arg| arg.to_string()));
+            words.push(rest[at + 1..].join(" "));
+            &[]
+        }
         _ => {
             words.push(file_name(program));
             rest
@@ -61,10 +68,26 @@ pub(crate) fn package_name(path: &str) -> Option<String> {
     }
 }
 
+/// cmd's switch that runs the rest of its line as a command: `/c`, `/k` or `/r`.
+fn is_cmd_command(word: &str) -> bool {
+    let Some(switch) = word.strip_prefix('/') else {
+        return false;
+    };
+    switch.len() == 1 && "ckr".contains(switch.to_ascii_lowercase().as_str())
+}
+
 fn is_path(word: &str) -> bool {
     let bytes = word.as_bytes();
-    word.starts_with('/')
+    (word.starts_with('/') && !is_switch(word))
         || (bytes.len() > 2 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/'))
+}
+
+/// A Windows switch such as cmd's `/c` or msbuild's `/p:Name=value`, which
+/// starts like a path but isn't one.
+fn is_switch(word: &str) -> bool {
+    let rest = word[1..].trim_start_matches(|c: char| c.is_ascii_alphanumeric());
+    let name = word.len() - 1 - rest.len();
+    (1..=2).contains(&name) && (rest.is_empty() || rest.starts_with([':', '+', '-']))
 }
 
 fn file_name(path: &str) -> String {
@@ -130,13 +153,24 @@ fn mask_argument(argument: &str) -> (String, After) {
     let mut words = Vec::with_capacity(tokens.len());
     let mut shown = tokens.len();
     for (index, &token) in tokens.iter().enumerate() {
+        // cmd's `set X=a b && …` assigns everything up to the next operator,
+        // whether `set` stands alone or right after one: `echo x&&set`.
+        let sets = index > 0
+            && tokens[index - 1]
+                .trim_matches('"')
+                .rsplit(SHELL_OPERATORS)
+                .next()
+                .is_some_and(|last| last.eq_ignore_ascii_case("set"));
         let token = if is_path(token) {
             file_name(token)
         } else {
             token.to_string()
         };
         let at_sign_follows = last_at_sign.is_some_and(|last| last > index);
-        let (text, after) = mask_token(&token, at_sign_follows);
+        let (text, mut after) = mask_token(&token, at_sign_follows);
+        if sets && token.contains('=') && after == After::Nothing {
+            after = After::RestHidden;
+        }
         words.push(text);
         match after {
             After::Nothing => continue,
@@ -642,6 +676,57 @@ mod tests {
         assert_eq!(
             show(&["pwsh", "-Command", "$env:API_TOKEN='x'; npm run dev"]),
             "pwsh -Command $env:API_TOKEN=***"
+        );
+    }
+
+    #[test]
+    fn hides_all_a_cmd_set_assigns_which_runs_on_to_the_next_command() {
+        assert_eq!(
+            show(&[
+                "cmd",
+                "/d",
+                "/s",
+                "/c",
+                "set X=secret words && node server.js"
+            ]),
+            "cmd /d /s /c set X=***"
+        );
+        assert_eq!(
+            show(&["cmd", "/c", "SET \"PORT=3000 4000\" && node app.js"]),
+            "cmd /c SET PORT=***"
+        );
+        assert_eq!(
+            show(&["cmd", "/c", "set && node app.js"]),
+            "cmd /c set && node app.js"
+        );
+        // Unquoted, cmd's command comes split into words; it is still one command.
+        assert_eq!(
+            show(&[
+                "cmd",
+                "/d",
+                "/s",
+                "/c",
+                "set",
+                "X=secret",
+                "words",
+                "&&",
+                "node",
+                "server.js"
+            ]),
+            "cmd /d /s /c set X=***"
+        );
+        assert_eq!(
+            show(&["cmd.exe", "/K", "node", "server.js"]),
+            "cmd.exe /K node server.js"
+        );
+        // A `set` right after an operator is one too.
+        assert_eq!(
+            show(&[
+                "cmd",
+                "/c",
+                "echo ready&&set X=secret words && node server.js"
+            ]),
+            "cmd /c echo ready&&set X=***"
         );
     }
 

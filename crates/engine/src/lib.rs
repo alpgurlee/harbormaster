@@ -180,6 +180,10 @@ impl Scanner {
         });
 
         self.details = cache.into_inner();
+        // A command line that couldn't be read is asked for again next time:
+        // the process may not have been ready, or Windows may answer later.
+        self.details
+            .retain(|_, details| details.args.known().is_some());
         Snapshot { services }
     }
 
@@ -583,6 +587,57 @@ mod tests {
             home,
             now,
         })
+    }
+
+    #[test]
+    fn asks_for_a_processs_details_again_until_its_command_line_is_known() {
+        let home = tempfile::tempdir().unwrap();
+        let mut unread = proc(11, 1, "node", "/usr/bin/node", &[], home.path());
+        unread.details.args = Field::Denied;
+        let procs = [
+            proc(
+                10,
+                1,
+                "node",
+                "/usr/bin/node",
+                &["node", "a.js"],
+                home.path(),
+            ),
+            unread,
+        ];
+        let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
+        let listeners: Vec<Listener> = procs
+            .iter()
+            .map(|p| Listener {
+                owner: p.entry.key,
+                address: IpAddr::from([127, 0, 0, 1]),
+                port: 3000 + p.entry.key.pid.0 as u16,
+                socket: None,
+            })
+            .collect();
+        let asked = RefCell::new(Vec::new());
+        let details = |key: ProcessKey| {
+            asked.borrow_mut().push(key.pid.0);
+            procs
+                .iter()
+                .find(|p| p.entry.key == key)
+                .map(|p| p.details.clone())
+                .unwrap()
+        };
+        let mut scanner = Scanner::default();
+        for _ in 0..2 {
+            scanner.scan(Input {
+                listeners: &listeners,
+                processes: &processes,
+                details: &details,
+                home: home.path(),
+                now: Instant::now(),
+            });
+        }
+
+        let asked = asked.borrow();
+        assert_eq!(asked.iter().filter(|&&pid| pid == 10).count(), 1);
+        assert_eq!(asked.iter().filter(|&&pid| pid == 11).count(), 2);
     }
 
     #[test]
