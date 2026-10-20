@@ -142,7 +142,7 @@ to `lsof` or `ps`. The scanning is Rust, and the windows are [Tauri](https://tau
 
 Built and tested on macOS 27 with Apple silicon. Windows 11 has an early preview: the panel and the
 command line's `ls` and `why` work there, while stopping, quitting apps and the cleaner are macOS's alone
-for now. Each change on `main` leaves an unsigned Windows installer in the
+for now. Each change to the code on `main` leaves an unsigned Windows installer in the
 [Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs.
 
 ## License
