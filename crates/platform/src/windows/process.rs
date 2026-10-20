@@ -22,9 +22,11 @@ use windows_sys::Win32::System::ProcessStatus::{
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW,
-    WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_READ,
+    QueryFullProcessImageNameW, WaitForSingleObject,
 };
+
+use super::parameters;
 
 use crate::{
     Field, Owner, Pid, Presence, ProcessDetails, ProcessEntry, ProcessKey, Signal, SignalOutcome,
@@ -38,7 +40,7 @@ const TICKS_BEFORE_1970: u64 = 116_444_736_000_000_000;
 const LONGEST_PATH: usize = 32_768;
 
 /// A handle, closed when dropped.
-struct Handle(HANDLE);
+pub(super) struct Handle(pub(super) HANDLE);
 
 impl Drop for Handle {
     fn drop(&mut self) {
@@ -345,8 +347,11 @@ impl Missing {
 
 /// The process `key` names, held open, if its pid still names it.
 fn reopen(key: ProcessKey) -> Result<Handle, Missing> {
-    let process =
-        open(key.pid.0, PROCESS_QUERY_LIMITED_INFORMATION).map_err(|error| Missing::of(&error))?;
+    reopen_with(key, PROCESS_QUERY_LIMITED_INFORMATION)
+}
+
+fn reopen_with(key: ProcessKey, access: u32) -> Result<Handle, Missing> {
+    let process = open(key.pid.0, access).map_err(|error| Missing::of(&error))?;
     match times(&process) {
         Some(times) if times.start == key.start => Ok(process),
         Some(_) => Err(Missing::Gone),
@@ -355,14 +360,21 @@ fn reopen(key: ProcessKey) -> Result<Handle, Missing> {
 }
 
 pub(crate) fn details(key: ProcessKey) -> ProcessDetails {
-    match reopen(key) {
-        Ok(process) => ProcessDetails {
-            exe: image(&process),
-            // Windows keeps both in the process's own memory; not read yet.
-            args: Field::Unsupported,
-            cwd: Field::Unsupported,
-        },
-        Err(missing) => missing.details(),
+    let process = match reopen(key) {
+        Ok(process) => process,
+        Err(missing) => return missing.details(),
+    };
+    // The working folder sits in the process's memory, which takes a right
+    // the limited handle lacks; without it, the program and command line
+    // are still told.
+    let cwd = match reopen_with(key, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ) {
+        Ok(readable) => parameters::working_folder(&readable),
+        Err(missing) => missing.field(),
+    };
+    ProcessDetails {
+        exe: image(&process),
+        args: parameters::command_line(&process),
+        cwd,
     }
 }
 

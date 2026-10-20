@@ -103,21 +103,132 @@ fn lists_processes_windows_runs_for_itself() {
     );
 }
 
+/// Whether `a` and `b` name the same folder, however each is spelled.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// A child of `program` started in `folder` with `/r`, and its key.
+fn started_in(program: &Path, folder: &Path) -> (Waiting, ProcessKey) {
+    let child = Command::new(program)
+        .arg("/r")
+        .current_dir(folder)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("the child should start");
+    let waiting = Waiting(child);
+    let key = find(waiting.0.id())
+        .expect("the child should be listed")
+        .key;
+    (waiting, key)
+}
+
 #[test]
-fn reads_a_childs_program_but_not_yet_its_arguments_or_folder() {
-    let (_waiting, key) = wait();
+fn reads_a_childs_program_arguments_and_working_folder() {
+    let folder = tempfile::tempdir().unwrap();
+    let (_waiting, key) = started_in(&waiter(), folder.path());
 
     let info = details(key);
 
-    let Field::Known(exe) = info.exe else {
+    let Field::Known(exe) = &info.exe else {
         panic!("the child's program should be readable: {:?}", info.exe);
     };
     assert!(
-        exe.ends_with("sort.exe") || exe.ends_with("SORT.EXE"),
+        exe.to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with("sort.exe"),
         "{exe:?}"
     );
-    assert_eq!(info.args, Field::Unsupported);
-    assert_eq!(info.cwd, Field::Unsupported);
+    let Field::Known(args) = &info.args else {
+        panic!(
+            "the child's command line should be readable: {:?}",
+            info.args
+        );
+    };
+    assert!(
+        args[0].to_ascii_lowercase().ends_with("sort.exe"),
+        "{args:?}"
+    );
+    assert_eq!(args[1..], ["/r"]);
+    let Field::Known(cwd) = &info.cwd else {
+        panic!(
+            "the child's working folder should be readable: {:?}",
+            info.cwd
+        );
+    };
+    assert!(
+        same_folder(cwd, folder.path()),
+        "{cwd:?} is not {:?}",
+        folder.path()
+    );
+}
+
+#[test]
+fn reads_a_32_bit_childs_arguments_and_working_folder_too() {
+    let system = std::env::var_os("SystemRoot").expect("Windows says where it lives");
+    let sort32 = Path::new(&system).join("SysWOW64").join("sort.exe");
+    let folder = tempfile::tempdir().unwrap();
+    let (_waiting, key) = started_in(&sort32, folder.path());
+
+    let info = details(key);
+
+    assert_eq!(
+        info.args.known().map(|args| &args[1..]),
+        Some(&["/r".to_string()][..]),
+        "{info:?}"
+    );
+    assert!(
+        info.cwd
+            .known()
+            .is_some_and(|cwd| same_folder(cwd, folder.path())),
+        "{info:?}"
+    );
+}
+
+#[test]
+fn reads_the_working_folder_a_process_moved_to() {
+    use std::io::{BufRead, BufReader};
+
+    let folder = tempfile::tempdir().unwrap();
+    let moved = folder.path().join("moved");
+    std::fs::create_dir(&moved).unwrap();
+    let script = format!(
+        "[Environment]::CurrentDirectory = '{}'; [Console]::Out.WriteLine('moved'); [Console]::Out.Flush(); [void][Console]::In.ReadToEnd()",
+        moved.display()
+    );
+    let child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .current_dir(folder.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("PowerShell should start");
+    let mut waiting = Waiting(child);
+    let mut line = String::new();
+    BufReader::new(waiting.0.stdout.take().unwrap())
+        .read_line(&mut line)
+        .expect("PowerShell should say it moved");
+    assert_eq!(line.trim(), "moved");
+    let key = find(waiting.0.id())
+        .expect("PowerShell should be listed")
+        .key;
+
+    let info = details(key);
+
+    assert!(
+        info.cwd.known().is_some_and(|cwd| same_folder(cwd, &moved)),
+        "{info:?}"
+    );
+    assert!(
+        info.args
+            .known()
+            .is_some_and(|args| args.iter().any(|arg| arg == "-NoProfile")),
+        "{info:?}"
+    );
 }
 
 #[test]

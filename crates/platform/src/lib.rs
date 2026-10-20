@@ -1,4 +1,11 @@
 mod bind;
+/// Read on Windows; their tests run everywhere.
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod command_line;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod peb;
 mod types;
 
 #[cfg(target_os = "macos")]
