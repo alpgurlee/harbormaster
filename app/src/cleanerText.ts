@@ -118,8 +118,6 @@ export function refusalText(refusal: CleanRefusal, i18n: Translator): string {
   switch (refusal.code) {
     case "busy":
       return i18n.t("cleanBusy");
-    case "closed":
-      return i18n.t("cleanClosed");
     case "expired":
       return i18n.t("cleanExpired");
     case "unlisted":

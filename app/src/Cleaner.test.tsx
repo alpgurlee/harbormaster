@@ -66,6 +66,7 @@ function fake() {
   const maps: { others: boolean; onEvent: (event: MapEvent) => void }[] = [];
   const shownAreas: { token: number; id: number }[] = [];
   let stoppable: () => Promise<string[]> = () => Promise.resolve([]);
+  let free = 100 * GB;
   const daemonPreviews: { token: number; path: string }[] = [];
   const daemonStops: number[] = [];
   const backend: CleanerBackend = {
@@ -89,7 +90,7 @@ function fake() {
       stops += 1;
       return Promise.resolve();
     },
-    disk: () => Promise.resolve({ total: 500 * GB, free: 100 * GB }),
+    disk: () => Promise.resolve({ total: 500 * GB, free }),
     reveal: (path) => {
       revealed.push(path);
       return Promise.resolve();
@@ -142,6 +143,10 @@ function fake() {
     stops: () => stops,
     refuse: (next: unknown) => {
       refusal = next;
+    },
+    /** How much room the disk has from now on. */
+    freeNow: (gb: number) => {
+      free = gb * GB;
     },
   };
 }
@@ -295,6 +300,19 @@ describe("the cleaner window", () => {
     section("Developer");
 
     expect(screen.getByText(/left alone for 90 days/)).toBeTruthy();
+  });
+
+  it("measures the disk again when the window comes back", async () => {
+    const driver = fake();
+    show(driver.backend);
+    expect(await screen.findByText("100.0 GB")).toBeTruthy();
+
+    driver.freeNow(80);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText("80.0 GB")).toBeTruthy();
   });
 
   it("shows the disk, and scans only when asked", async () => {

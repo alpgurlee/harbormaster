@@ -1,10 +1,6 @@
 //! The cleaner's own window, over the same pages as the panel.
 
-use std::sync::Arc;
-
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-
-use crate::cleaning::Cleaning;
 
 const LABEL: &str = "cleaner";
 
@@ -28,9 +24,13 @@ pub(crate) fn show(app: &AppHandle) -> tauri::Result<()> {
     let window = builder.build()?;
     let handle = app.clone();
     window.on_window_event(move |event| {
-        // Nobody is left to see a scan or removal through.
-        if let WindowEvent::Destroyed = event {
-            handle.state::<Arc<Cleaning>>().stop();
+        // Closing only hides the window: a scan or removal under way goes
+        // on, and the window comes back to it, and to its list, as it was.
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Some(window) = handle.get_webview_window(LABEL) {
+                let _ = window.hide();
+            }
         }
     });
     window.set_focus()

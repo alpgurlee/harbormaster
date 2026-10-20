@@ -119,8 +119,6 @@ pub(crate) enum MapEvent {
 pub(crate) enum Refusal {
     /// A scan or a removal is under way already.
     Busy,
-    /// The window that asked closed before the work could start.
-    Closed,
     /// The scan the window names is gone: removed from already, or replaced.
     Expired,
     /// The window asked for something that scan didn't list.
@@ -205,6 +203,7 @@ impl Search {
 
 /// The one scan or removal under way, taken before its work is queued so
 /// that a stop from then on holds; another can start once it is dropped.
+/// It outlives the window, which only hides when closed.
 #[derive(Debug)]
 pub(crate) struct Working(Arc<Cleaning>);
 
@@ -215,23 +214,16 @@ impl Drop for Working {
 }
 
 impl Cleaning {
-    /// Takes the slot for a scan or removal for the window `open` tells
-    /// of. A stop from before is forgotten, so the window is asked only
-    /// then: if it closed meanwhile, nothing starts. A stop after holds.
-    pub(crate) fn begin(self: &Arc<Self>, open: impl FnOnce() -> bool) -> Result<Working, Refusal> {
-        let working = {
-            let mut ledger = self.lock();
-            if ledger.working {
-                return Err(Refusal::Busy);
-            }
-            ledger.working = true;
-            self.stop.store(false, Ordering::Relaxed);
-            Working(Arc::clone(self))
-        };
-        if !open() {
-            return Err(Refusal::Closed);
+    /// Takes the slot for a scan or removal. A stop from before is
+    /// forgotten; one from then on holds.
+    pub(crate) fn begin(self: &Arc<Self>) -> Result<Working, Refusal> {
+        let mut ledger = self.lock();
+        if ledger.working {
+            return Err(Refusal::Busy);
         }
-        Ok(working)
+        ledger.working = true;
+        self.stop.store(false, Ordering::Relaxed);
+        Ok(Working(Arc::clone(self)))
     }
 
     /// Cuts the scan or removal under way short.
@@ -1135,11 +1127,11 @@ mod tests {
     #[test]
     fn runs_one_scan_or_removal_at_a_time() {
         let cleaning = Arc::new(Cleaning::default());
-        let working = cleaning.begin(|| true).unwrap();
+        let working = cleaning.begin().unwrap();
 
-        assert!(matches!(cleaning.begin(|| true), Err(Refusal::Busy)));
+        assert!(matches!(cleaning.begin(), Err(Refusal::Busy)));
         drop(working);
-        assert!(cleaning.begin(|| true).is_ok());
+        assert!(cleaning.begin().is_ok());
     }
 
     #[test]
@@ -1147,40 +1139,10 @@ mod tests {
         let cleaning = Arc::new(Cleaning::default());
         cleaning.stop();
 
-        let _working = cleaning.begin(|| true).unwrap();
+        let _working = cleaning.begin().unwrap();
         assert!(!cleaning.stop.load(Ordering::Relaxed));
 
         cleaning.stop();
-        assert!(cleaning.stop.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn starts_nothing_for_a_window_that_closed_before_the_work_was_taken_on() {
-        let cleaning = Arc::new(Cleaning::default());
-        let open = std::sync::atomic::AtomicBool::new(true);
-        // The window closes, setting the stop, before the request is taken on.
-        cleaning.stop();
-        open.store(false, Ordering::Relaxed);
-
-        // Taking it on forgets that stop, so it must see the window closed.
-        let refused = cleaning.begin(|| open.load(Ordering::Relaxed));
-
-        assert!(matches!(refused, Err(Refusal::Closed)));
-        assert!(cleaning.begin(|| true).is_ok());
-    }
-
-    #[test]
-    fn keeps_the_stop_of_a_window_closing_just_as_it_is_asked() {
-        let cleaning = Arc::new(Cleaning::default());
-
-        // Open when asked, and closed, with its stop, straight after.
-        let _working = cleaning
-            .begin(|| {
-                cleaning.stop();
-                true
-            })
-            .unwrap();
-
         assert!(cleaning.stop.load(Ordering::Relaxed));
     }
 

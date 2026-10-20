@@ -169,7 +169,6 @@ export interface Messages {
   whyInUse: string;
   whyUnchecked: string;
   cleanBusy: string;
-  cleanClosed: string;
   cleanExpired: string;
   cleanUnlisted: string;
   overview: string;
@@ -428,7 +427,6 @@ export const en: Messages = {
   whyInUse: "{who} is using it",
   whyUnchecked: "what is using it couldn't be read",
   cleanBusy: "A scan or clean-up is running already.",
-  cleanClosed: "The window was closed before the work could start.",
   cleanExpired: "This list is out of date. Scan again to clean up.",
   cleanUnlisted: "Something chosen wasn't in the list. Scan again to clean up.",
   overview: "Overview",
@@ -690,7 +688,6 @@ export const tr: Messages = {
   whyInUse: "{who} kullanıyor",
   whyUnchecked: "onu neyin kullandığı okunamadı",
   cleanBusy: "Bir tarama ya da temizlik zaten sürüyor.",
-  cleanClosed: "İş başlamadan pencere kapandı.",
   cleanExpired: "Bu liste eskidi. Temizlemek için yeniden tara.",
   cleanUnlisted: "Seçilenlerden biri listede yoktu. Temizlemek için yeniden tara.",
   overview: "Genel Bakış",

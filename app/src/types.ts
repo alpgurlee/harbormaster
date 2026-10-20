@@ -178,9 +178,7 @@ export interface Disk {
 }
 
 /** Why the app turned the cleaner down. */
-export type CleanRefusal =
-  | { code: "busy" | "closed" | "expired" | "unlisted" | "changed" }
-  | { code: "failed"; message: string };
+export type CleanRefusal = { code: "busy" | "expired" | "unlisted" | "changed" } | { code: "failed"; message: string };
 
 /** Why a place in the map may hold more than it says, the weightiest last. */
 export type Short = "deep" | "changed" | "denied" | "skipped" | "stopped";

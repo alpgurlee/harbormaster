@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use harbormaster_cleaner::Finding;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaner;
@@ -111,16 +111,14 @@ pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn clean_scan(
     channel: Channel<ScanEvent>,
-    window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
     store: State<'_, Store>,
 ) -> Result<(), Refusal> {
     let settings = store.get();
-    // Taken before the work is queued, so closing the window stops it from here on.
-    let working = cleaning.begin(|| open(&window))?;
+    // Taken before the work is queued, so a stop from here on holds.
+    let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         working.scan(&settings.roots, settings.idle_days, &|event| {
-            // A closed window stops the scan itself.
             let _ = channel.send(event);
         })
     })
@@ -134,10 +132,9 @@ pub(crate) async fn clean_scan(
 #[tauri::command]
 pub(crate) async fn clean_hunt(
     channel: Channel<ScanEvent>,
-    window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
 ) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
+    let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         working.hunt(&|event| {
             let _ = channel.send(event);
@@ -156,10 +153,9 @@ pub(crate) async fn clean_run(
     token: u64,
     paths: Vec<PathBuf>,
     channel: Channel<RunEvent>,
-    window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
 ) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
+    let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         working.run(token, &paths, &mut |event| {
             let _ = channel.send(event);
@@ -171,21 +167,14 @@ pub(crate) async fn clean_run(
     })?
 }
 
-/// Whether `window` is still there to see the work through; a closed one
-/// can't be asked, and a minimized one still counts.
-fn open(window: &WebviewWindow) -> bool {
-    window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false)
-}
-
 /// Lists this user's own apps, telling the window as it goes; they come
 /// last with what else is shown, under the token removing some takes.
 #[tauri::command]
 pub(crate) async fn clean_apps(
     channel: Channel<ScanEvent>,
-    window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
 ) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
+    let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         working.apps(&|event| {
             let _ = channel.send(event);
@@ -203,10 +192,9 @@ pub(crate) async fn clean_apps(
 pub(crate) async fn clean_map(
     others: bool,
     channel: Channel<MapEvent>,
-    window: WebviewWindow,
     cleaning: State<'_, Arc<Cleaning>>,
 ) -> Result<(), Refusal> {
-    let working = cleaning.begin(|| open(&window))?;
+    let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         working.map(others, &mut |event| {
             let _ = channel.send(event);

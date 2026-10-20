@@ -154,6 +154,12 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
       .catch(() => setDisk(null));
   }, [backend]);
   useEffect(measureDisk, [measureDisk]);
+  // The window hides rather than closes, so coming back to it measures the
+  // disk again: room may have gone or come meanwhile.
+  useEffect(() => {
+    window.addEventListener("focus", measureDisk);
+    return () => window.removeEventListener("focus", measureDisk);
+  }, [measureDisk]);
 
   // A scan looks for what tools and apps leave; a hunt, for the user's large files; a listing, for their apps.
   const search = useCallback(
