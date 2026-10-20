@@ -17,6 +17,9 @@
     "allow-settings-subscribe",
     "allow-resize-panel",
     "allow-hide-panel",
+    "allow-drag-panel",
+    "allow-anchor-panel",
+    "allow-panel-placed",
     "allow-quit"
   ]
 }

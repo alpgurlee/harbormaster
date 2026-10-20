@@ -122,6 +122,23 @@ pub(crate) fn hide_panel(app: AppHandle) {
     panel::hide(&app);
 }
 
+/// The user drags the panel off its icon; it stays where they put it.
+#[tauri::command]
+pub(crate) fn drag_panel(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    panel::drag(&app, &window).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn anchor_panel(app: AppHandle, window: WebviewWindow) {
+    panel::anchor(&app, &window);
+}
+
+/// Whether the panel sits where the user put it rather than by its icon.
+#[tauri::command]
+pub(crate) fn panel_placed(app: AppHandle) -> bool {
+    panel::placed(&app)
+}
+
 #[tauri::command]
 pub(crate) fn quit(app: AppHandle) {
     app.exit(0);

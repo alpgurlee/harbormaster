@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { urlOf } from "./address";
+import { dragsAfterMoving } from "./drag";
 import { useI18n } from "./i18n";
-import { Chevron, Gear, Mark, OpenOut, Search, Square, Sweep } from "./icons";
+import { Chevron, Gear, Mark, OpenOut, PutBack, Search, Square, Sweep } from "./icons";
 import { groupByProject, projectOf, totals } from "./model";
 import { Plate } from "./Plate";
 import { platform } from "./platform";
@@ -34,9 +35,30 @@ export interface PanelProps {
   /** Whether this platform has a cleaner at all; without one, no button shows. */
   cleans?: boolean;
   onSettings?: () => void;
+  /** Drags the panel off its icon, from its header. */
+  onDrag?: () => void;
+  /** Whether the user put the panel elsewhere, which `onAnchor` undoes. */
+  placed?: boolean;
+  onAnchor?: () => void;
 }
 
-export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onStop, onQuit, onClean, cleans = true, onSettings }: PanelProps) {
+export function Panel({
+  hidden = false,
+  tints,
+  update,
+  now,
+  onShow,
+  onOpen,
+  onStop,
+  onQuit,
+  onClean,
+  cleans = true,
+  onSettings,
+  onDrag,
+  placed = false,
+  onAnchor,
+}: PanelProps) {
+  const header = <Header onClean={onClean} cleans={cleans} onSettings={onSettings} onDrag={onDrag} onAnchor={placed ? onAnchor : undefined} />;
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -51,7 +73,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   if (update === null) {
     return (
       <div className={styles.panel} hidden={hidden}>
-        <Header onClean={onClean} cleans={cleans} onSettings={onSettings} />
+        {header}
         <p className={styles.note}>{i18n.t("looking")}</p>
       </div>
     );
@@ -112,7 +134,7 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
 
   return (
     <div className={styles.panel} hidden={hidden}>
-      <Header onClean={onClean} cleans={cleans} onSettings={onSettings} />
+      {header}
       <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} thermal={update.thermal} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />
@@ -176,13 +198,27 @@ export function Panel({ hidden = false, tints, update, now, onShow, onOpen, onSt
   );
 }
 
-function Header({ onClean, cleans, onSettings }: { onClean?: () => void; cleans: boolean; onSettings?: () => void }) {
+interface HeaderProps {
+  onClean?: () => void;
+  cleans: boolean;
+  onSettings?: () => void;
+  onDrag?: () => void;
+  /** Shown only while the panel sits where the user put it. */
+  onAnchor?: () => void;
+}
+
+function Header({ onClean, cleans, onSettings, onDrag, onAnchor }: HeaderProps) {
   const i18n = useI18n();
   return (
-    <header className={styles.header}>
+    <header className={styles.header} onMouseDown={onDrag && dragsAfterMoving(onDrag)}>
       <Mark className={styles.mark} />
       Harbormaster
       <span className={styles.tools}>
+        {onAnchor ? (
+          <button type="button" className={styles.tool} aria-label={i18n.t("putBack")} title={i18n.t("putBack")} onClick={onAnchor}>
+            <PutBack />
+          </button>
+        ) : null}
         {cleans ? (
           <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
             <Sweep />

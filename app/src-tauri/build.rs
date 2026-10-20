@@ -30,6 +30,9 @@ fn main() {
         "clean_daemon_stop",
         "resize_panel",
         "hide_panel",
+        "drag_panel",
+        "anchor_panel",
+        "panel_placed",
         "quit",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))

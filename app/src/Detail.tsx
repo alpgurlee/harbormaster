@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { hostOf, urlOf } from "./address";
+import { dragsAfterMoving } from "./drag";
 import { useI18n } from "./i18n";
 import { Chevron, OpenOut } from "./icons";
 import { Plate } from "./Plate";
@@ -22,12 +23,14 @@ export interface DetailProps {
   onReveal: (service: Service) => void;
   /** Asks to stop the server; without it, the page offers no stop. */
   onStop?: (service: Service) => void;
+  /** Drags the panel off its icon, from the page's header. */
+  onDrag?: () => void;
   /** Its project's color. */
   tint?: number;
 }
 
 /** One server's page: what runs, where, from what, and what it uses. */
-export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop, tint = 0 }: DetailProps) {
+export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop, onDrag, tint = 0 }: DetailProps) {
   const i18n = useI18n();
   const first = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState<"copied" | "copyFailed" | null>(null);
@@ -98,7 +101,7 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop,
 
   return (
     <section className={styles.page} aria-label={title} onKeyDown={onKeyDown}>
-      <header className={styles.header}>
+      <header className={styles.header} onMouseDown={onDrag && dragsAfterMoving(onDrag)}>
         <button ref={first} type="button" className={styles.back} aria-label={i18n.t("back")} onClick={onBack}>
           <Chevron />
         </button>

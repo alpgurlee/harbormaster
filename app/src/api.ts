@@ -56,6 +56,9 @@ export const quitAppPreview = (name: string) => invoke<QuitPreview>("quit_app_pr
 export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");
+export const dragPanel = () => invoke<void>("drag_panel");
+export const anchorPanel = () => invoke<void>("anchor_panel");
+export const panelPlaced = () => invoke<boolean>("panel_placed");
 export const openCleaner = () => invoke<void>("open_cleaner");
 export const openSettings = () => invoke<void>("open_settings");
 export const settingsGet = () => invoke<Settings>("settings_get");

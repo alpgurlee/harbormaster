@@ -72,3 +72,13 @@ export function Chevron(props: IconProps) {
     </svg>
   );
 }
+
+/** An arrow going back, for a panel to return by its icon. */
+export function PutBack(props: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...line} {...props}>
+      <path d="M6 3.5 3 6.5l3 3" />
+      <path d="M3 6.5h6.25a3.75 3.75 0 0 1 0 7.5H7.5" />
+    </svg>
+  );
+}

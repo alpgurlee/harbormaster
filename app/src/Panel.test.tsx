@@ -310,6 +310,22 @@ describe("Panel", () => {
     expect(screen.getByRole("option", { name: /Port 3000/ })).toBeTruthy();
   });
 
+  it("is dragged off its icon by its header, and put back from there", () => {
+    const onDrag = vi.fn();
+    const onAnchor = vi.fn();
+    show({ onDrag, onAnchor });
+    expect(screen.queryByRole("button", { name: "Put back by the icon" })).toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("banner"), { button: 0, screenX: 10, screenY: 10 });
+    fireEvent.mouseMove(window, { buttons: 1, screenX: 40, screenY: 10 });
+    expect(onDrag).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    show({ onDrag, onAnchor, placed: true });
+    fireEvent.click(screen.getByRole("button", { name: "Put back by the icon" }));
+    expect(onAnchor).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the cleaner's and the settings' buttons off where nothing can open them", () => {
     show();
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
-import { hidePanel, inApp, openCleaner, openInBrowser, openSettings, resizePanel, revealFolder } from "./api";
+import { anchorPanel, dragPanel, hidePanel, inApp, openCleaner, openInBrowser, openSettings, panelPlaced, resizePanel, revealFolder } from "./api";
 import { Detail } from "./Detail";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
@@ -41,6 +41,22 @@ function useWindowFit(frame: RefObject<HTMLDivElement | null>) {
   }, [frame]);
 }
 
+/** Whether the panel sits where the user put it. The app has the last word:
+ * it hangs the panel from its icon again if the screen it was on is gone. */
+function usePlaced(): [boolean, (placed: boolean) => void] {
+  const [placed, setPlaced] = useState(false);
+  useEffect(() => {
+    if (!inApp) return;
+    const ask = () => {
+      panelPlaced().then(setPlaced).catch(console.error);
+    };
+    ask();
+    window.addEventListener("focus", ask);
+    return () => window.removeEventListener("focus", ask);
+  }, []);
+  return [placed, setPlaced];
+}
+
 /** An Escape that nothing in the panel wanted closes it. */
 function useEscapeHides() {
   useEffect(() => {
@@ -76,6 +92,16 @@ function reveal(service: Service) {
 
 export function App() {
   const update = useUpdate();
+  // Dragged off its icon, the panel stays where it was put until put back.
+  const [placed, setPlaced] = usePlaced();
+  const drag = () => {
+    setPlaced(true);
+    dragPanel().catch(console.error);
+  };
+  const anchor = () => {
+    setPlaced(false);
+    anchorPanel().catch(console.error);
+  };
   const now = Math.max(useNow(5_000), update?.scannedAt ?? 0);
   const [shown, setShown] = useState<string | null>(null);
   // The server as it was when asked about, so the question stays put while scans go on.
@@ -133,6 +159,9 @@ export function App() {
             onClean={inApp ? clean : undefined}
             cleans={acts}
             onSettings={inApp ? settle : undefined}
+            onDrag={inApp ? drag : undefined}
+            placed={placed}
+            onAnchor={anchor}
           />
           {shown === null ? null : (
             <Detail
@@ -144,6 +173,7 @@ export function App() {
               onCopy={copy}
               onReveal={reveal}
               onStop={acts ? askStop : undefined}
+              onDrag={inApp ? drag : undefined}
             />
           )}
         </div>

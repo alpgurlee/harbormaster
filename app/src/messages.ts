@@ -5,6 +5,7 @@ export interface Plural {
 
 export interface Messages {
   settings: string;
+  putBack: string;
   clean: string;
   servers: Plural;
   memoryOf: string;
@@ -259,6 +260,7 @@ export interface Messages {
 
 export const en: Messages = {
   settings: "Settings",
+  putBack: "Put back by the icon",
   clean: "Clean up",
   servers: { one: "{count} server", other: "{count} servers" },
   memoryOf: "{used} of {total}",
@@ -520,6 +522,7 @@ export const en: Messages = {
 
 export const tr: Messages = {
   settings: "Ayarlar",
+  putBack: "Simgenin yanına geri koy",
   clean: "Temizle",
   servers: { one: "{count} sunucu", other: "{count} sunucu" },
   memoryOf: "{used} / {total}",

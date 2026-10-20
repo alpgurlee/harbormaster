@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use tauri::{
-    AppHandle, LogicalSize, Manager, Rect, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, LogicalSize, Manager, Monitor, Rect, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 
 use crate::scanning::Scanning;
@@ -27,11 +27,20 @@ pub(crate) struct Anchor(Mutex<Hold>);
 struct Hold {
     icon: Option<Rect>,
     hidden_at: Option<Instant>,
+    /// The user dragged the panel off its icon, to another screen perhaps:
+    /// it opens where they left it, and stays open when it loses focus.
+    placed: bool,
 }
 
 impl Anchor {
     fn lock(&self) -> MutexGuard<'_, Hold> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The icon the panel hangs from, unless the user put it elsewhere.
+    fn hung_from(&self) -> Option<Rect> {
+        let hold = self.lock();
+        hold.icon.filter(|_| !hold.placed)
     }
 }
 
@@ -62,11 +71,30 @@ pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
     }
     let handle = app.clone();
     window.on_window_event(move |event| {
-        if let WindowEvent::Focused(false) = event {
+        if let WindowEvent::Focused(false) = event
+            && !handle.state::<Anchor>().lock().placed
+        {
             hide(&handle);
         }
     });
     Ok(())
+}
+
+/// The user drags the panel away from its icon. It stays where they put it.
+pub(crate) fn drag(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
+    app.state::<Anchor>().lock().placed = true;
+    window.start_dragging()
+}
+
+/// Hangs the panel from its icon again.
+pub(crate) fn anchor(app: &AppHandle, window: &WebviewWindow) {
+    app.state::<Anchor>().lock().placed = false;
+    place(app, window);
+}
+
+/// Whether the user put the panel somewhere of their own.
+pub(crate) fn placed(app: &AppHandle) -> bool {
+    app.state::<Anchor>().lock().placed
 }
 
 /// The tray icon was clicked: open the panel under it, or close it.
@@ -102,6 +130,11 @@ pub(crate) fn show(app: &AppHandle) {
 }
 
 fn reveal(app: &AppHandle, window: &WebviewWindow) {
+    // Put on a screen that is gone since, it would open out of reach.
+    let anchor = app.state::<Anchor>();
+    if anchor.lock().placed && !on_a_screen(app, window) {
+        anchor.lock().placed = false;
+    }
     place(app, window);
     let _ = window.show();
     let _ = window.set_focus();
@@ -120,7 +153,7 @@ pub(crate) fn hide(app: &AppHandle) {
     }
 }
 
-/// The panel is as tall as its content, and stays hung from the icon.
+/// The panel is as tall as its content, and stays where it hangs or was put.
 pub(crate) fn resize(app: &AppHandle, window: &WebviewWindow, height: f64) -> tauri::Result<()> {
     window.set_size(LogicalSize::new(
         WIDTH,
@@ -131,7 +164,7 @@ pub(crate) fn resize(app: &AppHandle, window: &WebviewWindow, height: f64) -> ta
 }
 
 fn place(app: &AppHandle, window: &WebviewWindow) {
-    let Some(icon) = app.state::<Anchor>().lock().icon else {
+    let Some(icon) = app.state::<Anchor>().hung_from() else {
         return;
     };
     // Tray icons report their place in physical pixels.
@@ -140,16 +173,9 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
     // The screen whose physical bounds hold the icon: on a Mac, monitor_from_point
     // reads points, not pixels, and finds none.
     let monitor = app.available_monitors().ok().and_then(|monitors| {
-        monitors.into_iter().find(|monitor| {
-            let (origin, extent) = (monitor.position(), monitor.size());
-            let bounds = Area {
-                x: f64::from(origin.x),
-                y: f64::from(origin.y),
-                width: f64::from(extent.width),
-                height: f64::from(extent.height),
-            };
-            holds(bounds, position.x, position.y)
-        })
+        monitors
+            .into_iter()
+            .find(|monitor| holds(screen(monitor), position.x, position.y))
     });
     let (Some(monitor), Ok(panel), Ok(scale)) =
         (monitor, window.outer_size(), window.scale_factor())
@@ -190,6 +216,42 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
 
 fn holds(area: Area, x: f64, y: f64) -> bool {
     (area.x..area.x + area.width).contains(&x) && (area.y..area.y + area.height).contains(&y)
+}
+
+/// Whether any of the window shows on one of the screens there are now.
+/// Not knowing counts as yes: the window is left where it is.
+fn on_a_screen(app: &AppHandle, window: &WebviewWindow) -> bool {
+    let (Ok(position), Ok(size), Ok(monitors)) = (
+        window.outer_position(),
+        window.outer_size(),
+        app.available_monitors(),
+    ) else {
+        return true;
+    };
+    let panel = Area {
+        x: f64::from(position.x),
+        y: f64::from(position.y),
+        width: f64::from(size.width),
+        height: f64::from(size.height),
+    };
+    monitors
+        .iter()
+        .any(|monitor| overlaps(panel, screen(monitor)))
+}
+
+fn overlaps(a: Area, b: Area) -> bool {
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/// A screen's whole extent, in physical pixels.
+fn screen(monitor: &Monitor) -> Area {
+    let (origin, extent) = (monitor.position(), monitor.size());
+    Area {
+        x: f64::from(origin.x),
+        y: f64::from(origin.y),
+        width: f64::from(extent.width),
+        height: f64::from(extent.height),
+    }
 }
 
 /// A size in one screen's pixels, in another's: the panel may be about to move.
@@ -240,6 +302,16 @@ mod tests {
             width,
             height,
         }
+    }
+
+    #[test]
+    fn counts_a_window_as_on_a_screen_while_any_of_it_shows_there() {
+        let screen = area(0.0, 0.0, 2560.0, 1440.0);
+        assert!(super::overlaps(area(100.0, 100.0, 680.0, 800.0), screen));
+        assert!(super::overlaps(area(2500.0, -700.0, 680.0, 800.0), screen));
+        assert!(!super::overlaps(area(2560.0, 0.0, 680.0, 800.0), screen));
+        assert!(!super::overlaps(area(-680.0, 0.0, 680.0, 800.0), screen));
+        assert!(!super::overlaps(area(0.0, 1440.0, 680.0, 800.0), screen));
     }
 
     #[test]

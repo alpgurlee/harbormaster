@@ -70,6 +70,9 @@ fn main() {
         actions::clean_daemon_stop,
         commands::resize_panel,
         commands::hide_panel,
+        commands::drag_panel,
+        commands::anchor_panel,
+        commands::panel_placed,
         commands::quit,
     ]);
     #[cfg(windows)]
@@ -83,6 +86,9 @@ fn main() {
         commands::settings_set,
         commands::resize_panel,
         commands::hide_panel,
+        commands::drag_panel,
+        commands::anchor_panel,
+        commands::panel_placed,
         commands::quit,
     ]);
     builder
