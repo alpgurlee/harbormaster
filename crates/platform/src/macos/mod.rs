@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use libproc::file_info::pidfdinfo;
 use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
 
-use crate::{Listener, SocketId, Whereabouts};
+use crate::{Listener, ProcessKey, SocketId, Whereabouts};
 
 pub(crate) use language::preferred_language;
 pub(crate) use limits::allow_more_open_files;
@@ -35,6 +35,11 @@ pub(crate) fn light_taskbar() -> Option<bool> {
 }
 
 /// There is no Windows folder on a Mac, nor a shell window.
+/// A Mac ends nothing else along with a process.
+pub(crate) fn bound_to(_key: ProcessKey) -> io::Result<Vec<u32>> {
+    Ok(Vec::new())
+}
+
 pub(crate) fn windows_folder() -> Option<PathBuf> {
     None
 }

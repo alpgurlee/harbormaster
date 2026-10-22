@@ -82,6 +82,14 @@ pub fn presence(key: ProcessKey) -> Presence {
     sys::presence(key)
 }
 
+/// The pids of the processes the system would end along with the process
+/// `key` names: on Windows, those of each job it holds that ends them all
+/// once its last handle closes, as Node's for the programs it starts does.
+/// None on a Mac.
+pub fn bound_to(key: ProcessKey) -> Result<Vec<u32>, Error> {
+    Ok(sys::bound_to(key)?)
+}
+
 /// Whether this process runs as the system's own account: root, as its
 /// real or effective user, or Windows' LocalSystem. What a stop or a removal
 /// may reach is judged by the user it runs as, so those checks hold only

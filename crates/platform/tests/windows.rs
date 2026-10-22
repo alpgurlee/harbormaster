@@ -275,6 +275,76 @@ fn reads_nothing_through_a_key_whose_start_isnt_its_pids_now() {
     assert_eq!(presence(stale), Presence::Replaced);
 }
 
+/// A job this test holds open.
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        // SAFETY: the handle is open and this value alone owns it.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+/// A job holding `waiting`; if `ending`, it ends its processes once its
+/// last handle closes, as the job Node starts programs in does.
+fn job_for(waiting: &Waiting, ending: bool) -> Job {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+
+    // SAFETY: no attributes and no name are asked for.
+    let job = Job(unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) });
+    assert!(!job.0.is_null());
+    if ending {
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: the limits are as large as the call is told.
+        let set = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                size_of_val(&limits) as u32,
+            )
+        };
+        assert_ne!(set, 0);
+    }
+    // SAFETY: both handles are open; the child's has every right.
+    let assigned = unsafe { AssignProcessToJobObject(job.0, waiting.0.as_raw_handle()) };
+    assert_ne!(assigned, 0);
+    job
+}
+
+#[test]
+fn finds_what_a_job_this_process_holds_would_end_along_with_it() {
+    use harbormaster_platform::bound_to;
+
+    let (bound, bound_key) = wait();
+    let (kept, kept_key) = wait();
+    let _ending = job_for(&bound, true);
+    let _keeping = job_for(&kept, false);
+
+    let found = bound_to(own().key).expect("our own jobs should be readable");
+
+    assert!(found.contains(&bound_key.pid.0), "{found:?}");
+    assert!(!found.contains(&kept_key.pid.0), "{found:?}");
+}
+
+#[test]
+fn finds_no_job_held_by_a_process_that_exited() {
+    use harbormaster_platform::bound_to;
+
+    let (mut waiting, key) = wait();
+    drop(waiting.0.stdin.take());
+    waiting.0.wait().unwrap();
+
+    // Still held by us, so its pid names it, but it holds nothing now.
+    assert_eq!(bound_to(key).unwrap(), Vec::<u32>::new());
+}
+
 #[test]
 fn ends_a_held_child_and_sees_it_gone() {
     use harbormaster_platform::{Ended, hold};

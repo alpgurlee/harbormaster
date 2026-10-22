@@ -1,4 +1,5 @@
 pub mod control;
+mod jobs;
 mod language;
 mod memory;
 mod parameters;
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{Thermal, Whereabouts};
 
+pub(crate) use jobs::bound_to;
 pub(crate) use language::preferred_language;
 pub(crate) use memory::memory;
 pub(crate) use process::{
