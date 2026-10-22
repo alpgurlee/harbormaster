@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use harbormaster_platform::{Presence, ProcessKey, Signal, SignalOutcome};
 use serde::Serialize;
@@ -149,6 +149,76 @@ impl std::fmt::Debug for Signals<'_> {
     }
 }
 
+/// A process held to be ended, where the system ends processes through a
+/// handle rather than a signal: what is ended is what was checked.
+pub trait Held {
+    /// Ends it without asking; a process gone meanwhile counts as ended.
+    fn terminate(&self) -> Result<(), String>;
+    /// Waits up to `grace` for it to be gone.
+    fn wait(&self, grace: Duration) -> Waited;
+}
+
+/// How a held process stood when a wait was over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    Exited,
+    StillRunning,
+    /// The system wouldn't say.
+    Unknown,
+}
+
+/// Holds every one of `targets` through `hold` before anything is ended:
+/// one that is no longer what was approved, or can't be told, refuses the
+/// whole batch; one already gone is just reported so.
+/// What holding a batch gave: the processes held, and those gone already.
+#[derive(Debug)]
+pub struct Holding<T> {
+    pub held: Vec<(ProcessKey, T)>,
+    pub gone: Vec<(ProcessKey, Outcome)>,
+}
+
+pub fn hold_all<T>(
+    targets: &[ProcessKey],
+    hold: &dyn Fn(ProcessKey) -> Result<T, Presence>,
+) -> Result<Holding<T>, (ProcessKey, Presence)> {
+    let mut held = Vec::with_capacity(targets.len());
+    let mut gone = Vec::new();
+    for &key in targets {
+        match hold(key) {
+            Ok(target) => held.push((key, target)),
+            Err(Presence::Gone) => gone.push((key, Outcome::AlreadyGone)),
+            Err(presence) => return Err((key, presence)),
+        }
+    }
+    Ok(Holding { held, gone })
+}
+
+/// Ends `held` in order, the one that started the others first, then waits
+/// up to `grace` in all for them to be gone.
+pub fn force<T: Held>(held: &[(ProcessKey, T)], grace: Duration) -> Vec<(ProcessKey, Outcome)> {
+    let mut outcomes = Vec::with_capacity(held.len());
+    let mut waiting = Vec::new();
+    for (key, target) in held {
+        match target.terminate() {
+            Ok(()) => waiting.push((*key, target)),
+            Err(reason) => outcomes.push((*key, Outcome::Failed(reason))),
+        }
+    }
+    let deadline = Instant::now() + grace;
+    for (key, target) in waiting {
+        let left = deadline.saturating_duration_since(Instant::now());
+        outcomes.push((
+            key,
+            match target.wait(left) {
+                Waited::Exited => Outcome::Stopped,
+                Waited::StillRunning => Outcome::StillRunning,
+                Waited::Unknown => Outcome::Failed("could not tell whether it exited".into()),
+            },
+        ));
+    }
+    outcomes
+}
+
 /// Sends `signal` to `targets` in order, then waits up to `grace` for them to exit.
 pub fn stop(
     targets: &[ProcessKey],
@@ -266,6 +336,97 @@ mod tests {
             port,
             address: None,
         }
+    }
+
+    struct Fake<'a> {
+        log: &'a RefCell<Vec<String>>,
+        name: &'static str,
+        ends: super::Waited,
+        refuses: bool,
+    }
+
+    impl super::Held for Fake<'_> {
+        fn terminate(&self) -> Result<(), String> {
+            self.log.borrow_mut().push(format!("end {}", self.name));
+            if self.refuses {
+                Err("access denied".into())
+            } else {
+                Ok(())
+            }
+        }
+
+        fn wait(&self, _grace: Duration) -> super::Waited {
+            self.log.borrow_mut().push(format!("wait {}", self.name));
+            self.ends
+        }
+    }
+
+    #[test]
+    fn ends_the_held_in_order_and_waits_for_each() {
+        let log = RefCell::new(Vec::new());
+        let fake = |name, ends, refuses| Fake {
+            log: &log,
+            name,
+            ends,
+            refuses,
+        };
+        // The one that refuses sits in the middle: the rest still go.
+        let held = [
+            (key(10), fake("npm", super::Waited::Exited, false)),
+            (key(12), fake("worker", super::Waited::Exited, true)),
+            (key(11), fake("node", super::Waited::StillRunning, false)),
+            (key(13), fake("helper", super::Waited::Unknown, false)),
+        ];
+
+        let outcomes = super::force(&held, Duration::from_secs(5));
+
+        assert_eq!(
+            outcomes,
+            [
+                (key(12), Outcome::Failed("access denied".into())),
+                (key(10), Outcome::Stopped),
+                (key(11), Outcome::StillRunning),
+                (
+                    key(13),
+                    Outcome::Failed("could not tell whether it exited".into())
+                ),
+            ]
+        );
+        assert_eq!(
+            *log.borrow(),
+            [
+                "end npm",
+                "end worker",
+                "end node",
+                "end helper",
+                "wait npm",
+                "wait node",
+                "wait helper"
+            ]
+        );
+    }
+
+    #[test]
+    fn holds_every_target_first_or_none_at_all() {
+        let hold = |key: ProcessKey| match key.pid.0 {
+            10 => Ok(()),
+            11 => Err(Presence::Gone),
+            12 => Err(Presence::Replaced),
+            _ => Err(Presence::Unknown),
+        };
+
+        let holding = super::hold_all(&[key(10), key(11)], &hold).unwrap();
+        assert_eq!(holding.held, [(key(10), ())]);
+        assert_eq!(holding.gone, [(key(11), Outcome::AlreadyGone)]);
+
+        assert_eq!(
+            super::hold_all(&[key(10), key(12)], &hold).unwrap_err(),
+            (key(12), Presence::Replaced)
+        );
+        assert_eq!(
+            super::hold_all(&[key(13), key(10)], &hold).unwrap_err(),
+            (key(13), Presence::Unknown)
+        );
     }
 
     #[test]
