@@ -167,9 +167,6 @@ pub enum Waited {
     Unknown,
 }
 
-/// Holds every one of `targets` through `hold` before anything is ended:
-/// one that is no longer what was approved, or can't be told, refuses the
-/// whole batch; one already gone is just reported so.
 /// What holding a batch gave: the processes held, and those gone already.
 #[derive(Debug)]
 pub struct Holding<T> {
@@ -177,6 +174,9 @@ pub struct Holding<T> {
     pub gone: Vec<(ProcessKey, Outcome)>,
 }
 
+/// Holds every one of `targets` through `hold` before anything is ended:
+/// one that is no longer what was approved, or can't be told, refuses the
+/// whole batch; one already gone is just reported so.
 pub fn hold_all<T>(
     targets: &[ProcessKey],
     hold: &dyn Fn(ProcessKey) -> Result<T, Presence>,
