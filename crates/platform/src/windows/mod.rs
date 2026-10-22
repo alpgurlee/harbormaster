@@ -1,3 +1,4 @@
+pub mod control;
 mod language;
 mod memory;
 mod parameters;

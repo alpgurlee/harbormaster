@@ -40,6 +40,7 @@ const TICKS_BEFORE_1970: u64 = 116_444_736_000_000_000;
 const LONGEST_PATH: usize = 32_768;
 
 /// A handle, closed when dropped.
+#[derive(Debug)]
 pub(super) struct Handle(pub(super) HANDLE);
 
 impl Drop for Handle {
@@ -356,6 +357,20 @@ fn reopen_with(key: ProcessKey, access: u32) -> Result<Handle, Missing> {
         Some(times) if times.start == key.start => Ok(process),
         Some(_) => Err(Missing::Gone),
         None => Err(Missing::Denied),
+    }
+}
+
+/// The process `key` names, held open with `access`, or why it can't be:
+/// gone, taken over by another process, or out of reach.
+pub(super) fn hold_with(key: ProcessKey, access: u32) -> Result<Handle, Presence> {
+    let process = open(key.pid.0, access).map_err(|error| match Missing::of(&error) {
+        Missing::Gone => Presence::Gone,
+        Missing::Denied => Presence::Unknown,
+    })?;
+    match times(&process) {
+        Some(times) if times.start == key.start => Ok(process),
+        Some(_) => Err(Presence::Replaced),
+        None => Err(Presence::Unknown),
     }
 }
 

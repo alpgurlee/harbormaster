@@ -276,6 +276,37 @@ fn reads_nothing_through_a_key_whose_start_isnt_its_pids_now() {
 }
 
 #[test]
+fn ends_a_held_child_and_sees_it_gone() {
+    use harbormaster_platform::{Ended, hold};
+
+    let (_waiting, key) = wait();
+    let held = hold(key).expect("our child should be held");
+
+    held.terminate().expect("ending our own child should work");
+
+    assert_eq!(held.wait(PATIENCE), Ended::Exited);
+    assert_eq!(presence(key), Presence::Gone);
+    // Ending it again finds it ended, not refused.
+    held.terminate().expect("an exited process counts as ended");
+}
+
+#[test]
+fn holds_no_process_that_isnt_the_one_named() {
+    use harbormaster_platform::hold;
+
+    let (mut waiting, key) = wait();
+    let mut stale = key;
+    stale.start = StartTime(stale.start.0 - 1);
+    assert!(matches!(hold(stale), Err(Presence::Replaced)));
+
+    drop(waiting.0.stdin.take());
+    waiting.0.wait().unwrap();
+
+    // Exited but still held by us: nothing left to end.
+    assert!(matches!(hold(key), Err(Presence::Gone)));
+}
+
+#[test]
 fn sends_nothing_to_a_process_when_asked_to_stop_it() {
     let (_waiting, key) = wait();
 

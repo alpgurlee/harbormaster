@@ -16,6 +16,9 @@ use macos as sys;
 mod windows;
 #[cfg(windows)]
 use windows as sys;
+/// Ending a process, which Windows does through a held handle.
+#[cfg(windows)]
+pub use windows::control::{Ended, Held, hold};
 
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
