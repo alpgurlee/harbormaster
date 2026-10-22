@@ -291,11 +291,11 @@ fn roots(
         .collect()
 }
 
-/// What ending the processes `keys` name could end too, read right before
-/// a stop on Windows: what they started outside themselves, and what is in
-/// a job one of them holds that Windows ends once its last handle closes,
-/// as Node's for the programs it starts.
-pub fn strays(keys: &[ProcessKey]) -> Result<Vec<ProcessKey>, Error> {
+/// The pids of what ending the processes `keys` name could end too, read
+/// right before a stop on Windows: what they started outside themselves,
+/// and what is in a job one of them holds that Windows ends once its last
+/// handle closes, as Node's for the programs it starts.
+pub fn strays(keys: &[ProcessKey]) -> Result<Vec<u32>, Error> {
     let processes = harbormaster_platform::processes()?;
     let mut bound = HashSet::new();
     for &key in keys {
@@ -313,14 +313,15 @@ pub fn strays(keys: &[ProcessKey]) -> Result<Vec<ProcessKey>, Error> {
 
 /// Of `processes`, the children of the living `keys` and those whose pid
 /// is `bound`, leaving out `keys` and the console hosts Windows starts for
-/// a console program, which end once the programs using them have.
+/// a console program, which end once the programs using them have. A
+/// bound pid the table doesn't list can't be told apart, so it counts.
 fn strays_among(
     processes: &[ProcessEntry],
     keys: &[ProcessKey],
     bound: &HashSet<u32>,
     windows: Option<&Path>,
     exe_of: &dyn Fn(ProcessKey) -> Option<PathBuf>,
-) -> Vec<ProcessKey> {
+) -> Vec<u32> {
     let alive: HashSet<u32> = processes
         .iter()
         .filter(|entry| keys.contains(&entry.key))
@@ -335,6 +336,13 @@ fn strays_among(
                 })
         })
     };
+    let listed: HashSet<u32> = processes.iter().map(|entry| entry.key.pid.0).collect();
+    let mut unlisted: Vec<u32> = bound
+        .iter()
+        .copied()
+        .filter(|pid| !listed.contains(pid))
+        .collect();
+    unlisted.sort_unstable();
     processes
         .iter()
         .filter(|entry| {
@@ -342,7 +350,8 @@ fn strays_among(
                 || entry.parent.is_some_and(|parent| alive.contains(&parent.0))
         })
         .filter(|entry| !keys.contains(&entry.key) && !console_host(entry))
-        .map(|entry| entry.key)
+        .map(|entry| entry.key.pid.0)
+        .chain(unlisted)
         .collect()
 }
 
@@ -526,12 +535,13 @@ mod tests {
         };
         let approved = [key(20), key(30), key(40)];
         let windows = Some(Path::new(r"C:\Windows"));
-        // Whatever a job holds, the approved processes in it too.
-        let bound = HashSet::from([20, 30, 60, 90]);
+        // Whatever a job holds, the approved processes in it too, and one
+        // the process table couldn't read.
+        let bound = HashSet::from([20, 30, 60, 90, 77]);
 
         assert_eq!(
             strays_among(&processes, &approved, &bound, windows, &exe_of),
-            [key(50), key(70), key(90)]
+            [50, 70, 90, 77]
         );
         // Children of a pid that no longer names the approved process aren't its.
         let replaced = ProcessKey {
@@ -540,7 +550,7 @@ mod tests {
         };
         assert_eq!(
             strays_among(&processes, &[replaced], &HashSet::new(), windows, &exe_of),
-            []
+            [0u32; 0]
         );
     }
 
