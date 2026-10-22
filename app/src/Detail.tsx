@@ -5,7 +5,7 @@ import { dragsAfterMoving } from "./drag";
 import { useI18n } from "./i18n";
 import { Chevron, OpenOut } from "./icons";
 import { Plate } from "./Plate";
-import { platform } from "./platform";
+import { platform, stopsAtOnce } from "./platform";
 import { whyProtected } from "./protection";
 import { agentOf, terminalOf } from "./session";
 import type { Service } from "./types";
@@ -161,7 +161,7 @@ export function Detail({ service, now, onBack, onOpen, onCopy, onReveal, onStop,
       <footer className={styles.footer}>
         {onStop ? (
           <button type="button" className={styles.stop} disabled={!stoppable} onClick={() => onStop(service)}>
-            {i18n.t("stopEllipsis")}
+            {i18n.t(stopsAtOnce ? "forceQuitEllipsis" : "stopEllipsis")}
           </button>
         ) : null}
         {project ? (

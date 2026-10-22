@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use harbormaster_engine::Port;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::scanning::{Scanning, Update};
 use crate::settings::{Invalid, Settings, Store};
+use crate::stopping::{Approvals, Preview, Reason, Stopped};
 use crate::{panel, settings};
 
 #[tauri::command]
@@ -72,6 +73,31 @@ pub(crate) fn reveal_folder(
 }
 
 #[tauri::command]
+pub(crate) async fn stop_preview(id: String, app: AppHandle) -> Result<Preview, Reason> {
+    blocking(move || {
+        Ok(match app.state::<Arc<Scanning>>().snapshot() {
+            Some(snapshot) => app.state::<Approvals>().preview(&snapshot, &id),
+            None => Preview::Refused {
+                reason: Reason::NotFound,
+            },
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
+    blocking(move || app.state::<Approvals>().stop(token)).await
+}
+
+/// Only a Mac stops in two rounds; on Windows the stop is the forced one.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
+    blocking(move || app.state::<Approvals>().force(token)).await
+}
+
+#[tauri::command]
 pub(crate) fn open_settings(app: AppHandle) -> Result<(), String> {
     settings::show(&app).map_err(|error| error.to_string())
 }
@@ -103,8 +129,6 @@ pub(crate) fn settings_set(
     store.set(settings)
 }
 
-/// Looks through this user's home for what could go; the findings come
-/// last, under the token removing some of them takes.
 #[tauri::command]
 pub(crate) fn resize_panel(
     height: f64,
@@ -142,6 +166,17 @@ pub(crate) fn panel_placed(app: AppHandle) -> bool {
 #[tauri::command]
 pub(crate) fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+/// Scans and waits for processes to exit run off the thread that draws.
+pub(crate) async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, Reason> + Send + 'static,
+) -> Result<T, Reason> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| Reason::Failed {
+            message: error.to_string(),
+        })?
 }
 
 #[cfg(test)]

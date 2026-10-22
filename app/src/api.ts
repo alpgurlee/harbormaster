@@ -4,7 +4,7 @@ import type { Disk, Finding, Holder, MapEvent, Protection, RunEvent, ScanEvent, 
 
 /** Why the app turned a stop down. */
 export type Reason =
-  | { code: "notFound" | "runsHarbormaster" | "changed" | "expired" | "untrackedExec" | "unknownLineage" }
+  | { code: "notFound" | "runsHarbormaster" | "changed" | "expired" | "untrackedExec" | "unknownLineage" | "notAllowed" | "strays" }
   | { code: "protected"; protection: Protection }
   | { code: "failed"; message: string };
 

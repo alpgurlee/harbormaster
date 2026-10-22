@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// Stopping, quitting apps and cleaning are macOS's alone for now: on Windows
-// the panel only shows what runs.
+// Quitting apps and cleaning are macOS's alone for now: on Windows the
+// panel shows what runs and can stop a server.
 #[cfg(target_os = "macos")]
 mod actions;
 #[cfg(target_os = "macos")]
@@ -16,7 +16,6 @@ mod panel;
 mod quitting;
 mod scanning;
 mod settings;
-#[cfg(target_os = "macos")]
 mod stopping;
 mod tray;
 
@@ -45,9 +44,9 @@ fn main() {
         commands::subscribe,
         commands::open_in_browser,
         commands::reveal_folder,
-        actions::stop_preview,
-        actions::stop,
-        actions::force_stop,
+        commands::stop_preview,
+        commands::stop,
+        commands::force_stop,
         actions::quit_app_preview,
         actions::quit_app,
         actions::open_cleaner,
@@ -80,6 +79,8 @@ fn main() {
         commands::subscribe,
         commands::open_in_browser,
         commands::reveal_folder,
+        commands::stop_preview,
+        commands::stop,
         commands::open_settings,
         commands::settings_get,
         commands::settings_subscribe,
@@ -97,11 +98,11 @@ fn main() {
             {
                 // A menu bar app: no Dock icon and no app menu.
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                app.manage(stopping::Approvals::default());
                 app.manage(quitting::Quits::default());
                 app.manage(daemons::Daemons::default());
                 app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             }
+            app.manage(stopping::Approvals::default());
             app.manage(panel::Anchor::default());
             app.manage(settings::Store::open(
                 app.path().app_config_dir()?.join("settings.json"),

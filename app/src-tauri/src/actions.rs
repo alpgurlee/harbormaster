@@ -1,5 +1,6 @@
-//! What the panel and the cleaner window may do to this Mac: stop servers,
-//! quit apps, and find and remove what could go. macOS only for now.
+//! What the panel and the cleaner window may do to this Mac besides
+//! stopping servers: quit apps, and find and remove what could go. macOS
+//! only for now.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,34 +12,12 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaner;
 use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
+use crate::commands::blocking;
 use crate::daemons::{DaemonPreview, Daemons};
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning};
 use crate::settings::Store;
-use crate::stopping::{Approvals, Preview, Reason, Stopped};
-
-#[tauri::command]
-pub(crate) async fn stop_preview(id: String, app: AppHandle) -> Result<Preview, Reason> {
-    blocking(move || {
-        Ok(match app.state::<Arc<Scanning>>().snapshot() {
-            Some(snapshot) => app.state::<Approvals>().preview(&snapshot, &id),
-            None => Preview::Refused {
-                reason: Reason::NotFound,
-            },
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().stop(token)).await
-}
-
-#[tauri::command]
-pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().force(token)).await
-}
+use crate::stopping::{Reason, Stopped};
 
 /// `name` is an app as the breakdown lists it.
 #[tauri::command]
@@ -272,15 +251,4 @@ pub(crate) async fn clean_reveal_area(
         .map_err(|error| Refusal::Failed {
             message: error.to_string(),
         })
-}
-
-/// Scans and waits for processes to exit run off the thread that draws.
-async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, Reason> + Send + 'static,
-) -> Result<T, Reason> {
-    tauri::async_runtime::spawn_blocking(work)
-        .await
-        .map_err(|error| Reason::Failed {
-            message: error.to_string(),
-        })?
 }

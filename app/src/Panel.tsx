@@ -6,7 +6,7 @@ import { useI18n } from "./i18n";
 import { Chevron, Gear, Mark, OpenOut, PutBack, Search, Square, Sweep } from "./icons";
 import { groupByProject, projectOf, totals } from "./model";
 import { Plate } from "./Plate";
-import { platform } from "./platform";
+import { platform, stopsAtOnce } from "./platform";
 import { agentOf, displayName } from "./session";
 import { trendOf } from "./store";
 import { Trend } from "./Trend";
@@ -489,8 +489,8 @@ function Row({ service, tint, selected, now, onShow, onOpen, onStop }: RowProps)
               type="button"
               tabIndex={-1}
               className={`${styles.action} ${styles.danger}`}
-              aria-label={i18n.t("stop")}
-              title={i18n.t("stop")}
+              aria-label={i18n.t(stopsAtOnce ? "forceQuit" : "stop")}
+              title={i18n.t(stopsAtOnce ? "forceQuit" : "stop")}
               disabled={service.protected !== null}
               onClick={(event) => {
                 event.stopPropagation();

@@ -142,9 +142,11 @@ to `lsof` or `ps`. The scanning is Rust, and the windows are [Tauri](https://tau
 
 ## Status
 
-Built and tested on macOS 27 with Apple silicon. Windows 11 has an early preview: the panel and the
-command line's `ls` and `why` work there, while stopping, quitting apps and the cleaner are macOS's alone
-for now. Each change to the code on `main` leaves an unsigned Windows installer in the
+Built and tested on macOS 27 with Apple silicon. Windows 11 has an early preview: the panel, stopping
+a server from it, and the command line's `ls` and `why` work there, while quitting apps and the cleaner
+are macOS's alone for now. Windows has no request to quit that every server heeds, so a stop there is a
+force quit: once you confirm, the server's processes are ended at once, without a chance to clean up.
+Each change to the code on `main` leaves an unsigned Windows installer in the
 [Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs.
 
 ## License

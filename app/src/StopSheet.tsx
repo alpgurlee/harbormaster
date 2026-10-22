@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { forceStop, stopPreview, stopServer, type Preview, type Reason, type Stopped } from "./api";
 import { useI18n, type Translator } from "./i18n";
+import { stopsAtOnce } from "./platform";
 import { displayName } from "./session";
 import { asReason, describe, explain, keepFocusInside } from "./sheet";
 import type { Service } from "./types";
@@ -15,6 +16,11 @@ export interface Stopper {
 }
 
 const BACKEND: Stopper = { preview: stopPreview, stop: stopServer, force: forceStop };
+
+/** What the sheet calls a stop: on Windows it is the forced one, and says so. */
+const WORDS = stopsAtOnce
+  ? ({ title: "forceTitle", titlePlain: "forceTitlePlain", will: "willEnd", how: "howItEnds", go: "forceQuit", going: "ending" } as const)
+  : ({ title: "stopTitle", titlePlain: "stopTitlePlain", will: "willStop", how: "howItStops", go: "stopServer", going: "stopping" } as const);
 
 type Ready = Extract<Preview, { kind: "ready" }>;
 
@@ -36,7 +42,8 @@ export interface StopSheetProps {
   onDone: () => void;
 }
 
-/** Asks before stopping a server, says what happened, and offers force only after a stop. */
+/** Asks before stopping a server, says what happened, and offers force once, only after a stop
+ * that left something running. On Windows the stop is the forced one, so it has no second step. */
 export function StopSheet({ service, stopper = BACKEND, onClose, onDone }: StopSheetProps) {
   const i18n = useI18n();
   const [step, setStep] = useState<Step>({ kind: "asking" });
@@ -63,8 +70,9 @@ export function StopSheet({ service, stopper = BACKEND, onClose, onDone }: StopS
     (sheet?.querySelector<HTMLButtonElement>("button[data-main]:not(:disabled)") ?? sheet)?.focus();
   }, [step.kind]);
 
-  const settle = (preview: Ready, stopped: Stopped) => {
-    if (stopped.stillRunning) {
+  /** `forceable` says whether what outlived this round may still be forced. */
+  const settle = (preview: Ready, stopped: Stopped, forceable: boolean) => {
+    if (stopped.stillRunning && forceable) {
       setStep({ kind: "stuck", preview, stopped });
     } else if (stopped.outcomes.every(({ outcome }) => outcome === "stopped" || outcome === "alreadyGone")) {
       onDone();
@@ -76,14 +84,14 @@ export function StopSheet({ service, stopper = BACKEND, onClose, onDone }: StopS
     setStep({ kind: "stopping", preview });
     stopper
       .stop(preview.token)
-      .then((stopped) => settle(preview, stopped))
+      .then((stopped) => settle(preview, stopped, !stopsAtOnce))
       .catch((error: unknown) => setStep({ kind: "refused", reason: asReason(error) }));
   };
   const force = (preview: Ready, stopped: Stopped) => {
     setStep({ kind: "forcing", preview, stopped });
     stopper
       .force(preview.token)
-      .then((after) => settle(preview, after))
+      .then((after) => settle(preview, after, false))
       .catch((error: unknown) => setStep({ kind: "refused", reason: asReason(error) }));
   };
 
@@ -113,7 +121,7 @@ export function StopSheet({ service, stopper = BACKEND, onClose, onDone }: StopS
         onKeyDown={onKeyDown}
       >
         <h2 id="stop-title" className={styles.title}>
-          {ports ? i18n.t("stopTitle", { name, ports }) : i18n.t("stopTitlePlain", { name })}
+          {ports ? i18n.t(WORDS.title, { name, ports }) : i18n.t(WORDS.titlePlain, { name })}
         </h2>
         {body(step, i18n)}
         <div className={styles.buttons}>
@@ -129,7 +137,7 @@ export function StopSheet({ service, stopper = BACKEND, onClose, onDone }: StopS
                 disabled={busy}
                 onClick={() => step.kind === "ready" && stop(step.preview)}
               >
-                {busy ? i18n.t("stopping") : i18n.t("stopServer")}
+                {busy ? i18n.t(WORDS.going) : i18n.t(WORDS.go)}
               </button>
             </>
           ) : step.kind === "stuck" || step.kind === "forcing" ? (
@@ -166,7 +174,7 @@ function body(step: Step, i18n: Translator) {
     case "stopping":
       return (
         <>
-          <h3 className={styles.section}>{i18n.t("willStop")}</h3>
+          <h3 className={styles.section}>{i18n.t(WORDS.will)}</h3>
           <ul className={styles.stops}>
             {step.preview.stops.map((process) => (
               <li key={process.pid}>
@@ -186,7 +194,7 @@ function body(step: Step, i18n: Translator) {
               </ul>
             </>
           ) : null}
-          <p className={styles.note}>{i18n.t("howItStops")}</p>
+          <p className={styles.note}>{i18n.t(WORDS.how)}</p>
         </>
       );
     case "stuck":

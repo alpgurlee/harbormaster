@@ -4,7 +4,7 @@ import { anchorPanel, dragPanel, hidePanel, inApp, openCleaner, openInBrowser, o
 import { Detail } from "./Detail";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
-import { acts } from "./platform";
+import { hasCleaner, quitsApps } from "./platform";
 import { QuitSheet } from "./QuitSheet";
 import { Settled } from "./Settled";
 import { StopSheet } from "./StopSheet";
@@ -154,10 +154,10 @@ export function App() {
             now={now}
             onShow={(chosen) => setShown(chosen.id)}
             onOpen={open}
-            onStop={acts ? askStop : undefined}
-            onQuit={acts ? askQuit : undefined}
+            onStop={askStop}
+            onQuit={quitsApps ? askQuit : undefined}
             onClean={inApp ? clean : undefined}
-            cleans={acts}
+            cleans={hasCleaner}
             onSettings={inApp ? settle : undefined}
             onDrag={inApp ? drag : undefined}
             placed={placed}
@@ -172,7 +172,7 @@ export function App() {
               onOpen={open}
               onCopy={copy}
               onReveal={reveal}
-              onStop={acts ? askStop : undefined}
+              onStop={askStop}
               onDrag={inApp ? drag : undefined}
             />
           )}

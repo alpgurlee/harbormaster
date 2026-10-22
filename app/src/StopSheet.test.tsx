@@ -96,6 +96,19 @@ describe("StopSheet", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
+  it("offers to force once, not again after a force left something running", async () => {
+    const stuck: Stopped = { outcomes: [{ pid: 18310, name: "node", outcome: "stillRunning" }], stillRunning: true };
+    const { stopper, onDone } = await open({ stop: vi.fn(async () => stuck), force: vi.fn(async () => stuck) });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop server" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Force stop" })));
+
+    expect(screen.getByText("still running")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Force stop" })).toBeNull();
+    expect(stopper.force).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it("stops nothing when the server changed after it was approved", async () => {
     const { onDone } = await open({ stop: vi.fn(async () => Promise.reject({ code: "changed" })) });
 

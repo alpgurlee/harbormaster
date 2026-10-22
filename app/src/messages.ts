@@ -52,6 +52,8 @@ export interface Messages {
   processes: string;
   stopEllipsis: string;
   stopNamed: string;
+  forceQuit: string;
+  forceQuitEllipsis: string;
   daemonWarning: string;
   daemonHow: string;
   daemonGone: string;
@@ -67,13 +69,18 @@ export interface Messages {
   protectedSharedSocket: string;
   stopTitle: string;
   stopTitlePlain: string;
+  forceTitle: string;
+  forceTitlePlain: string;
   checking: string;
   willStop: string;
+  willEnd: string;
   staysOpen: string;
   howItStops: string;
+  howItEnds: string;
   cancel: string;
   stopServer: string;
   stopping: string;
+  ending: string;
   stillRunningAfter: string;
   forceStop: string;
   forcing: string;
@@ -83,6 +90,8 @@ export interface Messages {
   reasonExpired: string;
   reasonUntrackedExec: string;
   reasonUnknownLineage: string;
+  reasonNotAllowed: string;
+  reasonStrays: string;
   reasonFailed: string;
   outcomeStopped: string;
   outcomeAlreadyGone: string;
@@ -306,6 +315,8 @@ export const en: Messages = {
   processes: "Processes",
   stopEllipsis: "Stop…",
   stopNamed: "Stop {name}",
+  forceQuit: "Force quit",
+  forceQuitEllipsis: "Force quit…",
   daemonWarning: "A build it is running now is cut short. Your next build starts a new one.",
   daemonHow: "It is asked to exit, as kill would, and never forced. Then the list looks again.",
   daemonGone: "Nothing to stop: no daemon alone keeps it in use any more.",
@@ -321,13 +332,19 @@ export const en: Messages = {
   protectedSharedSocket: "another process holds its port too, so stopping it would not free the port",
   stopTitle: "Stop {name} on {ports}?",
   stopTitlePlain: "Stop {name}?",
+  forceTitle: "Force quit {name} on {ports}?",
+  forceTitlePlain: "Force quit {name}?",
   checking: "Checking…",
   willStop: "Will stop",
+  willEnd: "Will end",
   staysOpen: "Stays open",
   howItStops: "Asks each process to quit, as Ctrl+C would. If something still runs after 5 seconds, you'll be asked before it's forced.",
+  howItEnds:
+    "Each process is ended at once, without being asked to quit, so it can't save or clean up first. Something outside this list may start it again.",
   cancel: "Cancel",
   stopServer: "Stop server",
   stopping: "Stopping…",
+  ending: "Ending…",
   stillRunningAfter: "Still running after 5 seconds:",
   forceStop: "Force stop",
   forcing: "Forcing…",
@@ -337,6 +354,10 @@ export const en: Messages = {
   reasonExpired: "The confirmation lapsed. Try again.",
   reasonUntrackedExec: "This system can't tell when a process starts another program, so Harbormaster won't stop anything here.",
   reasonUnknownLineage: "Harbormaster couldn't trace what started it, so it stops nothing rather than risk stopping itself.",
+  reasonNotAllowed:
+    "Windows wouldn't let Harbormaster make sure of one of its processes, or end it. If it runs as administrator, stop it where it was started.",
+  reasonStrays:
+    "It started other programs that aren't part of it, such as another server, and on Windows those could end along with it. Stop them first.",
   reasonFailed: "Something went wrong: {message}",
   outcomeStopped: "stopped",
   outcomeAlreadyGone: "had already exited",
@@ -567,6 +588,8 @@ export const tr: Messages = {
   processes: "Süreçler",
   stopEllipsis: "Durdur…",
   stopNamed: "Durdur: {name}",
+  forceQuit: "Zorla sonlandır",
+  forceQuitEllipsis: "Zorla sonlandır…",
   daemonWarning: "Şu an çalıştırdığı bir derleme yarıda kesilir. Sonraki derlemen yenisini başlatır.",
   daemonHow: "kill gibi kapanması istenir, asla zorlanmaz. Ardından liste yeniden bakar.",
   daemonGone: "Durdurulacak bir şey yok: onu artık tek başına bir arka plan süreci kullanmıyor.",
@@ -582,13 +605,19 @@ export const tr: Messages = {
   protectedSharedSocket: "portunu başka bir süreç de tutuyor; durdurmak portu boşaltmaz",
   stopTitle: "{ports} üzerindeki {name} durdurulsun mu?",
   stopTitlePlain: "{name} durdurulsun mu?",
+  forceTitle: "{ports} üzerindeki {name} zorla sonlandırılsın mı?",
+  forceTitlePlain: "{name} zorla sonlandırılsın mı?",
   checking: "Denetleniyor…",
   willStop: "Durdurulacak",
+  willEnd: "Sonlandırılacak",
   staysOpen: "Açık kalacak",
   howItStops: "Her sürece, Ctrl+C gibi, kapanmasını söyler. 5 saniye sonra hâlâ çalışan olursa zorlamadan önce sorulur.",
+  howItEnds:
+    "Her süreç, kapanması istenmeden hemen sonlandırılır; önce kaydedemez ya da toparlanamaz. Bu listenin dışındaki bir şey onu yeniden başlatabilir.",
   cancel: "Vazgeç",
   stopServer: "Sunucuyu durdur",
   stopping: "Durduruluyor…",
+  ending: "Sonlandırılıyor…",
   stillRunningAfter: "5 saniye sonra hâlâ çalışıyor:",
   forceStop: "Zorla durdur",
   forcing: "Zorla durduruluyor…",
@@ -598,6 +627,10 @@ export const tr: Messages = {
   reasonExpired: "Onayın süresi doldu. Yeniden deneyin.",
   reasonUntrackedExec: "Bu sistem bir sürecin başka bir programa geçtiğini söyleyemiyor; bu yüzden Harbormaster burada hiçbir şeyi durdurmaz.",
   reasonUnknownLineage: "Harbormaster kendisini neyin başlattığını izleyemedi; kendine ya da başlatanına dokunmamak için hiçbir şeyi durdurmuyor.",
+  reasonNotAllowed:
+    "Windows, Harbormaster'ın süreçlerinden birini doğrulamasına ya da sonlandırmasına izin vermedi. Yönetici olarak çalışıyorsa başlatıldığı yerden durdurun.",
+  reasonStrays:
+    "Parçası olmayan başka programlar da başlatmış (örneğin başka bir sunucu); Windows'ta bunlar da onunla birlikte kapanabilir. Önce onları durdurun.",
   reasonFailed: "Bir şeyler ters gitti: {message}",
   outcomeStopped: "durduruldu",
   outcomeAlreadyGone: "zaten kapanmıştı",

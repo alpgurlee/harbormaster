@@ -37,6 +37,10 @@ export function explain(reason: Reason, i18n: Translator): string {
       return i18n.t("reasonUntrackedExec");
     case "unknownLineage":
       return i18n.t("reasonUnknownLineage");
+    case "notAllowed":
+      return i18n.t("reasonNotAllowed");
+    case "strays":
+      return i18n.t("reasonStrays");
     case "failed":
       return i18n.t("reasonFailed", { message: reason.message });
   }
