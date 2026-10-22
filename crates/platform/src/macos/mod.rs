@@ -34,6 +34,15 @@ pub(crate) fn light_taskbar() -> Option<bool> {
     None
 }
 
+/// There is no Windows folder on a Mac, nor a shell window.
+pub(crate) fn windows_folder() -> Option<PathBuf> {
+    None
+}
+
+pub(crate) fn shell_process() -> Option<u32> {
+    None
+}
+
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;
 const INI_IPV6: u8 = 0x2;

@@ -39,3 +39,33 @@ pub(crate) fn allow_more_open_files() -> io::Result<u64> {
 pub(crate) fn thermal() -> Thermal {
     Thermal::Unknown
 }
+
+/// Where Windows itself is installed, `C:\Windows` as a rule: the system's
+/// own folder, not the one a Terminal Services session may hand a program.
+pub(crate) fn windows_folder() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
+
+    let mut buffer = [0u16; 260];
+    // SAFETY: the buffer holds as many units as the call is told.
+    let length =
+        unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    (length > 0 && length < buffer.len())
+        .then(|| PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length])))
+}
+
+/// The process behind the desktop's shell window: the Explorer the session
+/// runs, which no other program can pose as.
+pub(crate) fn shell_process() -> Option<u32> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+
+    // SAFETY: GetShellWindow has no preconditions.
+    let window = unsafe { GetShellWindow() };
+    if window.is_null() {
+        return None;
+    }
+    let mut pid = 0u32;
+    // SAFETY: the window handle came from the system; `pid` is ours to write.
+    unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    (pid != 0).then_some(pid)
+}

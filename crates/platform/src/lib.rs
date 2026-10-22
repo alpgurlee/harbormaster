@@ -111,6 +111,18 @@ pub fn thermal() -> Thermal {
     sys::thermal()
 }
 
+/// Where Windows is installed, the folder its own programs live under;
+/// `None` on a Mac.
+pub fn windows_folder() -> Option<std::path::PathBuf> {
+    sys::windows_folder()
+}
+
+/// The pid of the process behind Windows' desktop shell window, the
+/// session's Explorer; `None` on a Mac or without a desktop.
+pub fn shell_process() -> Option<u32> {
+    sys::shell_process()
+}
+
 /// Whether Windows' taskbar is light, for an icon to stand out on it. `None`
 /// where the OS tints the icon itself, as macOS does, or doesn't say.
 pub fn light_taskbar() -> Option<bool> {
