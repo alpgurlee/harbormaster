@@ -25,7 +25,7 @@ pub use stop::{
     recheck, stop,
 };
 
-use role::{Role, normalize};
+use role::{Role, normalize, role};
 use sampler::CpuSampler;
 use tree::ProcessTree;
 
@@ -237,10 +237,9 @@ impl Scanner {
         let os_component = std::iter::once(owner)
             .chain(members.iter().copied())
             .any(|entry| {
-                details_of(entry.key)
-                    .exe
-                    .known()
-                    .is_some_and(|exe| is_os_component(exe))
+                details_of(entry.key).exe.known().is_some_and(|exe| {
+                    is_os_component(exe) && !runs_a_runners_script(entry, exe, tree, args_of)
+                })
             });
 
         let members: Vec<Member> = members
@@ -388,7 +387,7 @@ fn judge(entry: &ProcessEntry, tree: &ProcessTree<'_>, input: Input<'_>) -> Stan
             (input.details)(other.key).args.known().cloned()
         }
     };
-    let protection = if is_os_component(exe) {
+    let protection = if is_os_component(exe) && !runs_a_runners_script(entry, exe, tree, &args_of) {
         Some(Protection::System)
     } else if service::is_session_boundary(entry, tree, &args_of) {
         Some(Protection::Session)
@@ -476,6 +475,22 @@ fn is_os_component(exe: &Path) -> bool {
         || ["/system/", "/usr/libexec/", "/usr/sbin/", "/sbin/"]
             .iter()
             .any(|prefix| path.starts_with(prefix))
+}
+
+/// The OS's own shell running a script for a runner, as npm runs
+/// `cmd /d /s /c` on Windows: as stoppable as the runtimes the OS ships.
+/// The program must be that shell, and its arguments read as that shell's.
+fn runs_a_runners_script(
+    entry: &ProcessEntry,
+    exe: &Path,
+    tree: &ProcessTree<'_>,
+    args_of: service::ArgsOf<'_>,
+) -> bool {
+    let program = normalize(&exe.to_string_lossy());
+    let launched_as = args_of(entry).and_then(|args| args.first().map(|first| normalize(first)));
+    role(&program, None) == Role::Shell
+        && launched_as.as_deref() == Some(program.as_str())
+        && service::is_runner_shell(entry, tree, args_of)
 }
 
 /// Desktop apps on macOS, except the Python.app wrapper that python.org and
@@ -995,6 +1010,130 @@ mod tests {
         );
 
         assert_eq!(snapshot.services[0].protected, Some(Protection::System));
+    }
+
+    /// npm on Windows runs a script through Windows' own `cmd /d /s /c`.
+    /// `helper` is a program npm started too, by its file and command line.
+    fn npm_through_cmd(home: &Path, helper: Option<(&str, &[&str])>) -> Vec<Proc> {
+        let node = r"C:\Program Files\nodejs\node.exe";
+        let mut procs = vec![
+            proc(
+                10,
+                1,
+                "pwsh.exe",
+                r"C:\Program Files\PowerShell\7\pwsh.exe",
+                &["pwsh"],
+                home,
+            ),
+            proc(
+                20,
+                10,
+                "node.exe",
+                node,
+                &[
+                    node,
+                    r"C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js",
+                    "run",
+                    "dev",
+                ],
+                home,
+            ),
+            proc(
+                30,
+                20,
+                "cmd.exe",
+                r"C:\WINDOWS\system32\cmd.exe",
+                &[r"C:\WINDOWS\system32\cmd.exe", "/d", "/s", "/c", "next dev"],
+                home,
+            ),
+            proc(40, 30, "node.exe", node, &[node, "next", "dev"], home),
+        ];
+        if let Some((exe, args)) = helper {
+            let name = exe.rsplit('\\').next().unwrap();
+            procs.push(proc(50, 20, name, exe, args, home));
+        }
+        procs
+    }
+
+    #[test]
+    fn stops_what_npm_runs_through_windows_own_shell() {
+        let home = tempfile::tempdir().unwrap();
+        let procs = npm_through_cmd(home.path(), None);
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(40, 3000)],
+            home.path(),
+            Instant::now(),
+        );
+
+        let service = &snapshot.services[0];
+        assert_eq!(service.protected, None);
+        let pids: Vec<u32> = service.processes.iter().map(|member| member.pid).collect();
+        assert_eq!(pids, [20, 30, 40]);
+    }
+
+    #[test]
+    fn judges_windows_own_shell_running_npms_script_as_stoppable_right_before_a_stop() {
+        let home = tempfile::tempdir().unwrap();
+        let whoami = r"C:\Windows\System32\whoami.exe";
+        let procs = npm_through_cmd(home.path(), Some((whoami, &["cmd", "/c", "x"])));
+        let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
+        let details = |key: ProcessKey| {
+            procs
+                .iter()
+                .find(|p| p.entry.key == key)
+                .unwrap()
+                .details
+                .clone()
+        };
+        let input = Input {
+            listeners: &[],
+            processes: &processes,
+            details: &details,
+            home: home.path(),
+            now: Instant::now(),
+        };
+        let (shell, helper) = (procs[2].entry.key, procs[4].entry.key);
+
+        let found = super::standings(input, &[shell, helper], &|_| Presence::Running);
+
+        assert_eq!(
+            found,
+            [
+                (shell, Standing::Clear),
+                (helper, Standing::Protected(Protection::System)),
+            ]
+        );
+    }
+
+    #[test]
+    fn still_protects_a_part_of_windows_among_what_npm_runs() {
+        let home = tempfile::tempdir().unwrap();
+        let helper = r"C:\Windows\System32\helper.exe";
+        let whoami = r"C:\Windows\System32\whoami.exe";
+        for (why, exe, args) in [
+            ("on its own", helper, &[helper][..]),
+            ("told -c like a shell", helper, &[helper, "-c", "x"][..]),
+            ("started as if it were cmd", whoami, &["cmd", "/c", "x"][..]),
+        ] {
+            let procs = npm_through_cmd(home.path(), Some((exe, args)));
+
+            let snapshot = scan(
+                &mut Scanner::default(),
+                &procs,
+                &[(40, 3000)],
+                home.path(),
+                Instant::now(),
+            );
+
+            assert_eq!(
+                snapshot.services[0].protected,
+                Some(Protection::System),
+                "{why}"
+            );
+        }
     }
 
     #[test]
