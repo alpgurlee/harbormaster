@@ -291,6 +291,61 @@ fn roots(
         .collect()
 }
 
+/// What ending the processes `keys` name could end too, read right before
+/// a stop on Windows: what they started outside themselves, and what is in
+/// a job one of them holds that Windows ends once its last handle closes,
+/// as Node's for the programs it starts.
+pub fn strays(keys: &[ProcessKey]) -> Result<Vec<ProcessKey>, Error> {
+    let processes = harbormaster_platform::processes()?;
+    let mut bound = HashSet::new();
+    for &key in keys {
+        bound.extend(harbormaster_platform::bound_to(key)?);
+    }
+    let windows = harbormaster_platform::windows_folder();
+    Ok(strays_among(
+        &processes,
+        keys,
+        &bound,
+        windows.as_deref(),
+        &|key| harbormaster_platform::executable(key).known().cloned(),
+    ))
+}
+
+/// Of `processes`, the children of the living `keys` and those whose pid
+/// is `bound`, leaving out `keys` and the console hosts Windows starts for
+/// a console program, which end once the programs using them have.
+fn strays_among(
+    processes: &[ProcessEntry],
+    keys: &[ProcessKey],
+    bound: &HashSet<u32>,
+    windows: Option<&Path>,
+    exe_of: &dyn Fn(ProcessKey) -> Option<PathBuf>,
+) -> Vec<ProcessKey> {
+    let alive: HashSet<u32> = processes
+        .iter()
+        .filter(|entry| keys.contains(&entry.key))
+        .map(|entry| entry.key.pid.0)
+        .collect();
+    let console_host = |entry: &ProcessEntry| {
+        windows.is_some_and(|windows| {
+            crate::role::normalize(&entry.name) == "conhost"
+                && exe_of(entry.key).is_some_and(|exe| {
+                    inside(&exe, &windows.join("System32"))
+                        && crate::role::normalize(&exe.to_string_lossy()) == "conhost"
+                })
+        })
+    };
+    processes
+        .iter()
+        .filter(|entry| {
+            bound.contains(&entry.key.pid.0)
+                || entry.parent.is_some_and(|parent| alive.contains(&parent.0))
+        })
+        .filter(|entry| !keys.contains(&entry.key) && !console_host(entry))
+        .map(|entry| entry.key)
+        .collect()
+}
+
 /// Whether `path` is right under `folder`, however either is cased or
 /// its separators are written.
 fn inside(path: &Path, folder: &Path) -> bool {
@@ -329,7 +384,7 @@ mod tests {
 
     use harbormaster_platform::{Owner, Pid, ProcessEntry, ProcessKey, StartTime};
 
-    use super::{Daemon, daemon, lineage_from, roots};
+    use super::{Daemon, daemon, lineage_from, roots, strays_among};
 
     fn args(args: &[&str]) -> Vec<String> {
         args.iter().map(ToString::to_string).collect()
@@ -435,6 +490,58 @@ mod tests {
             memory_bytes: None,
             cpu_time: None,
         }
+    }
+
+    #[test]
+    fn finds_what_ending_approved_processes_could_end_too_but_windows_console_hosts() {
+        let child = |pid, parent, name| ProcessEntry {
+            parent: Some(Pid(parent)),
+            ..entry(pid, name, Owner::CurrentUser)
+        };
+        let processes = [
+            entry(20, "node.exe", Owner::CurrentUser),
+            child(30, 20, "cmd.exe"),
+            child(40, 30, "node.exe"),
+            // Another server the approved one started.
+            child(50, 40, "node.exe"),
+            child(60, 30, "conhost.exe"),
+            child(70, 30, "conhost.exe"),
+            child(80, 99, "node.exe"),
+            // In a job of the approved, its parent gone.
+            child(90, 98, "node.exe"),
+        ];
+        let exe_of = |key: ProcessKey| {
+            Some(PathBuf::from(match key.pid.0 {
+                60 => r"C:\WINDOWS\system32\conhost.exe",
+                70 => r"C:\Users\dev\conhost.exe",
+                _ => r"C:\Program Files\nodejs\node.exe",
+            }))
+        };
+        let key = |pid: u32| {
+            processes
+                .iter()
+                .find(|entry| entry.key.pid.0 == pid)
+                .unwrap()
+                .key
+        };
+        let approved = [key(20), key(30), key(40)];
+        let windows = Some(Path::new(r"C:\Windows"));
+        // Whatever a job holds, the approved processes in it too.
+        let bound = HashSet::from([20, 30, 60, 90]);
+
+        assert_eq!(
+            strays_among(&processes, &approved, &bound, windows, &exe_of),
+            [key(50), key(70), key(90)]
+        );
+        // Children of a pid that no longer names the approved process aren't its.
+        let replaced = ProcessKey {
+            start: StartTime(0),
+            ..key(40)
+        };
+        assert_eq!(
+            strays_among(&processes, &[replaced], &HashSet::new(), windows, &exe_of),
+            []
+        );
     }
 
     #[test]
