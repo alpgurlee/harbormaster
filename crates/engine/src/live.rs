@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use harbormaster_platform::{Error, Field, ProcessKey};
+use harbormaster_platform::{Error, Field, Owner, ProcessEntry, ProcessKey};
 
 use crate::apps::AppUsage;
 use crate::{Input, Member, Scanner, Snapshot, Standing, command, standings};
@@ -235,19 +235,81 @@ pub fn members(keys: &[ProcessKey]) -> Result<Vec<Member>, Error> {
 }
 
 /// This process and everything above it, which a stop must never reach.
-/// `None` when the chain doesn't get to launchd: a gap could hide an ancestor.
+/// `None` when the chain doesn't get to a root the system started: a gap
+/// could hide an ancestor. On a Mac the root is launchd; on Windows, the
+/// user's own Explorer or the services that start sessions, each verified
+/// to be Windows' own program.
 pub fn lineage() -> Result<Option<Vec<u32>>, Error> {
-    let parents: HashMap<u32, u32> = harbormaster_platform::processes()?
+    let processes = harbormaster_platform::processes()?;
+    let parents: HashMap<u32, u32> = processes
         .iter()
         .filter_map(|entry| entry.parent.map(|parent| (entry.key.pid.0, parent.0)))
         .collect();
-    Ok(lineage_from(std::process::id(), &parents))
+    let windows = harbormaster_platform::windows_folder();
+    let shell = harbormaster_platform::shell_process();
+    let roots = roots(&processes, windows.as_deref(), shell, &|key| {
+        harbormaster_platform::executable(key).known().cloned()
+    });
+    Ok(lineage_from(std::process::id(), &parents, &roots))
 }
 
-fn lineage_from(pid: u32, parents: &HashMap<u32, u32>) -> Option<Vec<u32>> {
+/// The processes a chain may end at. Without a Windows folder it is
+/// launchd alone; with one, the Explorer behind the desktop's shell window
+/// and the session services, only where Windows' own program runs them.
+/// Any other Explorer may be one a user started to put processes under.
+fn roots(
+    processes: &[ProcessEntry],
+    windows: Option<&Path>,
+    shell: Option<u32>,
+    exe_of: &dyn Fn(ProcessKey) -> Option<PathBuf>,
+) -> HashSet<u32> {
+    processes
+        .iter()
+        .filter(|entry| match windows {
+            None => entry.key.pid.0 == 1,
+            Some(windows) => {
+                let name = crate::role::normalize(&entry.name);
+                // Each lives in one place, where only Windows writes.
+                let (trusted, home) = match name.as_str() {
+                    "explorer" => (
+                        entry.owner == Owner::CurrentUser && shell == Some(entry.key.pid.0),
+                        windows.to_path_buf(),
+                    ),
+                    "services" | "wininit" => {
+                        (entry.owner == Owner::System, windows.join("System32"))
+                    }
+                    _ => (false, PathBuf::new()),
+                };
+                trusted
+                    && exe_of(entry.key).is_some_and(|exe| {
+                        inside(&exe, &home)
+                            && crate::role::normalize(&exe.to_string_lossy()) == name
+                    })
+            }
+        })
+        .map(|entry| entry.key.pid.0)
+        .collect()
+}
+
+/// Whether `path` is right under `folder`, however either is cased or
+/// its separators are written.
+fn inside(path: &Path, folder: &Path) -> bool {
+    let spelled = |text: &str| {
+        text.replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
+    let path = path.to_string_lossy();
+    let parent = path
+        .rsplit_once(['\\', '/'])
+        .map_or("", |(parent, _)| parent);
+    spelled(parent) == spelled(&folder.to_string_lossy())
+}
+
+fn lineage_from(pid: u32, parents: &HashMap<u32, u32>, roots: &HashSet<u32>) -> Option<Vec<u32>> {
     let mut lineage = vec![pid];
     let mut current = pid;
-    while current > 1 {
+    while !roots.contains(&current) {
         let parent = *parents.get(&current)?;
         if lineage.contains(&parent) {
             return None;
@@ -262,7 +324,12 @@ fn lineage_from(pid: u32, parents: &HashMap<u32, u32>) -> Option<Vec<u32>> {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{Daemon, daemon, lineage_from};
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+
+    use harbormaster_platform::{Owner, Pid, ProcessEntry, ProcessKey, StartTime};
+
+    use super::{Daemon, daemon, lineage_from, roots};
 
     fn args(args: &[&str]) -> Vec<String> {
         args.iter().map(ToString::to_string).collect()
@@ -336,14 +403,77 @@ mod tests {
     }
 
     #[test]
-    fn traces_up_to_launchd_or_not_at_all() {
+    fn traces_up_to_a_root_or_not_at_all() {
+        let roots = HashSet::from([1]);
         let parents = HashMap::from([(77, 40), (40, 20), (20, 1)]);
-        assert_eq!(lineage_from(77, &parents), Some(vec![77, 40, 20, 1]));
+        assert_eq!(
+            lineage_from(77, &parents, &roots),
+            Some(vec![77, 40, 20, 1])
+        );
+        assert_eq!(
+            lineage_from(77, &parents, &HashSet::from([20])),
+            Some(vec![77, 40, 20])
+        );
 
         let gap = HashMap::from([(77, 40), (40, 20)]);
-        assert_eq!(lineage_from(77, &gap), None);
+        assert_eq!(lineage_from(77, &gap, &roots), None);
 
         let cycle = HashMap::from([(77, 40), (40, 77)]);
-        assert_eq!(lineage_from(77, &cycle), None);
+        assert_eq!(lineage_from(77, &cycle, &roots), None);
+    }
+
+    fn entry(pid: u32, name: &str, owner: Owner) -> ProcessEntry {
+        ProcessEntry {
+            key: ProcessKey {
+                pid: Pid(pid),
+                start: StartTime(u64::from(pid)),
+                exec: 0,
+            },
+            parent: None,
+            name: name.into(),
+            owner,
+            memory_bytes: None,
+            cpu_time: None,
+        }
+    }
+
+    #[test]
+    fn takes_explorer_or_the_session_services_for_a_root_only_where_windows_runs_them() {
+        let processes = [
+            entry(1, "launchd", Owner::System),
+            entry(10, "explorer.exe", Owner::CurrentUser),
+            entry(11, "explorer.exe", Owner::OtherUser),
+            entry(12, "explorer.exe", Owner::CurrentUser),
+            entry(13, "explorer.exe", Owner::CurrentUser),
+            entry(20, "services.exe", Owner::System),
+            entry(21, "services.exe", Owner::CurrentUser),
+            entry(22, "wininit.exe", Owner::System),
+            entry(30, "svchost.exe", Owner::System),
+        ];
+        let exe_of = |key: ProcessKey| {
+            Some(PathBuf::from(match key.pid.0 {
+                10 | 11 | 13 => r"C:\WINDOWS\explorer.exe",
+                12 => r"C:\Users\dev\explorer.exe",
+                20 | 21 => r"C:\Windows\System32\services.exe",
+                22 => r"C:\Windows\System32\wininit.exe",
+                _ => r"C:\Windows\System32\svchost.exe",
+            }))
+        };
+        let windows = Path::new(r"C:\Windows");
+
+        // 13 is the real Explorer too, started by the user: only the one
+        // behind the shell window counts.
+        assert_eq!(
+            roots(&processes, Some(windows), Some(10), &exe_of),
+            HashSet::from([10, 20, 22])
+        );
+        assert_eq!(
+            roots(&processes, Some(windows), None, &exe_of),
+            HashSet::from([20, 22])
+        );
+        assert_eq!(
+            roots(&processes, None, Some(10), &exe_of),
+            HashSet::from([1])
+        );
     }
 }

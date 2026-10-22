@@ -39,8 +39,21 @@ fn finds_nothing_against_stopping_a_plain_process_of_this_user() {
 }
 
 #[test]
-fn finds_no_chain_up_to_a_root_a_stop_could_trust() {
-    // Windows doesn't hand an orphan to a root process as macOS does, so the
-    // chain always has a gap and a stop is refused.
-    assert_eq!(live::lineage().unwrap(), None);
+fn traces_this_process_up_to_a_root_windows_started() {
+    let lineage = live::lineage().unwrap().expect("an unbroken chain");
+    let root = *lineage.last().unwrap();
+    let name = harbormaster_platform::processes()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.key.pid.0 == root)
+        .map(|entry| entry.name.to_ascii_lowercase());
+
+    assert_eq!(lineage.first(), Some(&std::process::id()));
+    assert!(
+        matches!(
+            name.as_deref(),
+            Some("explorer.exe" | "services.exe" | "wininit.exe")
+        ),
+        "{name:?} ends {lineage:?}"
+    );
 }
