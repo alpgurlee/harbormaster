@@ -132,8 +132,8 @@ impl Settings {
             if root.as_os_str().len() > LONGEST_PATH
                 || !root.is_absolute()
                 || !plain
-                || !root.starts_with(home)
-                || root == home
+                || !harbormaster_cleaner::within(&root, home)
+                || harbormaster_cleaner::within(home, &root)
             {
                 return Err(Invalid::Root { path: root });
             }
@@ -393,6 +393,25 @@ mod tests {
         let kept = open(file).set(messy).unwrap();
 
         assert_eq!(kept.hidden, ["serena", "uvx"]);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn takes_a_project_folder_however_its_case_is_written_on_windows() {
+        let (_folder, file) = place();
+        let written = Settings {
+            roots: vec![PathBuf::from(r"c:\users\DEV\code")],
+            ..Settings::default()
+        };
+
+        let kept = open(file).set(written).unwrap();
+
+        assert_eq!(kept.roots, [PathBuf::from(r"c:\users\DEV\code")]);
+        let home_again = Settings {
+            roots: vec![PathBuf::from(r"C:\USERS\dev")],
+            ..Settings::default()
+        };
+        assert!(open(place().1).set(home_again).is_err());
     }
 
     #[test]

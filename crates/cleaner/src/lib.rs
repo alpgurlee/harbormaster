@@ -570,7 +570,7 @@ pub fn holds(held: &Path, path: &Path, project: Option<&Path>) -> bool {
 
 /// Whether `path` is `folder` or inside it, a whole name at a time and with
 /// names compared as the disk compares them: on Windows, whatever the case.
-fn within(path: &Path, folder: &Path) -> bool {
+pub fn within(path: &Path, folder: &Path) -> bool {
     let mut names = path.components();
     folder.components().all(|own| {
         names.next().is_some_and(|name| match (own, name) {
