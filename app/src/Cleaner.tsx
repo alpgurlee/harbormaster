@@ -20,6 +20,7 @@ import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { DaemonSheet, type DaemonStopper } from "./DaemonSheet";
 import { useI18n, type TextKey, type Translator } from "./i18n";
 import { Review } from "./Review";
+import { cleanerSections, mapsHome, platform } from "./platform";
 import { keepFocusInside } from "./sheet";
 import { SpaceMap } from "./SpaceMap";
 import type { Area, CleanRefusal, Cleaned, Disk, Finding, MapEvent, Removal, RunEvent, ScanEvent } from "./types";
@@ -69,7 +70,6 @@ interface Told {
 
 const NONE: ReadonlySet<string> = new Set();
 
-const SECTIONS: CleanModule[] = ["developer", "system", "large", "apps"];
 const SECTION_NAMES = {
   developer: "moduleDeveloper",
   system: "moduleSystem",
@@ -78,7 +78,11 @@ const SECTION_NAMES = {
 } as const;
 
 /** What each search says before it starts, its buttons, what it says while it looks, and once it has measured some. */
-const HINTS: Record<Search, TextKey> = { scan: "scanHint", hunt: "huntHint", apps: "appsHint" };
+const HINTS: Record<Search, TextKey> = {
+  scan: platform === "windows" ? "scanHintWindows" : "scanHint",
+  hunt: "huntHint",
+  apps: "appsHint",
+};
 const STARTS: Record<Search, TextKey> = { scan: "scan", hunt: "scan", apps: "appsStart" };
 const AGAINS: Record<Search, TextKey> = { scan: "cleanScanAgain", hunt: "cleanScanAgain", apps: "appsAgain" };
 const LOOKING: Record<Search, TextKey> = { scan: "cleanLooking", hunt: "huntLooking", apps: "appsLooking" };
@@ -122,10 +126,14 @@ export interface CleanerProps {
   backend?: CleanerBackend;
   /** Milliseconds since the Unix epoch, for how long projects have sat. */
   now?: number;
+  /** The sections past the overview this platform has. */
+  sections?: CleanModule[];
+  /** Whether the window maps the home folder. */
+  maps?: boolean;
 }
 
 /** Finds what this Mac can do without, says what removing it would do, and removes only what the user chose. */
-export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
+export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleanerSections, maps = mapsHome }: CleanerProps) {
   const i18n = useI18n();
   const [step, setStep] = useState<Step>({ kind: "ready" });
   const [view, setView] = useState<View>("overview");
@@ -378,7 +386,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
         >
           {i18n.t("overview")}
         </button>
-        {SECTIONS.map((section) => (
+        {sections.map((section) => (
           <button
             key={section}
             type="button"
@@ -394,15 +402,17 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
             {listed(section) ? <span className={styles.sectionSize}>{i18n.bytes(sectionBytes(section))}</span> : null}
           </button>
         ))}
-        <button
-          type="button"
-          className={styles.section}
-          aria-current={view === "map" ? "page" : undefined}
-          onClick={() => setView("map")}
-        >
-          {i18n.t("moduleMap")}
-          {mapping.kind === "mapped" ? <span className={styles.sectionSize}>{i18n.bytes(mapping.root.bytes)}</span> : null}
-        </button>
+        {maps ? (
+          <button
+            type="button"
+            className={styles.section}
+            aria-current={view === "map" ? "page" : undefined}
+            onClick={() => setView("map")}
+          >
+            {i18n.t("moduleMap")}
+            {mapping.kind === "mapped" ? <span className={styles.sectionSize}>{i18n.bytes(mapping.root.bytes)}</span> : null}
+          </button>
+        ) : null}
         {disk === null ? null : (
           <p className={styles.diskNote}>
             {i18n.t("diskFree", { free: i18n.bytes(disk.free), total: i18n.bytes(disk.total) })}
@@ -476,7 +486,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now() }: CleanerProps) {
               onStopDaemons={setStopping}
             />
           ) : (
-            overview(step, { disk, chosen, charting, i18n, onScan: () => search("scan"), onReview: setView, onBack: back })
+            overview(step, { disk, chosen, charting, sections, i18n, onScan: () => search("scan"), onReview: setView, onBack: back })
           )}
         </div>
         {view !== "map" && found !== null && found.findings.length > 0 ? (
@@ -520,19 +530,20 @@ interface Overview {
   chosen: Set<string>;
   /** Whether a map is being made, which no scan may start beside. */
   charting: boolean;
+  sections: CleanModule[];
   i18n: Translator;
   onScan: () => void;
   onReview: (section: CleanModule) => void;
   onBack: () => void;
 }
 
-function overview(step: Step, { disk, chosen, charting, i18n, onScan, onReview, onBack }: Overview) {
+function overview(step: Step, { disk, chosen, charting, sections, i18n, onScan, onReview, onBack }: Overview) {
   switch (step.kind) {
     case "ready":
       return (
         <Start
           disk={disk}
-          hint={i18n.t(charting ? "waitForMap" : "scanHint")}
+          hint={i18n.t(charting ? "waitForMap" : HINTS.scan)}
           start={i18n.t("scan")}
           disabled={charting}
           onStart={onScan}
@@ -555,7 +566,7 @@ function overview(step: Step, { disk, chosen, charting, i18n, onScan, onReview, 
       return step.findings.length === 0 ? (
         <p className={styles.empty}>{i18n.t("cleanNothing")}</p>
       ) : (
-        <Summary step={step} chosen={chosen} i18n={i18n} onReview={onReview} />
+        <Summary step={step} chosen={chosen} sections={sections} i18n={i18n} onReview={onReview} />
       );
     case "removing":
       return (
@@ -709,11 +720,13 @@ function Ring({ fraction, waiting = false, children }: { fraction: number; waiti
 function Summary({
   step,
   chosen,
+  sections,
   i18n,
   onReview,
 }: {
   step: Found;
   chosen: Set<string>;
+  sections: CleanModule[];
   i18n: Translator;
   onReview: (section: CleanModule) => void;
 }) {
@@ -738,7 +751,7 @@ function Summary({
         ))}
       </div>
       <ul className={styles.cards}>
-        {SECTIONS.map((section) => {
+        {sections.map((section) => {
           const members = groups.filter((group) => MODULES[section].includes(group.group));
           if (members.length === 0) return null;
           const found = members.reduce((total, group) => total + group.bytes, 0);

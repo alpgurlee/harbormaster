@@ -2,15 +2,23 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Preview, QuitPreview, Stopped } from "./api";
+import { Cleaner, type CleanerBackend } from "./Cleaner";
 import { Detail } from "./Detail";
 import { I18nProvider } from "./i18n";
 import { Panel } from "./Panel";
 import { QuitSheet, type Quitter } from "./QuitSheet";
 import { StopSheet, type Stopper } from "./StopSheet";
-import type { AppUsage, Service, Update } from "./types";
+import type { AppUsage, Finding, ScanEvent, Service, Update } from "./types";
 
 // Where a stop is the forced one, the panel says so.
-vi.mock("./platform", () => ({ platform: "windows", stopsAtOnce: true, closesWindows: true, hasCleaner: false }));
+vi.mock("./platform", () => ({
+  platform: "windows",
+  stopsAtOnce: true,
+  closesWindows: true,
+  cleanerSections: ["developer"],
+  mapsHome: false,
+  revealsIn: "revealInExplorer",
+}));
 
 afterEach(cleanup);
 
@@ -251,5 +259,80 @@ describe("closing an app on Windows", () => {
     expect(within(list).getAllByRole("button").map((button) => button.textContent)).toEqual(["Close"]);
     fireEvent.click(within(list).getByRole("button", { name: "Close chrome" }));
     expect(onQuit).toHaveBeenCalledWith(chrome);
+  });
+});
+
+describe("the cleaner on Windows", () => {
+  const npm: Finding = {
+    group: "packages",
+    kind: "rebuildable",
+    name: "npm",
+    path: "C:\\Users\\dev\\AppData\\Local\\npm-cache\\_cacache",
+    bytes: 1024 ** 3,
+    picked: true,
+    inUse: null,
+    touched: null,
+    project: null,
+    emptied: true,
+  };
+
+  function cleaner() {
+    const scans: ((event: ScanEvent) => void)[] = [];
+    const revealed: string[] = [];
+    const nothing = () => Promise.resolve();
+    const backend: CleanerBackend = {
+      scan: (onEvent) => {
+        scans.push(onEvent);
+        return Promise.resolve();
+      },
+      hunt: nothing,
+      apps: nothing,
+      run: nothing,
+      stop: nothing,
+      disk: () => Promise.resolve({ total: 500 * 1024 ** 3, free: 100 * 1024 ** 3 }),
+      reveal: (path) => {
+        revealed.push(path);
+        return Promise.resolve();
+      },
+      recheck: () => new Promise(() => {}),
+      map: nothing,
+      revealArea: nothing,
+      daemons: () => Promise.resolve([]),
+      daemonPreview: () => new Promise(() => {}),
+      daemonStop: () => new Promise(() => {}),
+    };
+    render(
+      <I18nProvider locale="en">
+        <Cleaner backend={backend} now={NOW} />
+      </I18nProvider>,
+    );
+    return { scans, revealed };
+  }
+
+  it("offers only what developer tools leave, and no map", async () => {
+    const driver = cleaner();
+    await act(async () => {});
+
+    const sections = within(screen.getByRole("navigation", { name: "Clean up" })).getAllByRole("button");
+    expect(sections.map((button) => button.textContent?.replace(/[\d.]+ GB$/, ""))).toEqual(["Overview", "Developer"]);
+    expect(screen.getByText("Looks for build outputs and the caches developer tools keep. Nothing goes without your say.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    act(() =>
+      driver.scans[0]({
+        kind: "done",
+        token: 3,
+        home: "C:\\Users\\dev",
+        findings: [npm],
+        scanned: true,
+        hunted: false,
+        appsListed: false,
+        idleDays: 30,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Developer/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in File Explorer: npm" }));
+
+    expect(driver.revealed).toEqual([npm.path]);
   });
 });

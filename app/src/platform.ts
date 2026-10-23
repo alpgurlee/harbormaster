@@ -1,3 +1,5 @@
+import type { CleanModule } from "./cleanup";
+
 /** Which desktop the panel runs on, for its look and its wording. */
 export const platform: "mac" | "windows" = navigator.userAgent.includes("Windows") ? "windows" : "mac";
 
@@ -11,5 +13,13 @@ export const stopsAtOnce = platform === "windows";
  * forces it. */
 export const closesWindows = platform === "windows";
 
-/** Cleaning up is macOS's alone for now. */
-export const hasCleaner = platform === "mac";
+/** The cleaner's sections: on Windows only what developer tools leave, for
+ * now; large files, apps and the rest wait for the Recycle Bin and for a
+ * way to tell that an app is closed. */
+export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer"] : ["developer", "system", "large", "apps"];
+
+/** Whether the cleaner maps where the room in the home folder goes. */
+export const mapsHome = platform === "mac";
+
+/** What shows a file where it is. */
+export const revealsIn = platform === "windows" ? "revealInExplorer" : "revealInFinder";

@@ -194,6 +194,7 @@ export interface Messages {
   diskOf: string;
   scan: string;
   scanHint: string;
+  scanHintWindows: string;
   huntHint: string;
   huntLooking: string;
   huntMeasured: string;
@@ -208,6 +209,7 @@ export interface Messages {
   chooseShown: string;
   heldHint: string;
   revealInFinder: string;
+  revealInExplorer: string;
   noItemsMatch: string;
   moduleMap: string;
   mapStart: string;
@@ -471,6 +473,7 @@ export const en: Messages = {
   diskOf: "free of {total}",
   scan: "Scan",
   scanHint: "Looks for build outputs, package caches, Xcode data, app caches, logs and the Trash. Nothing goes without your say.",
+  scanHintWindows: "Looks for build outputs and the caches developer tools keep. Nothing goes without your say.",
   huntHint:
     "Looks through your folders outside the Library for files over 50 MB. None is chosen for you, and what you choose goes to the Trash. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
   huntLooking: "Looking through your folders…",
@@ -486,6 +489,7 @@ export const en: Messages = {
   chooseShown: "Choose all shown",
   heldHint: "Quit what is using an item, then come back here: the list looks again.",
   revealInFinder: "Show in Finder",
+  revealInExplorer: "Show in File Explorer",
   noItemsMatch: "Nothing here matches “{query}”.",
   moduleMap: "Space map",
   mapStart: "Map",
@@ -536,7 +540,7 @@ export const en: Messages = {
   folderPath: "Folder, such as ~/code",
   idleTitle: "Days a project sits untouched before its build outputs are chosen",
   aboutText: "A menu bar app for the dev servers on your Mac, and a cleaner for what your tools leave behind.",
-  aboutTextWindows: "A tray app for the dev servers on your PC.",
+  aboutTextWindows: "A tray app for the dev servers on your PC, and a cleaner for what your tools leave behind.",
   aboutLicense: "Free and open source, under the MIT License.",
   version: "Version {version}",
   invalidIdleDays: "Days must be from 1 to 365.",
@@ -751,6 +755,7 @@ export const tr: Messages = {
   diskOf: "boş · toplam {total}",
   scan: "Tara",
   scanHint: "Derleme çıktıları, paket önbellekleri, Xcode verileri, uygulama önbellekleri, kayıtlar ve Çöp Sepeti aranır. Sen onaylamadan hiçbir şey silinmez.",
+  scanHintWindows: "Derleme çıktıları ve geliştirici araçlarının önbellekleri aranır. Sen onaylamadan hiçbir şey silinmez.",
   huntHint:
     "Library dışındaki klasörlerinde 50 MB'tan büyük dosyaları arar. Hiçbirini senin yerine seçmez; seçtiklerin Çöp Sepeti'ne gider. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
   huntLooking: "Klasörlerin taranıyor…",
@@ -766,6 +771,7 @@ export const tr: Messages = {
   chooseShown: "Görünenlerin tümünü seç",
   heldHint: "Bir öğeyi kullananı kapat, sonra buraya dön; liste yeniden bakar.",
   revealInFinder: "Finder'da göster",
+  revealInExplorer: "Dosya Gezgini'nde göster",
   noItemsMatch: "“{query}” ile eşleşen bir şey yok.",
   moduleMap: "Alan haritası",
   mapStart: "Haritala",
@@ -816,7 +822,7 @@ export const tr: Messages = {
   folderPath: "Klasör, örneğin ~/code",
   idleTitle: "Derleme çıktıları seçilmeden önce bir projenin dokunulmadan kalacağı gün",
   aboutText: "Mac'indeki dev sunucuları için bir menü çubuğu uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",
-  aboutTextWindows: "Bilgisayarındaki dev sunucuları için bir sistem tepsisi uygulaması.",
+  aboutTextWindows: "Bilgisayarındaki dev sunucuları için bir sistem tepsisi uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",
   aboutLicense: "Ücretsiz ve açık kaynak; MIT Lisansı ile.",
   version: "Sürüm {version}",
   invalidIdleDays: "Gün sayısı 1 ile 365 arasında olmalı.",

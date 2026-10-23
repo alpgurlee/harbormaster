@@ -479,6 +479,7 @@ impl Working {
     }
 
     /// Lists this user's own apps, telling `told` as it goes.
+    #[cfg(target_os = "macos")]
     pub(crate) fn apps(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
@@ -647,9 +648,7 @@ fn failed(error: impl Display) -> Refusal {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
     use std::fs;
-    use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -680,6 +679,23 @@ mod tests {
             emptied: true,
             identity: Identity::default(),
         }
+    }
+
+    /// `path` and then a unit that isn't text, as a disk may hold in a name.
+    fn untextual(path: &str) -> PathBuf {
+        #[cfg(unix)]
+        let path = {
+            use std::os::unix::ffi::OsStrExt;
+            std::ffi::OsStr::from_bytes(&[path.as_bytes(), b"\xff"].concat()).to_owned()
+        };
+        #[cfg(windows)]
+        let path = {
+            use std::os::windows::ffi::OsStringExt;
+            let lone_surrogate = 0xD800;
+            let units: Vec<u16> = path.encode_utf16().chain([lone_surrogate]).collect();
+            std::ffi::OsString::from_wide(&units)
+        };
+        PathBuf::from(path)
     }
 
     fn paths(paths: &[&str]) -> Vec<PathBuf> {
@@ -793,7 +809,7 @@ mod tests {
             path,
             identity: Identity::default(),
         };
-        let odd = PathBuf::from(OsStr::from_bytes(b"/Users/dev/caf\xe9"));
+        let odd = untextual("/Users/dev/caf");
         let root = place(
             0,
             PathBuf::from("/Users/dev"),
@@ -1114,11 +1130,8 @@ mod tests {
 
     #[test]
     fn leaves_out_what_the_window_cant_be_told_of() {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
-
         let mut odd = finding("/");
-        odd.path = PathBuf::from(OsStr::from_bytes(b"/Users/dev/\xff"));
+        odd.path = untextual("/Users/dev/");
 
         assert!(super::showable(&finding("/Users/dev/.npm/_cacache")));
         assert!(!super::showable(&odd));

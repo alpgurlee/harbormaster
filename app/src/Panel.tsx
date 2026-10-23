@@ -32,8 +32,6 @@ export interface PanelProps {
   onQuit?: (app: AppUsage) => void;
   /** Opens the cleaner; its button stays off without it. */
   onClean?: () => void;
-  /** Whether this platform has a cleaner at all; without one, no button shows. */
-  cleans?: boolean;
   onSettings?: () => void;
   /** Drags the panel off its icon, from its header. */
   onDrag?: () => void;
@@ -52,13 +50,12 @@ export function Panel({
   onStop,
   onQuit,
   onClean,
-  cleans = true,
   onSettings,
   onDrag,
   placed = false,
   onAnchor,
 }: PanelProps) {
-  const header = <Header onClean={onClean} cleans={cleans} onSettings={onSettings} onDrag={onDrag} onAnchor={placed ? onAnchor : undefined} />;
+  const header = <Header onClean={onClean} onSettings={onSettings} onDrag={onDrag} onAnchor={placed ? onAnchor : undefined} />;
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
@@ -200,14 +197,13 @@ export function Panel({
 
 interface HeaderProps {
   onClean?: () => void;
-  cleans: boolean;
   onSettings?: () => void;
   onDrag?: () => void;
   /** Shown only while the panel sits where the user put it. */
   onAnchor?: () => void;
 }
 
-function Header({ onClean, cleans, onSettings, onDrag, onAnchor }: HeaderProps) {
+function Header({ onClean, onSettings, onDrag, onAnchor }: HeaderProps) {
   const i18n = useI18n();
   return (
     <header className={styles.header} onMouseDown={onDrag && dragsAfterMoving(onDrag)}>
@@ -219,12 +215,10 @@ function Header({ onClean, cleans, onSettings, onDrag, onAnchor }: HeaderProps) 
             <PutBack />
           </button>
         ) : null}
-        {cleans ? (
-          <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
-            <Sweep />
-            {i18n.t("clean")}
-          </button>
-        ) : null}
+        <button type="button" className={styles.tool} disabled={onClean === undefined} onClick={onClean}>
+          <Sweep />
+          {i18n.t("clean")}
+        </button>
         <button
           type="button"
           className={styles.tool}

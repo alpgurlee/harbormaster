@@ -1,12 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// Cleaning is macOS's alone for now: on Windows the panel shows what runs,
-// stops servers and closes apps.
-#[cfg(target_os = "macos")]
 mod actions;
-#[cfg(target_os = "macos")]
 mod cleaner;
-#[cfg(target_os = "macos")]
 mod cleaning;
 mod commands;
 #[cfg(target_os = "macos")]
@@ -17,9 +12,6 @@ mod scanning;
 mod settings;
 mod stopping;
 mod tray;
-
-use std::io;
-use std::path::PathBuf;
 
 use tauri::Manager;
 
@@ -83,10 +75,20 @@ fn main() {
         commands::quit_app_preview,
         commands::force_quit_app_preview,
         commands::quit_app,
+        actions::open_cleaner,
         commands::open_settings,
         commands::settings_get,
         commands::settings_subscribe,
         commands::settings_set,
+        actions::clean_scan,
+        actions::clean_hunt,
+        actions::clean_map,
+        actions::clean_run,
+        actions::clean_recheck,
+        actions::clean_stop,
+        actions::clean_disk,
+        actions::clean_reveal,
+        actions::clean_reveal_area,
         commands::resize_panel,
         commands::hide_panel,
         commands::drag_panel,
@@ -101,14 +103,14 @@ fn main() {
                 // A menu bar app: no Dock icon and no app menu.
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 app.manage(daemons::Daemons::default());
-                app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             }
+            app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
             app.manage(panel::Anchor::default());
             app.manage(settings::Store::open(
                 app.path().app_config_dir()?.join("settings.json"),
-                home()?,
+                harbormaster_cleaner::account_home()?,
             ));
             panel::create(app.handle())?;
             tray::create(app.handle())?;
@@ -118,17 +120,4 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Harbormaster should start");
-}
-
-/// The home folder of the account this runs as, read from the account
-/// itself rather than from $HOME, which whatever starts us may set.
-#[cfg(target_os = "macos")]
-fn home() -> io::Result<PathBuf> {
-    harbormaster_cleaner::account_home()
-}
-
-/// The user's profile folder.
-#[cfg(windows)]
-fn home() -> io::Result<PathBuf> {
-    std::env::home_dir().ok_or_else(|| io::ErrorKind::NotFound.into())
 }

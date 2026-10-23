@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { version } from "../package.json";
 import { settingsGet, settingsSet } from "./api";
 import { useI18n, type TextKey, type Translator } from "./i18n";
-import { hasCleaner, platform } from "./platform";
+import { platform } from "./platform";
 import type { Appearance, Settings, SettingsRefusal } from "./types";
 import styles from "./SettingsWindow.module.css";
 
@@ -31,8 +31,7 @@ const APPEARANCES: [Appearance, TextKey][] = [
 ];
 
 /** What the user can set, each kept as soon as it is changed. */
-/** `cleans` says whether this platform has the cleaner its section sets up. */
-export function SettingsWindow({ backend = BACKEND, cleans = hasCleaner }: { backend?: SettingsBackend; cleans?: boolean }) {
+export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBackend }) {
   const i18n = useI18n();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [section, setSection] = useState<Section>("general");
@@ -81,7 +80,7 @@ export function SettingsWindow({ backend = BACKEND, cleans = hasCleaner }: { bac
     <div className={styles.window}>
       <nav className={styles.side} aria-label={i18n.t("settings")}>
         <div className={styles.sideTop} data-tauri-drag-region />
-        {SECTIONS.filter((each) => cleans || each !== "cleanup").map((each) => (
+        {SECTIONS.map((each) => (
           <button
             key={each}
             type="button"

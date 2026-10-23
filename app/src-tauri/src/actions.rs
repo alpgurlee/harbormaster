@@ -1,23 +1,29 @@
-//! What the cleaner window may do to this Mac: find and remove what could
-//! go. macOS only for now.
+//! What the cleaner window may do to this machine: find and remove what
+//! could go. Listing apps and stopping dev daemons are a Mac's alone.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use harbormaster_cleaner::Finding;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaner;
 use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
+#[cfg(target_os = "macos")]
 use crate::commands::blocking;
+#[cfg(target_os = "macos")]
 use crate::daemons::{DaemonPreview, Daemons};
 use crate::settings::Store;
+#[cfg(target_os = "macos")]
 use crate::stopping::{Reason, Stopped};
 
 /// Of the items listed under `token` and in use, those only known dev
 /// daemons keep so, which the window may offer to stop.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_daemons(token: u64, app: AppHandle) -> Result<Vec<PathBuf>, Reason> {
     blocking(move || {
@@ -31,6 +37,7 @@ pub(crate) async fn clean_daemons(token: u64, app: AppHandle) -> Result<Vec<Path
 }
 
 /// What stopping the daemons that keep the item at `path` in use would do.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_daemon_preview(
     token: u64,
@@ -48,6 +55,7 @@ pub(crate) async fn clean_daemon_preview(
 }
 
 /// Stops the daemons the window was shown and the user agreed to stop.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_daemon_stop(approval: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || {
@@ -124,6 +132,7 @@ pub(crate) async fn clean_run(
 
 /// Lists this user's own apps, telling the window as it goes; they come
 /// last with what else is shown, under the token removing some takes.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_apps(
     channel: Channel<ScanEvent>,
@@ -191,7 +200,7 @@ pub(crate) fn clean_disk() -> Result<harbormaster_cleaner::Disk, Refusal> {
     })
 }
 
-/// Shows a finding in Finder; only one the scan listed.
+/// Shows a finding in Finder or Explorer; only one the scan listed.
 #[tauri::command]
 pub(crate) fn clean_reveal(
     path: PathBuf,
@@ -208,7 +217,7 @@ pub(crate) fn clean_reveal(
         })
 }
 
-/// Shows a place of the last map in Finder, if it is still what the map found.
+/// Shows a place of the last map in Finder or Explorer, if it is still what the map found.
 #[tauri::command]
 pub(crate) async fn clean_reveal_area(
     token: u64,

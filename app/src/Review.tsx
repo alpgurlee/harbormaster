@@ -4,6 +4,7 @@ import { choiceOf, groupsOf, matching, ordered, selectable, toggled, type GroupV
 import { ABOUT, NAMES, TINTS, note } from "./cleanerText";
 import { useI18n } from "./i18n";
 import { OpenOut } from "./icons";
+import { revealsIn } from "./platform";
 import type { CleanGroup, Finding } from "./types";
 import styles from "./Review.module.css";
 
@@ -137,8 +138,8 @@ export function Review({ findings, home, chosen, idleDays, now, stoppable, onCho
                 <button
                   type="button"
                   className={styles.reveal}
-                  aria-label={`${i18n.t("revealInFinder")}: ${finding.name}`}
-                  title={i18n.t("revealInFinder")}
+                  aria-label={`${i18n.t(revealsIn)}: ${finding.name}`}
+                  title={i18n.t(revealsIn)}
                   onClick={() => onReveal(finding)}
                 >
                   <OpenOut />

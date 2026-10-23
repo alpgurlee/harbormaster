@@ -317,13 +317,12 @@ describe("Panel", () => {
     expect(onSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no stop, quit or clean up where the platform can't do them", () => {
-    show({ onStop: undefined, onQuit: undefined, onClean: vi.fn(), cleans: false });
+  it("offers no stop or quit where the platform can't do them", () => {
+    show({ onStop: undefined, onQuit: undefined });
     fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
 
     expect(screen.queryAllByRole("button", { name: "Stop" })).toEqual([]);
     expect(within(screen.getByRole("list", { name: "Memory by app" })).queryAllByRole("button")).toEqual([]);
-    expect(screen.queryByRole("button", { name: "Clean up" })).toBeNull();
     expect(screen.getByRole("option", { name: /Port 3000/ })).toBeTruthy();
   });
 

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { asRefusal, refusalText } from "./cleanerText";
 import { useI18n } from "./i18n";
 import { SHORT_TEXT, bytesOf, pieces, unmeasured, type Piece } from "./mapPieces";
+import { revealsIn } from "./platform";
 import { squarify } from "./treemap";
 import type { Area, CleanRefusal } from "./types";
 import styles from "./SpaceMap.module.css";
@@ -125,7 +126,7 @@ export function SpaceMap({ root, onReveal, onMapOthers }: SpaceMapProps) {
         ) : null}
         {focus === root ? null : (
           <button type="button" className={styles.reveal} onClick={reveal}>
-            {i18n.t("revealInFinder")}
+            {i18n.t(revealsIn)}
           </button>
         )}
       </section>
