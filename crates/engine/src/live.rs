@@ -64,7 +64,9 @@ pub fn holdings() -> Result<Vec<Holding>, Error> {
         .filter(|process| process.key.pid.0 != own)
         .map(|process| {
             // Only a JVM's arguments are read: `java` alone says little.
-            let daemon = (process.name == "java")
+            let daemon = process
+                .name
+                .eq_ignore_ascii_case("java")
                 .then(|| jvm_daemon(process.key))
                 .flatten();
             Holding {
