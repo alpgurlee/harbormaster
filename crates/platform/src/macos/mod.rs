@@ -14,7 +14,7 @@ use std::io;
 use std::mem::{MaybeUninit, size_of};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use libproc::file_info::pidfdinfo;
 use libproc::net_info::{SocketFDInfo, SocketInfoKind, TcpSIState};
@@ -74,6 +74,11 @@ struct FileInfo {
 struct VnodeWithPath {
     file: FileInfo,
     vnode: libc::vnode_info_path,
+}
+
+/// The kernel already reports paths as the disk spells them.
+pub(crate) fn canonical(path: &Path) -> io::Result<PathBuf> {
+    std::fs::canonicalize(path)
 }
 
 /// Each of this user's processes with its working folder, program and open files.

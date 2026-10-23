@@ -30,7 +30,7 @@ pub fn scan(scanner: &mut Scanner, home: &Path) -> Result<Snapshot, Error> {
 /// Not knowing where that is, it can't say what is free, so it fails.
 pub fn held() -> Result<Vec<(PathBuf, String)>, Error> {
     let program = (
-        std::env::current_exe().and_then(std::fs::canonicalize)?,
+        std::env::current_exe().and_then(|program| harbormaster_platform::canonical(&program))?,
         "Harbormaster".to_owned(),
     );
     Ok(holdings()?

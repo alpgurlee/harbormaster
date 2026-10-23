@@ -13,23 +13,43 @@ pub mod window;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::{Thermal, Whereabouts};
+use crate::Thermal;
 
 pub(crate) use jobs::bound_to;
 pub(crate) use language::preferred_language;
 pub(crate) use memory::memory;
 pub(crate) use process::{
     details, executable_of, presence, processes, runs_as_root, sets, signal, tracks_exec,
+    whereabouts,
 };
 pub(crate) use socket::{alone, every};
 pub(crate) use tcp::listeners;
 pub(crate) use theme::light_taskbar;
 pub(crate) use version::description;
 
-/// Not read on Windows yet. An empty list would say that nothing uses a
-/// folder, so this fails instead.
-pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
-    Err(io::ErrorKind::Unsupported.into())
+/// `path` with every link in it resolved, spelled as the disk spells it
+/// and as people write it: `C:\Users\dev`, not `\\?\C:\Users\dev`.
+pub(crate) fn canonical(path: &Path) -> io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+
+    let path = std::fs::canonicalize(path)?;
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Ok(path);
+    };
+    let mut plain = match prefix.kind() {
+        Prefix::VerbatimDisk(letter) => PathBuf::from(format!("{}:", char::from(letter))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut root = std::ffi::OsString::from(r"\\");
+            root.push(server);
+            root.push(r"\");
+            root.push(share);
+            PathBuf::from(root)
+        }
+        _ => return Ok(path),
+    };
+    plain.extend(components);
+    Ok(plain)
 }
 
 pub(crate) fn trash(_path: &Path) -> io::Result<PathBuf> {

@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use harbormaster_platform::{
     Field, Owner, Pid, Presence, ProcessEntry, ProcessKey, Signal, SignalOutcome, StartTime,
-    details, executable, listeners, presence, processes, runs_as_root, signal, trash, whereabouts,
+    canonical, details, executable, listeners, presence, processes, runs_as_root, signal, trash,
+    whereabouts,
 };
 
 /// Long enough for a slow machine, short enough that a hang fails the test.
@@ -389,13 +390,52 @@ fn sends_nothing_to_a_process_when_asked_to_stop_it() {
 
 #[test]
 fn refuses_what_it_cannot_do_yet_rather_than_answer_nothing() {
-    assert!(
-        whereabouts().is_err(),
-        "an empty answer would say nothing uses a folder"
-    );
     let folder = tempfile::tempdir().unwrap();
     assert!(trash(folder.path()).is_err());
     assert!(folder.path().exists());
+}
+
+#[test]
+fn says_where_a_childs_program_and_working_folder_are_as_the_disk_spells_them() {
+    let folder = tempfile::tempdir().unwrap();
+    let real = canonical(folder.path()).unwrap();
+    // Spelled another way than the disk does, as a process may set it.
+    let shouted = PathBuf::from(real.to_str().unwrap().to_uppercase());
+    let (_waiting, key) = started_in(&waiter(), &shouted);
+
+    let found = whereabouts().unwrap();
+
+    let child = found
+        .iter()
+        .find(|process| process.key == key)
+        .expect("the child should be listed");
+    assert_eq!(child.name.to_ascii_lowercase(), "sort");
+    assert!(child.paths.contains(&real), "{:?}", child.paths);
+    assert!(
+        child.paths.contains(&canonical(&waiter()).unwrap()),
+        "{:?}",
+        child.paths
+    );
+    assert!(
+        child
+            .paths
+            .iter()
+            .all(|path| !path.to_string_lossy().starts_with(r"\\?\"))
+    );
+    assert!(found.iter().all(|process| process.key.pid != Pid(4)));
+}
+
+#[test]
+fn writes_a_canonical_path_without_the_prefix_windows_adds() {
+    let folder = tempfile::tempdir().unwrap();
+
+    let path = canonical(folder.path()).unwrap();
+
+    assert!(
+        path.to_str().unwrap().chars().nth(1) == Some(':'),
+        "{path:?}"
+    );
+    assert!(same_folder(&path, folder.path()));
 }
 
 #[test]

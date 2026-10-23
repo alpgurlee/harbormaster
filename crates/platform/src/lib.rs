@@ -45,6 +45,12 @@ pub fn whereabouts() -> Result<Vec<Whereabouts>, Error> {
     Ok(sys::whereabouts()?)
 }
 
+/// `path` with every link in it resolved, spelled as the disk spells it and
+/// in the form processes report paths in.
+pub fn canonical(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    sys::canonical(path)
+}
+
 /// Moves the file or folder at `path` to the Trash, as Finder's Move to
 /// Trash does, so it can be put back, and says where it went. The path is
 /// followed as given, links in it too.

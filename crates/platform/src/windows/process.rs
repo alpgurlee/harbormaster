@@ -31,7 +31,7 @@ use super::parameters;
 
 use crate::{
     Field, Owner, Pid, Presence, ProcessDetails, ProcessEntry, ProcessKey, Signal, SignalOutcome,
-    StartTime,
+    StartTime, Whereabouts,
 };
 
 /// FILETIME counts 100 ns ticks from 1601; a StartTime counts nanoseconds
@@ -432,6 +432,38 @@ pub(crate) fn details(key: ProcessKey) -> ProcessDetails {
         args: parameters::command_line(&process),
         cwd,
     }
+}
+
+/// Each of this user's processes, in any of their sessions, with its program
+/// and working folder, spelled as the disk spells them. One whose memory
+/// can't be read, as one run as administrator, gives its program alone; one
+/// that can't be opened is left out, as on the Mac.
+pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
+    Ok(processes()?
+        .into_iter()
+        .filter(|entry| matches!(entry.owner, Owner::CurrentUser | Owner::OtherSession))
+        .filter_map(|entry| {
+            // Held while it is read, so that its pid names no other process meanwhile.
+            let process = reopen(entry.key).ok()?;
+            let mut paths: Vec<PathBuf> = image(&process).known().cloned().into_iter().collect();
+            let readable = reopen_with(
+                entry.key,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+            );
+            if let Ok(readable) = readable {
+                paths.extend(parameters::working_folder(&readable).known().cloned());
+            }
+            let name = entry.name.strip_suffix(".exe").unwrap_or(&entry.name);
+            Some(Whereabouts {
+                key: entry.key,
+                name: name.to_owned(),
+                paths: paths
+                    .into_iter()
+                    .map(|path| super::canonical(&path).unwrap_or(path))
+                    .collect(),
+            })
+        })
+        .collect())
 }
 
 pub(crate) fn executable_of(key: ProcessKey) -> Field<PathBuf> {
