@@ -639,3 +639,14 @@ fn watches_a_child_without_the_right_to_end_it() {
     drop(waiting.0.stdin.take());
     assert_eq!(watched.wait(PATIENCE), Ended::Exited);
 }
+
+#[test]
+fn reads_what_a_program_says_it_is_from_its_file() {
+    use harbormaster_platform::description;
+
+    let sort = description(&waiter()).expect("Windows' own sort describes itself");
+    assert!(!sort.trim().is_empty(), "{sort:?}");
+    // Built without a version resource, as Rust programs are.
+    assert_eq!(description(&std::env::current_exe().unwrap()), None);
+    assert_eq!(description(Path::new(r"C:\no\such\program.exe")), None);
+}

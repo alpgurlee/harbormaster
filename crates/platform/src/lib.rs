@@ -130,6 +130,13 @@ pub fn windows_folder() -> Option<std::path::PathBuf> {
     sys::windows_folder()
 }
 
+/// What a program's file says it is, as Task Manager names it: on Windows,
+/// the description in its version resource, read once per file. `None` on a
+/// Mac, whose apps go by their bundles, or where the file says nothing.
+pub fn description(exe: &std::path::Path) -> Option<String> {
+    sys::description(exe)
+}
+
 /// The pid of the process behind Windows' desktop shell window, the
 /// session's Explorer; `None` on a Mac or without a desktop.
 pub fn shell_process() -> Option<u32> {

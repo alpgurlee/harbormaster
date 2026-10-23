@@ -7,6 +7,7 @@ mod process;
 mod socket;
 mod tcp;
 mod theme;
+mod version;
 pub mod window;
 
 use std::io;
@@ -23,6 +24,7 @@ pub(crate) use process::{
 pub(crate) use socket::{alone, every};
 pub(crate) use tcp::listeners;
 pub(crate) use theme::light_taskbar;
+pub(crate) use version::description;
 
 /// Not read on Windows yet. An empty list would say that nothing uses a
 /// folder, so this fails instead.

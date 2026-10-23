@@ -48,6 +48,11 @@ pub(crate) fn shell_process() -> Option<u32> {
     None
 }
 
+/// A Mac app goes by its bundle.
+pub(crate) fn description(_exe: &std::path::Path) -> Option<String> {
+    None
+}
+
 // From xnu bsd/sys/proc_info.h.
 const INI_IPV4: u8 = 0x1;
 const INI_IPV6: u8 = 0x2;
