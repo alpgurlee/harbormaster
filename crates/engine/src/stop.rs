@@ -196,10 +196,20 @@ pub fn hold_all<T>(
 /// Ends `held` in order, the one that started the others first, then waits
 /// up to `grace` in all for them to be gone.
 pub fn force<T: Held>(held: &[(ProcessKey, T)], grace: Duration) -> Vec<(ProcessKey, Outcome)> {
+    end(held, grace, &T::terminate)
+}
+
+/// Does `how` to each of `held` in order, then waits up to `grace` in all
+/// for them to be gone: what `how` refused is reported so, and not waited for.
+pub fn end<T: Held>(
+    held: &[(ProcessKey, T)],
+    grace: Duration,
+    how: &dyn Fn(&T) -> Result<(), String>,
+) -> Vec<(ProcessKey, Outcome)> {
     let mut outcomes = Vec::with_capacity(held.len());
     let mut waiting = Vec::new();
     for (key, target) in held {
-        match target.terminate() {
+        match how(target) {
             Ok(()) => waiting.push((*key, target)),
             Err(reason) => outcomes.push((*key, Outcome::Failed(reason))),
         }
@@ -403,6 +413,52 @@ mod tests {
                 "wait node",
                 "wait helper"
             ]
+        );
+    }
+
+    #[test]
+    fn asks_the_held_as_told_then_waits_for_all_of_them() {
+        let log = RefCell::new(Vec::new());
+        let fake = |name, ends| Fake {
+            log: &log,
+            name,
+            ends,
+            refuses: false,
+        };
+        let held = [
+            (key(10), fake("app", super::Waited::Exited)),
+            (key(11), fake("helper", super::Waited::StillRunning)),
+            (key(12), fake("window", super::Waited::Exited)),
+        ];
+        // Only the app and its window are asked; the helper is only waited for.
+        let ask = |target: &Fake<'_>| {
+            log.borrow_mut().push(format!("ask {}", target.name));
+            match target.name {
+                "window" => Err("it shows no window to close".to_string()),
+                _ => Ok(()),
+            }
+        };
+        let only_asked = |target: &Fake<'_>| match target.name {
+            "helper" => Ok(()),
+            _ => ask(target),
+        };
+
+        let outcomes = super::end(&held, Duration::from_secs(5), &only_asked);
+
+        assert_eq!(
+            outcomes,
+            [
+                (
+                    key(12),
+                    Outcome::Failed("it shows no window to close".into())
+                ),
+                (key(10), Outcome::Stopped),
+                (key(11), Outcome::StillRunning),
+            ]
+        );
+        assert_eq!(
+            *log.borrow(),
+            ["ask app", "ask window", "wait app", "wait helper"]
         );
     }
 

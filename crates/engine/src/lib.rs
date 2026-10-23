@@ -21,7 +21,7 @@ use serde::Serialize;
 pub use port::{PortReport, explain_port};
 pub use project::{Framework, Project};
 pub use stop::{
-    Held, Holding, Outcome, Refusal, Signals, Target, Waited, choose, force, hold_all, order,
+    Held, Holding, Outcome, Refusal, Signals, Target, Waited, choose, end, force, hold_all, order,
     recheck, stop,
 };
 
