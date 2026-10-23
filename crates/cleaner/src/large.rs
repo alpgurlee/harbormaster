@@ -6,8 +6,9 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::UNIX_EPOCH;
 
-use crate::walk::{self, Dir};
+use crate::walk::{self, Dir, Stat};
 use crate::{Finding, Group, Hunt, Identity, Kind, Measured, in_use, measure, projects};
 
 /// Folders deeper than this aren't looked into.
@@ -106,7 +107,7 @@ pub(crate) fn hunt(
     measured: &(dyn Fn(Measured) + Sync),
 ) -> io::Result<Vec<Finding>> {
     let home = Dir::open(hunt.home)?;
-    let device = home.metadata()?.st_dev;
+    let device = home.metadata()?.device;
     // Files right in the home folder are looked at here; each folder in it
     // is looked through on its own.
     let mut found = Vec::new();
@@ -163,7 +164,7 @@ pub(crate) fn hunt(
 fn looked(
     dir: &Dir,
     relative: &Path,
-    device: libc::dev_t,
+    device: u64,
     depth: usize,
     hunt: &Hunt,
     stop: &AtomicBool,
@@ -197,8 +198,8 @@ fn looked(
 }
 
 /// What is never looked at: a hidden name, a link, or another disk.
-fn passed_over(name: &OsStr, stat: &libc::stat, device: libc::dev_t) -> bool {
-    name.as_bytes().starts_with(b".") || walk::is_link(stat) || stat.st_dev != device
+fn passed_over(name: &OsStr, stat: &Stat, device: u64) -> bool {
+    name.as_bytes().starts_with(b".") || walk::is_link(stat) || stat.device != device
 }
 
 /// Whether a folder called `name` is looked into: not a package, nor the
@@ -211,9 +212,9 @@ fn entered(name: &OsStr) -> bool {
 /// The file `relative` from the home folder, stored as `stat`, if it is a
 /// regular file large enough to list. A file with other links is left out:
 /// trashing one of its names would free nothing.
-fn finding(hunt: &Hunt, relative: &Path, stat: &libc::stat) -> Option<Finding> {
-    let bytes = measure::blocks(stat);
-    if !walk::is_file(stat) || stat.st_nlink > 1 || bytes < hunt.smallest {
+fn finding(hunt: &Hunt, relative: &Path, stat: &Stat) -> Option<Finding> {
+    let bytes = stat.bytes;
+    if !walk::is_file(stat) || stat.may_have_other_names() || bytes < hunt.smallest {
         return None;
     }
     let name = relative.file_name()?;
@@ -226,7 +227,11 @@ fn finding(hunt: &Hunt, relative: &Path, stat: &libc::stat) -> Option<Finding> {
         path,
         bytes,
         picked: false,
-        touched: u64::try_from(stat.st_mtime).ok(),
+        touched: stat
+            .modified
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .map(|since| since.as_secs()),
         project: None,
         emptied: false,
         identity: Identity::of(stat),

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
-use crate::walk::{self, Dir};
+use crate::walk::{self, Dir, Stat};
 use crate::{Candidate, Group, Kind, Survey};
 
 /// How many folder levels below a root are looked at. Projects sit near the
@@ -75,7 +75,7 @@ struct Walk<'a> {
     stop: &'a AtomicBool,
     /// Folders already looked at, by disk and inode, so one reached twice,
     /// under nested roots or two spellings, is listed once.
-    walked: HashSet<(libc::dev_t, libc::ino_t)>,
+    walked: HashSet<(u64, u128)>,
     found: Vec<Candidate>,
 }
 
@@ -86,7 +86,7 @@ impl Walk<'_> {
         let Ok(own) = dir.metadata() else {
             return;
         };
-        if !self.walked.insert((own.st_dev, own.st_ino)) {
+        if !self.walked.insert((own.device, own.inode)) {
             return;
         }
         let Ok(entries) = dir.entries_while(|| !self.stopped()) else {
@@ -100,7 +100,7 @@ impl Walk<'_> {
             if self.stopped() {
                 return;
             }
-            if !walk::is_folder(stat) || stat.st_dev != own.st_dev {
+            if !walk::is_folder(stat) || stat.device != own.device {
                 continue;
             }
             let Ok(Some(child)) = dir.child_if_same(name, stat) else {
@@ -120,12 +120,7 @@ impl Walk<'_> {
     /// newest change to the folder, to anything directly inside it, or inside
     /// its `.git` folder, which every commit and checkout changes. Unknown
     /// when any of that can't be read.
-    fn last_touched(
-        &self,
-        dir: &Dir,
-        own: &libc::stat,
-        entries: &[(OsString, libc::stat)],
-    ) -> Option<u64> {
+    fn last_touched(&self, dir: &Dir, own: &Stat, entries: &[(OsString, Stat)]) -> Option<u64> {
         let mut newest = modified(own);
         for (_, stat) in entries {
             newest = newest.max(modified(stat));
@@ -181,6 +176,8 @@ fn hidden(name: &OsStr) -> bool {
     name.as_bytes().starts_with(b".")
 }
 
-fn modified(stat: &libc::stat) -> u64 {
-    u64::try_from(stat.st_mtime).unwrap_or(0)
+fn modified(stat: &Stat) -> u64 {
+    stat.modified
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
 }

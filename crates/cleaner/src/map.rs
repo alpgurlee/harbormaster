@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::walk::{self, Dir};
-use crate::{Area, Chart, Charting, Identity, Short, measure};
+use crate::walk::{self, Dir, Stat};
+use crate::{Area, Chart, Charting, Identity, Short};
 
 /// The most places shown inside one folder; the others are counted together.
 const SHOWN_INSIDE: usize = 50;
@@ -50,7 +50,7 @@ fn charted(
         told,
         kept,
         tell_every,
-        device: stat.st_dev,
+        device: stat.device,
         linked: HashSet::new(),
         bytes: 0,
         items: 0,
@@ -67,9 +67,9 @@ struct Walker<'a> {
     told: &'a mut dyn FnMut(Charting),
     kept: usize,
     tell_every: Duration,
-    device: libc::dev_t,
+    device: u64,
     /// Files with more than one name, so each is counted once.
-    linked: HashSet<(libc::dev_t, libc::ino_t)>,
+    linked: HashSet<(u64, u128)>,
     bytes: u64,
     items: u64,
     last: Instant,
@@ -81,8 +81,8 @@ impl Walker<'_> {
     /// is read, folders as they are gone through, and each keeps no more
     /// places below it than the map may, so only what may be shown is held:
     /// never a whole listing, nor all of a wide folder's depths.
-    fn folder(&mut self, dir: &Dir, relative: &Path, stat: &libc::stat, depth: usize) -> Area {
-        let mut area = self.area(relative, stat, measure::blocks(stat));
+    fn folder(&mut self, dir: &Dir, relative: &Path, stat: &Stat, depth: usize) -> Area {
+        let mut area = self.area(relative, stat, stat.bytes);
         self.counted(area.bytes, relative);
         if self.stopped() {
             area.short = Some(Short::Stopped);
@@ -94,7 +94,7 @@ impl Walker<'_> {
         }
         let stop = self.stop;
         let listed = dir.each_seen(|| !stop.load(Ordering::Relaxed), &mut |name, stat| {
-            if stat.st_dev != self.device {
+            if stat.device != self.device {
                 return;
             }
             let below = relative.join(name);
@@ -102,8 +102,9 @@ impl Walker<'_> {
                 self.inner(dir, name, &below, stat, depth)
             } else {
                 // A file with more names takes its room once, under the first one met.
-                let again = stat.st_nlink > 1 && !self.linked.insert((stat.st_dev, stat.st_ino));
-                let bytes = if again { 0 } else { measure::blocks(stat) };
+                let again =
+                    stat.may_have_other_names() && !self.linked.insert((stat.device, stat.inode));
+                let bytes = if again { 0 } else { stat.bytes };
                 self.counted(bytes, &below);
                 self.area(&below, stat, bytes)
             };
@@ -122,14 +123,7 @@ impl Walker<'_> {
 
     /// The folder `name` inside `dir`, gone through unless it is other
     /// apps' data not asked for, or can't be.
-    fn inner(
-        &mut self,
-        dir: &Dir,
-        name: &OsStr,
-        below: &Path,
-        stat: &libc::stat,
-        depth: usize,
-    ) -> Area {
+    fn inner(&mut self, dir: &Dir, name: &OsStr, below: &Path, stat: &Stat, depth: usize) -> Area {
         let other_apps =
             !self.chart.others && OTHER_APPS.iter().any(|path| below == Path::new(path));
         let short = if other_apps {
@@ -143,7 +137,7 @@ impl Walker<'_> {
                 Err(error) => unopened(&error),
             }
         };
-        let bytes = measure::blocks(stat);
+        let bytes = stat.bytes;
         self.counted(bytes, below);
         Area {
             short: Some(short),
@@ -151,7 +145,7 @@ impl Walker<'_> {
         }
     }
 
-    fn area(&self, relative: &Path, stat: &libc::stat, bytes: u64) -> Area {
+    fn area(&self, relative: &Path, stat: &Stat, bytes: u64) -> Area {
         // Joining nothing would add a slash to the home folder's path.
         let path = if relative.as_os_str().is_empty() {
             self.chart.home.to_path_buf()
@@ -198,9 +192,10 @@ impl Walker<'_> {
 /// Why a folder listed a moment ago couldn't be opened: gone since, or made
 /// something else, or kept from us.
 fn unopened(error: &io::Error) -> Short {
-    match error.raw_os_error() {
-        Some(libc::ENOENT | libc::ELOOP | libc::ENOTDIR) => Short::Changed,
-        _ => Short::Denied,
+    if walk::changed(error) {
+        Short::Changed
+    } else {
+        Short::Denied
     }
 }
 

@@ -8,7 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::walk::{self, Dir};
+use crate::walk::{self, Dir, Stat};
 use crate::{Candidate, Finding, Group, Kind, Measured, Reach, in_use, measure};
 
 /// Flags that lock a file against being moved or changed.
@@ -67,8 +67,8 @@ fn shelved(
     stop: &AtomicBool,
 ) -> io::Result<Vec<Candidate>> {
     let keep_going = || !stop.load(Ordering::Relaxed);
-    let device = root.metadata()?.st_dev;
-    let here = |stat: &libc::stat| walk::is_folder(stat) && stat.st_dev == device;
+    let device = root.metadata()?.device;
+    let here = |stat: &Stat| walk::is_folder(stat) && stat.device == device;
     let mut found = Vec::new();
     for (name, stat) in root.entries_while(keep_going)? {
         if !here(&stat) {
@@ -96,7 +96,7 @@ fn shelved(
 fn candidate(
     dir: &Dir,
     relative: &Path,
-    stat: &libc::stat,
+    stat: &Stat,
     folder: &Path,
     busy: &[(PathBuf, String)],
 ) -> Option<Candidate> {
@@ -134,10 +134,10 @@ pub(crate) fn eligible(bundle: &Dir) -> io::Result<bool> {
 
 /// Whether the user may move what `stat` describes: it is theirs, and not
 /// locked against change.
-fn owned(stat: &libc::stat) -> bool {
+fn owned(stat: &Stat) -> bool {
     // SAFETY: getuid has no preconditions.
     let user = unsafe { libc::getuid() };
-    stat.st_uid == user && stat.st_flags & LOCKED == 0
+    stat.owner == user && stat.flags & LOCKED == 0
 }
 
 fn is_bundle(name: &OsStr) -> bool {
@@ -157,16 +157,23 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicBool;
 
+    use std::time::UNIX_EPOCH;
+
     use super::{SF_NOUNLINK, SF_RESTRICTED, is_bundle, owned, shelved};
     use crate::measure;
-    use crate::walk::Dir;
+    use crate::walk::{Dir, FileType, Stat};
 
-    fn stat(uid: libc::uid_t, flags: u32) -> libc::stat {
-        // SAFETY: a stat is plain integers, for which zero is valid.
-        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-        stat.st_uid = uid;
-        stat.st_flags = flags;
-        stat
+    fn stat(owner: libc::uid_t, flags: u32) -> Stat {
+        Stat {
+            kind: FileType::Folder,
+            device: 1,
+            inode: 1,
+            links: Some(1),
+            bytes: 0,
+            modified: UNIX_EPOCH,
+            owner,
+            flags,
+        }
     }
 
     #[test]

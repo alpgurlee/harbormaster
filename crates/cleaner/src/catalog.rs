@@ -3,6 +3,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::SystemTime;
 
 use crate::walk::{self, Dir};
 use crate::{Candidate, Group, Kind};
@@ -229,17 +230,12 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
 
 /// The real folders inside `dir`, with when each last changed; links and
 /// files are left out, as are names that aren't valid text.
-fn folders(dir: &Dir, stop: &AtomicBool) -> Vec<(String, (i64, i64))> {
+fn folders(dir: &Dir, stop: &AtomicBool) -> Vec<(String, SystemTime)> {
     dir.entries_while(|| !stop.load(Ordering::Relaxed))
         .unwrap_or_default()
         .into_iter()
         .filter(|(_, stat)| walk::is_folder(stat))
-        .filter_map(|(name, stat)| {
-            Some((
-                name.into_string().ok()?,
-                (stat.st_mtime, stat.st_mtime_nsec),
-            ))
-        })
+        .filter_map(|(name, stat)| Some((name.into_string().ok()?, stat.modified)))
         .collect()
 }
 

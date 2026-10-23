@@ -2,6 +2,7 @@
 //! build outputs of projects left alone, logs, and the Trash. A scan only
 //! looks; removal takes what the user confirmed, checking each item again.
 
+#[cfg(target_os = "macos")]
 mod apps;
 mod catalog;
 mod large;
@@ -130,16 +131,16 @@ pub struct Finding {
 /// which nothing on disk matches.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Identity {
-    device: libc::dev_t,
-    inode: libc::ino_t,
+    device: u64,
+    inode: u128,
     pub(crate) folder: bool,
 }
 
 impl Identity {
-    pub(crate) fn of(stat: &libc::stat) -> Self {
+    pub(crate) fn of(stat: &walk::Stat) -> Self {
         Self {
-            device: stat.st_dev,
-            inode: stat.st_ino,
+            device: stat.device,
+            inode: stat.inode,
             folder: walk::is_folder(stat),
         }
     }
@@ -466,6 +467,7 @@ pub fn map(chart: &Chart, stop: &AtomicBool, told: &mut dyn FnMut(Charting)) -> 
 /// Store's do, or is locked, is left out, as is anything reached through a
 /// link or without its Info.plist. One a process of `busy` runs from is in
 /// use. `measured` hears after each app is measured; `stop` cuts it short.
+#[cfg(target_os = "macos")]
 pub fn apps(
     reach: &Reach,
     busy: &[(PathBuf, String)],

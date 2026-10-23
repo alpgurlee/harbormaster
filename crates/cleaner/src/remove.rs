@@ -197,7 +197,7 @@ fn deleted(
     stop: &AtomicBool,
 ) -> io::Result<Outcome> {
     let own = dir.metadata()?;
-    empty(dir, own.st_dev, 0, stop)?;
+    empty(dir, own.device, 0, stop)?;
     if !emptied {
         parent.unlink(name, true)?;
     }
@@ -207,7 +207,7 @@ fn deleted(
 /// Removes everything inside `dir`, staying on `device` and never following
 /// a link: a link goes, what it points to stays. A folder goes once it is
 /// empty. Anything out of the ordinary stops this finding.
-fn empty(dir: &Dir, device: libc::dev_t, depth: usize, stop: &AtomicBool) -> io::Result<()> {
+fn empty(dir: &Dir, device: u64, depth: usize, stop: &AtomicBool) -> io::Result<()> {
     if depth >= DEEPEST {
         return Err(io::Error::other("the folder goes deeper than is removed"));
     }
@@ -215,7 +215,7 @@ fn empty(dir: &Dir, device: libc::dev_t, depth: usize, stop: &AtomicBool) -> io:
         if stop.load(Ordering::Relaxed) {
             return Err(io::ErrorKind::Interrupted.into());
         }
-        if stat.st_dev != device {
+        if stat.device != device {
             return Err(io::Error::other("reaches onto another disk"));
         }
         let folder = walk::is_folder(&stat);

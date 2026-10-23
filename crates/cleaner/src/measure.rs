@@ -6,7 +6,9 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::walk::{self, Dir};
-use crate::{Candidate, Finding, Group, Identity, Measured, apps};
+use crate::{Candidate, Finding, Identity, Measured};
+#[cfg(target_os = "macos")]
+use crate::{Group, apps};
 
 /// The most places measured at once.
 const WORKERS: usize = 4;
@@ -38,6 +40,7 @@ pub(crate) fn all(
                             break;
                         };
                         let sized = home.descend(&candidate.relative).and_then(|dir| {
+                            #[cfg(target_os = "macos")]
                             if candidate.group == Group::Applications && !apps::eligible(&dir)? {
                                 return Err(io::Error::other("no longer an app of the user's"));
                             }
@@ -86,6 +89,7 @@ pub(crate) fn all(
 }
 
 /// As many workers as the open-file limit leaves room for.
+#[cfg(unix)]
 pub(crate) fn workers() -> usize {
     let mut limit = MaybeUninit::<libc::rlimit>::uninit();
     // SAFETY: `limit` has room for one rlimit, which getrlimit fills on success.
@@ -109,14 +113,14 @@ fn workers_for(open_files: u64) -> usize {
 /// a folder it can't read.
 pub(crate) fn size(dir: &Dir, stop: &AtomicBool) -> io::Result<u64> {
     let top = dir.metadata()?;
-    Ok(blocks(&top) + below(dir, top.st_dev, 0, &mut HashSet::new(), stop)?)
+    Ok(top.bytes + below(dir, top.device, 0, &mut HashSet::new(), stop)?)
 }
 
 fn below(
     dir: &Dir,
-    device: libc::dev_t,
+    device: u64,
     depth: usize,
-    linked: &mut HashSet<u64>,
+    linked: &mut HashSet<u128>,
     stop: &AtomicBool,
 ) -> io::Result<u64> {
     if stop.load(Ordering::Relaxed) {
@@ -131,26 +135,22 @@ fn below(
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        if walk::is_link(&stat) || stat.st_dev != device {
+        if walk::is_link(&stat) || stat.device != device {
             continue;
         }
         if walk::is_folder(&stat) {
             let Some(child) = dir.child_if_same(&name, &stat)? else {
                 continue;
             };
-            total += blocks(&stat) + below(&child, device, depth + 1, linked, stop)?;
-        } else if stat.st_nlink <= 1 || linked.insert(stat.st_ino) {
-            total += blocks(&stat);
+            total += stat.bytes + below(&child, device, depth + 1, linked, stop)?;
+        } else if !stat.may_have_other_names() || linked.insert(stat.inode) {
+            total += stat.bytes;
         }
     }
     if stop.load(Ordering::Relaxed) {
         return Err(io::ErrorKind::Interrupted.into());
     }
     Ok(total)
-}
-
-pub(crate) fn blocks(stat: &libc::stat) -> u64 {
-    u64::try_from(stat.st_blocks).unwrap_or(0) * 512
 }
 
 #[cfg(test)]
