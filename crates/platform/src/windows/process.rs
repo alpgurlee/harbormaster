@@ -453,16 +453,9 @@ pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
             if let Ok(readable) = readable {
                 paths.extend(parameters::working_folder(&readable).known().cloned());
             }
-            let program = std::path::Path::new(&entry.name);
-            let name = match program.extension() {
-                Some(extension) if extension.eq_ignore_ascii_case("exe") => program.file_stem(),
-                _ => None,
-            };
             Some(Whereabouts {
                 key: entry.key,
-                name: name.map_or(entry.name.clone(), |name| {
-                    name.to_string_lossy().into_owned()
-                }),
+                name: program_name(&entry.name),
                 paths: paths
                     .into_iter()
                     .map(|path| super::canonical(&path).unwrap_or(path))
@@ -470,6 +463,18 @@ pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
             })
         })
         .collect())
+}
+
+/// A process's name as people call the program: without `.exe`, however
+/// that is written.
+fn program_name(listed: &str) -> String {
+    let program = std::path::Path::new(listed);
+    match (program.extension(), program.file_stem()) {
+        (Some(extension), Some(stem)) if extension.eq_ignore_ascii_case("exe") => {
+            stem.to_string_lossy().into_owned()
+        }
+        _ => listed.to_owned(),
+    }
 }
 
 pub(crate) fn executable_of(key: ProcessKey) -> Field<PathBuf> {
@@ -547,7 +552,7 @@ pub(crate) fn signal(_key: ProcessKey, _signal: Signal) -> SignalOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{TICKS_BEFORE_1970, keep_true_parents, name, start_time};
+    use super::{TICKS_BEFORE_1970, keep_true_parents, name, program_name, start_time};
     use crate::{Owner, Pid, ProcessEntry, ProcessKey, StartTime};
 
     fn started(pid: u32, start: u64, parent: u32) -> ProcessEntry {
@@ -585,6 +590,15 @@ mod tests {
         text.encode_utf16()
             .chain(std::iter::repeat_n(0, 4))
             .collect()
+    }
+
+    #[test]
+    fn calls_a_program_without_exe_however_it_is_written() {
+        assert_eq!(program_name("node.exe"), "node");
+        assert_eq!(program_name("JAVA.EXE"), "JAVA");
+        assert_eq!(program_name("Code.Exe"), "Code");
+        assert_eq!(program_name("System"), "System");
+        assert_eq!(program_name("notes.txt"), "notes.txt");
     }
 
     #[test]
