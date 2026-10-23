@@ -50,10 +50,19 @@ fn lists_what_listens_as_json() {
 }
 
 #[test]
-fn has_no_way_yet_to_stop_or_clean() {
-    for command in ["stop", "clean"] {
-        let output = harbormaster(&[command, "--help"]);
+fn has_no_way_yet_to_stop_from_the_command_line() {
+    let output = harbormaster(&["stop", "--help"]);
 
-        assert_ne!(output.status.code(), Some(0), "{command}: {output:?}");
-    }
+    assert_ne!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[test]
+fn shows_what_could_go_without_removing_anything() {
+    let output = harbormaster(&["clean", "--json"]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let document: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the listing should be JSON");
+    assert!(document["findings"].is_array(), "{document}");
+    assert!(document.get("cleaned").is_none(), "{document}");
 }
