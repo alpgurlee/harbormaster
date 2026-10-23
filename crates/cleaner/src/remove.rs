@@ -271,13 +271,11 @@ fn trashed(
 
 #[cfg(test)]
 mod tests {
+    use super::all;
+    use crate::walk::Dir;
+    use crate::{Outcome, Reach, Usage};
     use std::fs;
     use std::sync::atomic::AtomicBool;
-    use std::time::{Duration, SystemTime};
-
-    use super::{Roots, all, one};
-    use crate::walk::Dir;
-    use crate::{Outcome, Reach, Survey, Usage, scan};
 
     #[test]
     fn stops_before_deleting_anything_when_told_while_listing() {
@@ -321,7 +319,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn moves_nothing_to_the_trash_once_told_to_stop() {
+        use std::time::{Duration, SystemTime};
+
+        use super::{Roots, one};
+        use crate::{Survey, scan};
+
         let place = tempfile::tempdir().unwrap();
         let home = place.path().canonicalize().unwrap();
         let archive = home.join("Library/Developer/Xcode/Archives/2026-09-20");
