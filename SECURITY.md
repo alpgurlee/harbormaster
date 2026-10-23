@@ -27,6 +27,10 @@ It can end processes and delete files, so both go through checks first:
   with whatever it holds by then, files added since the scan included. What may be yours to keep is
   never chosen for you and goes to the Trash; everything else, the Trash's contents included, is
   deleted for good.
+- The cleaner never follows a link. Each folder is opened one name at a time from the one above it, and
+  a link in its place is refused: on Windows that is any reparse point, so junctions, mount points and
+  files kept in the cloud are never entered, and one inside a folder being removed goes by itself,
+  leaving what it points to.
 
 ## Known limits
 
@@ -37,6 +41,13 @@ It can end processes and delete files, so both go through checks first:
   the check of who it is until it has ended, so no other process can take its PID in between. Right
   before an app's window is asked to close, it is checked to still belong to the approved process; in
   the moment between, the window could close and its handle pass to another program's window.
+- On Windows the cleaner can't read what files a program has open, as it can on macOS. It reads each of
+  your programs' working folder and where it runs from, and takes a cache to be in use while the tool
+  it belongs to runs: Cargo's while `cargo` or `rustc` does, Gradle's while a Gradle daemon does.
+  Programs run by Node, such as npm, can't be told apart by name. Windows itself won't delete a file
+  a program opened without letting others delete it, so removing a folder stops there and reports the
+  folder as failed, with whatever was removed before it gone. A working folder is read only on x64
+  Windows; elsewhere only where a program runs from is known.
 - Command lines are shown with likely secrets hidden: the value of every `NAME=value` word; the value
   of a flag or header whose name mentions a credential, such as a token, secret, password, auth, cookie,
   or API or access key; a URL's user info, and query or fragment values under such names or named
