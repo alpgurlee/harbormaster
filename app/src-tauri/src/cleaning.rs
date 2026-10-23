@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+#[cfg(target_os = "macos")]
+use harbormaster_cleaner::{Area, Chart, Charting, Hunt};
 use harbormaster_cleaner::{
-    Area, Chart, Charting, Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal,
-    Survey, Usage, Why,
+    Cleaned, Finding, Group, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
 };
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
@@ -19,6 +20,7 @@ use serde::Serialize;
 use crate::scanning;
 
 /// The least room a file takes to be listed as large: 50 MB, as the window says.
+#[cfg(target_os = "macos")]
 const LARGE_FROM: u64 = 50 * 1024 * 1024;
 
 /// What a scan tells the window as it goes.
@@ -94,6 +96,7 @@ pub(crate) enum RunEvent {
 }
 
 /// What a map tells the window as it goes.
+#[cfg(target_os = "macos")]
 #[derive(Debug, Serialize)]
 #[serde(
     tag = "kind",
@@ -124,6 +127,7 @@ pub(crate) enum Refusal {
     /// The window asked for something that scan didn't list.
     Unlisted,
     /// What the window names isn't what was found there any more.
+    #[cfg(target_os = "macos")]
     Changed,
     Failed {
         message: String,
@@ -144,11 +148,13 @@ struct Ledger {
     shown: Option<Shown>,
     /// The last map, kept whole so its places can be shown in Finder; none
     /// of them is ever taken to be removed.
+    #[cfg(target_os = "macos")]
     map: Option<Mapped>,
     working: bool,
 }
 
 /// A map shown to the window, under the token it holds.
+#[cfg(target_os = "macos")]
 #[derive(Debug)]
 struct Mapped {
     token: u64,
@@ -365,6 +371,7 @@ impl Cleaning {
 
     /// Keeps `root` as the map shown from now on, in place of the last,
     /// and gives the token that showing its places in Finder takes.
+    #[cfg(target_os = "macos")]
     fn keep_map(&self, root: Area) -> u64 {
         let mut ledger = self.lock();
         ledger.last += 1;
@@ -375,6 +382,7 @@ impl Cleaning {
 
     /// Where the place `id` of the map under `token` is, if it is still
     /// what the map found there. The home folder itself isn't one of them.
+    #[cfg(target_os = "macos")]
     pub(crate) fn mapped(&self, token: u64, id: u32) -> Result<PathBuf, Refusal> {
         let (home, path, identity) = {
             let ledger = self.lock();
@@ -437,6 +445,7 @@ impl Working {
     }
 
     /// Hunts for this user's large files, telling `told` as it goes.
+    #[cfg(target_os = "macos")]
     pub(crate) fn hunt(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
@@ -462,6 +471,7 @@ impl Working {
 
     /// Maps this user's home folder, and other apps' data in it when
     /// `others` asks, telling `told` as it goes.
+    #[cfg(target_os = "macos")]
     pub(crate) fn map(&self, others: bool, told: &mut dyn FnMut(MapEvent)) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
@@ -564,6 +574,7 @@ fn stayed(chosen: Vec<Finding>, removals: &[Removal]) -> Vec<Finding> {
 }
 
 /// The place numbered `id`, `area` or one below it.
+#[cfg(target_os = "macos")]
 fn place(area: &Area, id: u32) -> Option<&Area> {
     if area.id == id {
         return Some(area);
@@ -649,20 +660,22 @@ fn failed(error: impl Display) -> Refusal {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::Ordering;
 
+    #[cfg(target_os = "macos")]
+    use harbormaster_cleaner::{Area, Chart, Charting};
     use harbormaster_cleaner::{
-        Area, Chart, Charting, Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal,
-        Why,
+        Cleaned, Finding, Group, Identity, Kind, Measured, Outcome, Removal, Why,
     };
 
     use std::time::Duration;
 
+    #[cfg(target_os = "macos")]
+    use super::MapEvent;
     use super::{
-        Cleaning, Listed, MapEvent, Refusal, RunEvent, ScanEvent, Search, idle_after,
-        roots_or_usual, stayed,
+        Cleaning, Listed, Refusal, RunEvent, ScanEvent, Search, idle_after, roots_or_usual, stayed,
     };
 
     fn finding(path: &str) -> Finding {
@@ -713,6 +726,7 @@ mod tests {
     }
 
     /// A home folder holding one large film, under its real path.
+    #[cfg(target_os = "macos")]
     fn home_with_a_film() -> (tempfile::TempDir, PathBuf) {
         let place = tempfile::tempdir().unwrap();
         let home = place.path().canonicalize().unwrap();
@@ -721,15 +735,18 @@ mod tests {
         (place, home)
     }
 
-    fn mapped(home: &Path) -> Area {
+    #[cfg(target_os = "macos")]
+    fn mapped(home: &std::path::Path) -> Area {
         let chart = Chart {
             home,
             others: false,
         };
-        harbormaster_cleaner::map(&chart, &AtomicBool::new(false), &mut |_| {}).unwrap()
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        harbormaster_cleaner::map(&chart, &stop, &mut |_| {}).unwrap()
     }
 
     /// The number of the place at `names` down from `area`.
+    #[cfg(target_os = "macos")]
     fn id(area: &Area, names: &[&str]) -> u32 {
         names
             .iter()
@@ -740,6 +757,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn shows_in_finder_only_a_place_of_the_last_map_still_as_it_was() {
         let (_place, home) = home_with_a_film();
         let cleaning = Cleaning::default();
@@ -761,6 +779,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn lets_a_new_map_replace_the_last() {
         let (_place, home) = home_with_a_film();
         let cleaning = Cleaning::default();
@@ -775,6 +794,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn never_takes_a_mapped_place_for_removal() {
         let (_place, home) = home_with_a_film();
         let cleaning = Cleaning::default();
@@ -795,6 +815,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn never_shows_in_finder_a_path_finder_would_be_told_another_way() {
         let cleaning = Cleaning::default();
         let place = |id, path: PathBuf, inside| Area {
@@ -1208,32 +1229,7 @@ mod tests {
                 apps_listed: false,
             },
         };
-        let charting = MapEvent::Charting(Charting {
-            bytes: 8,
-            items: 2,
-            folder: "Library/Caches".into(),
-        });
-        let (_place, home) = home_with_a_film();
-        let mut area = mapped(&home);
-        area.inside.clear();
-        area.bytes = 6;
-        area.rest = 6;
-        area.short = None;
-        let charted = MapEvent::Done { token: 6, area };
         let json = |value: serde_json::Result<serde_json::Value>| value.unwrap();
-        assert_eq!(
-            json(serde_json::to_value(charting)),
-            serde_json::json!({"kind": "charting", "bytes": 8, "items": 2, "folder": "Library/Caches"})
-        );
-        let name = home.file_name().unwrap().to_str().unwrap();
-        assert_eq!(
-            json(serde_json::to_value(charted)),
-            serde_json::json!({"kind": "done", "token": 6, "area": {"id": 0, "name": name, "bytes": 6, "folder": true, "short": null, "inside": [], "rest": 6, "folded": false}})
-        );
-        assert_eq!(
-            json(serde_json::to_value(Refusal::Changed)),
-            serde_json::json!({"code": "changed"})
-        );
         assert_eq!(
             json(serde_json::to_value(failed)),
             serde_json::json!({"kind": "failed", "refusal": {"code": "failed", "message": "no disk"}, "token": 5, "findings": [], "scanned": true, "hunted": true, "appsListed": false})
@@ -1263,6 +1259,37 @@ mod tests {
         assert_eq!(
             json(serde_json::to_value(Refusal::Unlisted)),
             serde_json::json!({"code": "unlisted"})
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn tells_the_window_of_its_map_as_it_expects() {
+        let charting = MapEvent::Charting(Charting {
+            bytes: 8,
+            items: 2,
+            folder: "Library/Caches".into(),
+        });
+        let (_place, home) = home_with_a_film();
+        let mut area = mapped(&home);
+        area.inside.clear();
+        area.bytes = 6;
+        area.rest = 6;
+        area.short = None;
+        let charted = MapEvent::Done { token: 6, area };
+        let json = |value: serde_json::Result<serde_json::Value>| value.unwrap();
+        assert_eq!(
+            json(serde_json::to_value(charting)),
+            serde_json::json!({"kind": "charting", "bytes": 8, "items": 2, "folder": "Library/Caches"})
+        );
+        let name = home.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            json(serde_json::to_value(charted)),
+            serde_json::json!({"kind": "done", "token": 6, "area": {"id": 0, "name": name, "bytes": 6, "folder": true, "short": null, "inside": [], "rest": 6, "folded": false}})
+        );
+        assert_eq!(
+            json(serde_json::to_value(Refusal::Changed)),
+            serde_json::json!({"code": "changed"})
         );
     }
 
