@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, Machine, age, link_folder, machine, node_project, reach, write};
 #[cfg(target_os = "macos")]
-use common::{MIB, set_mode};
+use common::set_mode;
+use common::{DAY, MIB, Machine, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
     Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, Usage, Why, remove, scan,
 };
@@ -101,10 +101,9 @@ fn deletes_a_build_output_folder_and_nothing_beside_it() {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
 fn empties_a_cache_but_keeps_its_folder() {
     let machine = machine();
-    let cache = machine.home.join(".npm/_cacache");
+    let cache = machine.home.join(NPM);
     write(&cache.join("content-v2/a"), &vec![1; 2 * MIB]);
     write(&cache.join("index-v5/b"), b"x");
 

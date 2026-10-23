@@ -11,6 +11,11 @@ use std::time::{Duration, SystemTime};
 pub const MIB: usize = 1024 * 1024;
 pub const DAY: Duration = Duration::from_secs(86_400);
 pub const TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55\n# a cache\n";
+/// Where npm keeps its downloads, from the home folder.
+#[cfg(unix)]
+pub const NPM: &str = ".npm/_cacache";
+#[cfg(windows)]
+pub const NPM: &str = r"AppData\Local\npm-cache\_cacache";
 
 /// A temp folder standing in for a home folder, under its real path: temp
 /// folders sit under `/var`, a link to `/private/var`, and the cleaner only

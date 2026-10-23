@@ -1,5 +1,5 @@
-//! The places a developer's Mac fills with things its tools rebuild, written
-//! from each tool's own documentation.
+//! The places a developer's machine fills with things its tools rebuild,
+//! written from each tool's own documentation.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +21,6 @@ struct Place {
     keep_latest: bool,
 }
 
-#[cfg(target_os = "macos")]
 const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
     Place {
         group,
@@ -150,8 +149,87 @@ const PLACES: &[Place] = &[
     },
 ];
 
-#[cfg(not(target_os = "macos"))]
-const PLACES: &[Place] = &[];
+/// Only what each tool downloads or builds for itself. What can't be had
+/// again, such as Maven's installed jars, waits for the Recycle Bin; apps'
+/// caches wait for a way to tell the app is closed, as Windows won't remove
+/// what an app has open.
+#[cfg(windows)]
+const PLACES: &[Place] = &[
+    whole(Group::Packages, "npm", r"AppData\Local\npm-cache\_cacache"),
+    whole(Group::Packages, "npx", r"AppData\Local\npm-cache\_npx"),
+    whole(Group::Packages, "pnpm", r"AppData\Local\pnpm\store"),
+    whole(
+        Group::Packages,
+        "pnpm metadata",
+        r"AppData\Local\pnpm-cache",
+    ),
+    whole(Group::Packages, "Yarn", r"AppData\Local\Yarn\Cache"),
+    whole(
+        Group::Packages,
+        "Yarn Berry",
+        r"AppData\Local\Yarn\Berry\cache",
+    ),
+    whole(Group::Packages, "Bun", r".bun\install\cache"),
+    whole(Group::Packages, "pip", r"AppData\Local\pip\Cache"),
+    whole(Group::Packages, "uv", r"AppData\Local\uv\cache"),
+    whole(Group::Packages, "Poetry", r"AppData\Local\pypoetry\Cache"),
+    whole(Group::Packages, "Cargo", r".cargo\registry\cache"),
+    whole(Group::Packages, "Cargo sources", r".cargo\registry\src"),
+    whole(Group::Packages, "Cargo git", r".cargo\git\checkouts"),
+    whole(Group::Packages, "Go build cache", r"AppData\Local\go-build"),
+    whole(Group::Packages, "Composer", r"AppData\Local\Composer"),
+    // Only what pub downloaded: its bin and global_packages are tools the user activated.
+    whole(
+        Group::Packages,
+        "Dart packages",
+        r"AppData\Local\Pub\Cache\hosted",
+    ),
+    whole(
+        Group::Packages,
+        "Dart git packages",
+        r"AppData\Local\Pub\Cache\git",
+    ),
+    // Only what Deno downloaded or compiled: location_data holds what programs stored.
+    whole(
+        Group::Packages,
+        "Deno modules",
+        r"AppData\Local\deno\remote",
+    ),
+    whole(
+        Group::Packages,
+        "Deno npm packages",
+        r"AppData\Local\deno\npm",
+    ),
+    whole(
+        Group::Packages,
+        "Deno compiled code",
+        r"AppData\Local\deno\gen",
+    ),
+    // What NuGet fetched over HTTP; the packages builds use stay.
+    whole(
+        Group::Packages,
+        "NuGet downloads",
+        r"AppData\Local\NuGet\v3-cache",
+    ),
+    whole(Group::Packages, "Gradle", r".gradle\caches"),
+    whole(
+        Group::Packages,
+        "Gradle distributions",
+        r".gradle\wrapper\dists",
+    ),
+    whole(Group::Packages, "node-gyp", r"AppData\Local\node-gyp\Cache"),
+    whole(Group::Packages, "Next.js SWC", r"AppData\Local\next-swc"),
+    whole(
+        Group::Packages,
+        "TypeScript",
+        r"AppData\Local\Microsoft\TypeScript",
+    ),
+    whole(
+        Group::Packages,
+        "Playwright browsers",
+        r"AppData\Local\ms-playwright",
+    ),
+];
 
 /// Where apps keep caches, each in a folder named after the app.
 #[cfg(target_os = "macos")]

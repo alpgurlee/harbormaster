@@ -36,6 +36,9 @@ const USUAL_ROOTS: &[&str] = &[
     "repos",
     "work",
 ];
+/// Where Visual Studio and GitHub Desktop put projects on Windows.
+#[cfg(windows)]
+const WINDOWS_ROOTS: &[&str] = &["source", r"Documents\GitHub"];
 
 /// How the cleaner window groups what it finds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -554,8 +557,11 @@ fn within(path: &Path, folder: &Path) -> bool {
 
 /// The usual project folders that exist under `home`.
 pub fn usual_roots(home: &Path) -> Vec<PathBuf> {
-    USUAL_ROOTS
-        .iter()
+    #[cfg(windows)]
+    let usual = USUAL_ROOTS.iter().chain(WINDOWS_ROOTS);
+    #[cfg(not(windows))]
+    let usual = USUAL_ROOTS.iter();
+    usual
         .map(|name| home.join(name))
         .filter(|root| root.is_dir())
         .collect()

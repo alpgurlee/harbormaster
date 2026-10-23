@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, MIB, Machine, TAG, age, machine, node_project, write};
+use common::{DAY, MIB, Machine, NPM, TAG, age, machine, node_project, write};
 use harbormaster_cleaner::{Finding, Group, Survey, scan};
 
 fn survey(
@@ -81,15 +81,14 @@ fn takes_a_rust_target_only_when_it_says_it_is_a_cache() {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
 fn never_picks_what_a_process_is_using() {
     let machine = machine();
     let project = node_project(&machine, "busy");
     age(&project, 60 * DAY);
-    write(&machine.home.join(".npm/_cacache/a"), &vec![1; 2 * MIB]);
+    write(&machine.home.join(NPM).join("a"), &vec![1; 2 * MIB]);
     let busy = [
         (project.join("src/index.ts"), "code".to_string()),
-        (machine.home.join(".npm/_cacache/a"), "node".to_string()),
+        (machine.home.join(NPM).join("a"), "node".to_string()),
     ];
 
     let findings = survey(&machine, &busy, &[]);
