@@ -112,6 +112,11 @@ export interface Messages {
   quitGone: string;
   quitChanged: string;
   wontQuit: string;
+  closeApp: string;
+  closeTitle: string;
+  closeHowApp: string;
+  closeWindows: string;
+  closing: string;
   cleanLooking: string;
   cleanMeasured: string;
   cleanFoundSoFar: string;
@@ -380,6 +385,12 @@ export const en: Messages = {
   quitGone: "{name} isn't running anymore.",
   quitChanged: "It changed since you looked. Look again before quitting it.",
   wontQuit: "Harbormaster won't quit this: {reason}.",
+  closeApp: "Close {name}",
+  closeTitle: "Close {name}?",
+  closeHowApp:
+    "Each of {name}'s windows is asked to close, as its close button would. It may ask you to save first, or stay open.",
+  closeWindows: "Close windows",
+  closing: "Closing…",
   cleanLooking: "Looking for projects and caches…",
   cleanMeasured: "Measured {done} of {total} places",
   cleanFoundSoFar: "{bytes} found so far",
@@ -654,6 +665,12 @@ export const tr: Messages = {
   quitGone: "{name} artık çalışmıyor.",
   quitChanged: "Sen baktıktan sonra değişti. Kapatmadan önce yeniden bak.",
   wontQuit: "Harbormaster bunu kapatmaz: {reason}.",
+  closeApp: "Kapat: {name}",
+  closeTitle: "{name} kapatılsın mı?",
+  closeHowApp:
+    "{name} uygulamasının her penceresine, kapat düğmesine basılmış gibi kapanması söylenir. Önce kaydetmek isteyip istemediğini sorabilir ya da açık kalabilir.",
+  closeWindows: "Pencereleri kapat",
+  closing: "Kapatılıyor…",
   cleanLooking: "Projeler ve önbellekler aranıyor…",
   cleanMeasured: "{total} yerden {done} tanesi ölçüldü",
   cleanFoundSoFar: "Şimdiye dek {bytes} bulundu",

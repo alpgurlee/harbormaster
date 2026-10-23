@@ -6,6 +6,10 @@ export const platform: "mac" | "windows" = navigator.userAgent.includes("Windows
  * quit and forces only what outlives that, after asking again. */
 export const stopsAtOnce = platform === "windows";
 
-/** Quitting apps and cleaning up are macOS's alone for now. */
-export const quitsApps = platform === "mac";
+/** Windows asks an app to close its windows, and ends what outlives that
+ * only after asking the user again. A Mac asks the app to quit, and never
+ * forces it. */
+export const closesWindows = platform === "windows";
+
+/** Cleaning up is macOS's alone for now. */
 export const hasCleaner = platform === "mac";

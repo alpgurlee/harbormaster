@@ -54,6 +54,9 @@ export const forceStop = (token: number) => invoke<Stopped>("force_stop", { toke
 export const quitAppPreview = (id: string) => invoke<QuitPreview>("quit_app_preview", { id });
 /** Asks politely and never forces; rejects with a `Reason` when the app changed since it was approved. */
 export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token });
+
+/** What ending every process of the app at once would do; Windows only. */
+export const forceQuitAppPreview = (id: string) => invoke<QuitPreview>("force_quit_app_preview", { id });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });
 export const hidePanel = () => invoke<void>("hide_panel");
 export const dragPanel = () => invoke<void>("drag_panel");

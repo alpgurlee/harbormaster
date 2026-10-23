@@ -85,15 +85,15 @@ pub(crate) struct Stopping {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Stopped {
-    outcomes: Vec<Ended>,
-    still_running: bool,
+    pub(crate) outcomes: Vec<Ended>,
+    pub(crate) still_running: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Ended {
-    pid: u32,
+    pub(crate) pid: u32,
     name: String,
-    outcome: Outcome,
+    pub(crate) outcome: Outcome,
 }
 
 impl Stopped {
@@ -162,7 +162,7 @@ impl Approvals {
         let service = harbormaster_engine::choose(snapshot, &Target::Service(id.to_string()), &own)
             .map_err(|refusal| reason(&refusal))?;
         #[cfg(windows)]
-        alone(service)?;
+        alone(&keys_of(service))?;
         let stops = service
             .processes
             .iter()
@@ -204,20 +204,9 @@ impl Approvals {
     pub(crate) fn stop(&self, token: u64) -> Result<Stopped, Reason> {
         let approval = self.take(token, Instant::now(), Round::Terminate)?;
         recheck(&approval.service)?;
-        alone(&approval.service)?;
-        let targets: Vec<ProcessKey> = approval
-            .service
-            .processes
-            .iter()
-            .map(|member| member.key)
-            .collect();
-        let holding = harbormaster_engine::hold_all(&targets, &|key| {
-            harbormaster_platform::hold(key).map(Grip)
-        })
-        .map_err(|(_, presence)| match presence {
-            harbormaster_platform::Presence::Replaced => Reason::Changed,
-            _ => Reason::NotAllowed,
-        })?;
+        let targets = keys_of(&approval.service);
+        alone(&targets)?;
+        let holding = hold_all(&targets)?;
         let mut outcomes = holding.gone;
         outcomes.extend(harbormaster_engine::force(&holding.held, GRACE));
         // Settled as the last round, so the approval is spent whatever is left.
@@ -319,18 +308,45 @@ fn recheck(service: &Service) -> Result<Vec<ProcessKey>, Reason> {
     .map_err(|refusal| reason(&refusal))
 }
 
-/// Ending a process on Windows can end others too, through a job it holds,
-/// so a service is left alone while ending it could reach anything outside
-/// it: what it started, such as another server, or what its jobs hold.
-/// Windows' console hosts, which end with their programs, don't count.
 #[cfg(windows)]
-fn alone(service: &Service) -> Result<(), Reason> {
-    let keys: Vec<ProcessKey> = service.processes.iter().map(|member| member.key).collect();
-    if live::strays(&keys).map_err(failed)?.is_empty() {
+fn keys_of(service: &Service) -> Vec<ProcessKey> {
+    service.processes.iter().map(|member| member.key).collect()
+}
+
+/// Ending a process on Windows can end others too, through a job it holds,
+/// so `keys` are left alone while ending them could reach anything outside
+/// them: what they started, such as another server, or what their jobs
+/// hold. Windows' console hosts, which end with their programs, don't count.
+#[cfg(windows)]
+pub(crate) fn alone(keys: &[ProcessKey]) -> Result<(), Reason> {
+    if live::strays(keys).map_err(failed)?.is_empty() {
         Ok(())
     } else {
         Err(Reason::Strays)
     }
+}
+
+/// Holds every one of `keys` before anything is done to any: one that is
+/// no longer what was approved, or can't be made sure of, refuses them all.
+#[cfg(windows)]
+pub(crate) fn hold_all(keys: &[ProcessKey]) -> Result<harbormaster_engine::Holding<Grip>, Reason> {
+    hold_all_through(keys, &harbormaster_platform::hold)
+}
+
+/// As `hold_all`, through `hold`.
+#[cfg(windows)]
+pub(crate) fn hold_all_through(
+    keys: &[ProcessKey],
+    hold: &dyn Fn(
+        ProcessKey,
+    ) -> Result<harbormaster_platform::Held, harbormaster_platform::Presence>,
+) -> Result<harbormaster_engine::Holding<Grip>, Reason> {
+    harbormaster_engine::hold_all(keys, &|key| hold(key).map(Grip)).map_err(|(_, presence)| {
+        match presence {
+            harbormaster_platform::Presence::Replaced => Reason::Changed,
+            _ => Reason::NotAllowed,
+        }
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -344,7 +360,7 @@ fn signals() -> Signals<'static> {
 
 /// A Windows process held for the engine to end.
 #[cfg(windows)]
-struct Grip(harbormaster_platform::Held);
+pub(crate) struct Grip(pub(crate) harbormaster_platform::Held);
 
 #[cfg(windows)]
 impl harbormaster_engine::Held for Grip {

@@ -1,15 +1,16 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Preview, Stopped } from "./api";
+import type { Preview, QuitPreview, Stopped } from "./api";
 import { Detail } from "./Detail";
 import { I18nProvider } from "./i18n";
 import { Panel } from "./Panel";
+import { QuitSheet, type Quitter } from "./QuitSheet";
 import { StopSheet, type Stopper } from "./StopSheet";
-import type { Service, Update } from "./types";
+import type { AppUsage, Service, Update } from "./types";
 
 // Where a stop is the forced one, the panel says so.
-vi.mock("./platform", () => ({ platform: "windows", stopsAtOnce: true, quitsApps: false, hasCleaner: false }));
+vi.mock("./platform", () => ({ platform: "windows", stopsAtOnce: true, closesWindows: true, hasCleaner: false }));
 
 afterEach(cleanup);
 
@@ -123,5 +124,132 @@ describe("on Windows", () => {
     expect(screen.queryByTitle("Stop")).toBeNull();
     expect(screen.getByRole("button", { name: "Force quit…" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull();
+  });
+});
+
+const chrome: AppUsage = { id: "user/path:c:\\program files\\google\\chrome\\application\\chrome.exe", name: "chrome.exe", memoryBytes: 3 * 1024 ** 3, system: false };
+
+const forced: QuitPreview = {
+  kind: "programs",
+  token: 9,
+  quits: [
+    { pid: 40, name: "chrome.exe", command: null },
+    { pid: 41, name: "chrome.exe", command: "chrome.exe --type=renderer" },
+  ],
+  staysOpen: [],
+};
+
+async function quitting(quitter: Partial<Quitter>, app: AppUsage = chrome) {
+  const handlers = { onClose: vi.fn(), onDone: vi.fn() };
+  const full: Quitter = {
+    preview: vi.fn(async (): Promise<QuitPreview> => ({ kind: "app", token: 8 })),
+    quit: vi.fn(async () => ended),
+    force: vi.fn(async () => forced),
+    ...quitter,
+  };
+  await act(async () => {
+    render(
+      <I18nProvider locale="en">
+        <QuitSheet app={app} quitter={full} {...handlers} />
+      </I18nProvider>,
+    );
+  });
+  return { ...handlers, quitter: full };
+}
+
+describe("closing an app on Windows", () => {
+  it("asks its windows to close, as their close buttons do", async () => {
+    const { quitter, onDone } = await quitting({});
+
+    expect(screen.getByRole("dialog", { name: "Close chrome?" })).toBeTruthy();
+    expect(screen.getByText(/as its close button would/)).toBeTruthy();
+    expect(screen.queryByText(/⌘Q/)).toBeNull();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Close windows" })));
+
+    expect(quitter.quit).toHaveBeenCalledWith(8);
+    expect(quitter.force).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it("offers to force what stayed open, but only after showing what that ends", async () => {
+    const open_: Stopped = {
+      outcomes: [
+        { pid: 40, name: "chrome.exe", outcome: "stillRunning" },
+        { pid: 41, name: "chrome.exe", outcome: "stillRunning" },
+      ],
+      stillRunning: true,
+    };
+    const quit = vi.fn(async (token: number) => (token === 8 ? open_ : ended));
+    const { quitter, onDone } = await quitting({ quit });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Close windows" })));
+
+    expect(screen.getByText(/chrome is still open/)).toBeTruthy();
+    expect(quitter.force).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Force quit…" })));
+
+    expect(quitter.force).toHaveBeenCalledWith(chrome.id);
+    expect(screen.getByRole("dialog", { name: "Force quit chrome?" })).toBeTruthy();
+    expect(screen.getByText("Will end")).toBeTruthy();
+    expect(screen.getByText("PID 41")).toBeTruthy();
+    expect(screen.getByText(/without being asked to quit/)).toBeTruthy();
+    expect(quit).toHaveBeenCalledTimes(1);
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Force quit" })));
+
+    expect(quit).toHaveBeenLastCalledWith(9);
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it("says why a window wouldn't take the request", async () => {
+    const refused: Stopped = {
+      outcomes: [{ pid: 40, name: "chrome.exe", outcome: { failed: "it may run as administrator" } }],
+      stillRunning: false,
+    };
+    await quitting({ quit: vi.fn(async () => refused) });
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Close windows" })));
+
+    expect(screen.getByText(/it may run as administrator/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Force quit…" })).toBeTruthy();
+  });
+
+  it("ends a program without windows at once, and says so first", async () => {
+    const node: AppUsage = { id: "user/path:c:\\tools\\node.exe", name: "node.exe", memoryBytes: 1, system: false };
+    const { quitter } = await quitting(
+      {
+        preview: vi.fn(async (): Promise<QuitPreview> => ({
+          kind: "programs",
+          token: 5,
+          quits: [{ pid: 50, name: "node.exe", command: "node watch.js" }],
+          staysOpen: [],
+        })),
+      },
+      node,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Force quit node?" })).toBeTruthy();
+    expect(screen.getByText(/without being asked to quit/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing is forced/)).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Force quit" })));
+    expect(quitter.quit).toHaveBeenCalledWith(5);
+  });
+
+  it("offers to close each app the memory list shows, but never the system", () => {
+    const apps: AppUsage[] = [chrome, { id: "system/name:dwm.exe", name: "dwm.exe", memoryBytes: 1, system: true }];
+    const update: Update = { services: [], memory: { used: 8 * 1024 ** 3, total: 16 * 1024 ** 3 }, apps, scannedAt: NOW, thermal: "nominal" };
+    const onQuit = vi.fn();
+    render(
+      <I18nProvider locale="en">
+        <Panel update={update} now={NOW} tints={new Map()} onShow={vi.fn()} onOpen={vi.fn()} onStop={vi.fn()} onQuit={onQuit} />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "8.0 of 16 GB" }));
+
+    const list = screen.getByRole("list", { name: "Memory by app" });
+    expect(within(list).getAllByRole("button").map((button) => button.textContent)).toEqual(["Close"]);
+    fireEvent.click(within(list).getByRole("button", { name: "Close chrome" }));
+    expect(onQuit).toHaveBeenCalledWith(chrome);
   });
 });

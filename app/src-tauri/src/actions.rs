@@ -1,6 +1,5 @@
-//! What the panel and the cleaner window may do to this Mac besides
-//! stopping servers: quit apps, and find and remove what could go. macOS
-//! only for now.
+//! What the cleaner window may do to this Mac: find and remove what could
+//! go. macOS only for now.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,31 +13,8 @@ use crate::cleaner;
 use crate::cleaning::{Cleaning, MapEvent, Refusal, RunEvent, ScanEvent};
 use crate::commands::blocking;
 use crate::daemons::{DaemonPreview, Daemons};
-use crate::quitting::{QuitPreview, Quits};
-use crate::scanning::{self, Scanning};
 use crate::settings::Store;
 use crate::stopping::{Reason, Stopped};
-
-/// `id` names an app as the breakdown lists it.
-#[tauri::command]
-pub(crate) async fn quit_app_preview(id: String, app: AppHandle) -> Result<QuitPreview, Reason> {
-    blocking(move || {
-        Ok(match app.state::<Arc<Scanning>>().snapshot() {
-            Some(snapshot) => app
-                .state::<Quits>()
-                .preview(&scanning::servers(&snapshot.services), &id),
-            None => QuitPreview::Refused {
-                reason: Reason::NotFound,
-            },
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Quits>().quit(token)).await
-}
 
 /// Of the items listed under `token` and in use, those only known dev
 /// daemons keep so, which the window may offer to stop.

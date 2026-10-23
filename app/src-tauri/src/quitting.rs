@@ -1,13 +1,15 @@
-//! Quitting what uses memory, from the panel's breakdown: politely, after the
-//! checks a stop runs, and never by force.
+//! Quitting what uses memory, from the panel's breakdown, after the checks
+//! a stop runs. A Mac asks politely and never forces. Windows asks an app
+//! to close its windows; a program without any it ends at once, as it does
+//! what outlived a close, each time only once the user agreed to that.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use harbormaster_engine::apps::AppUsage;
-use harbormaster_engine::{Holder, Protection, Signals, Standing, live};
-use harbormaster_platform::{Presence, ProcessKey, Signal, SignalOutcome};
+use harbormaster_engine::{Holder, Outcome, Protection, Standing, live};
+use harbormaster_platform::ProcessKey;
 use serde::Serialize;
 
 use crate::scanning::home;
@@ -26,11 +28,13 @@ const APPROVAL_LIFETIME: Duration = Duration::from_secs(120);
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum QuitPreview {
-    /// An app, asked to quit as ⌘Q asks it; it may ask the user first.
+    /// An app, asked to quit as ⌘Q asks it, or on Windows to close its
+    /// windows; it may ask the user first.
     App {
         token: u64,
     },
-    /// Programs with no app around them, each asked to exit as `kill` asks.
+    /// Programs with no app around them, each asked to exit as `kill` asks;
+    /// on Windows, ended at once.
     Programs {
         token: u64,
         quits: Vec<Stopping>,
@@ -78,8 +82,11 @@ struct Approval {
     plan: Plan,
     /// Everything the quit may end; none of it may run Harbormaster.
     reach: Vec<ProcessKey>,
-    /// How each target was shown, for the report.
+    /// How each process it may end was shown, for the report.
     names: Vec<(ProcessKey, String)>,
+    /// Whether an app among it may only be asked, as the system asks apps.
+    /// Not so once the user agreed to end everything at once.
+    polite: bool,
     at: Instant,
 }
 
@@ -97,11 +104,25 @@ impl Quits {
     /// `skip` holds the dev servers' processes, which the breakdown leaves
     /// out; `id` names an app as the breakdown lists it.
     pub(crate) fn preview(&self, skip: &HashSet<ProcessKey>, id: &str) -> QuitPreview {
-        self.prepare(skip, id)
+        self.prepare(skip, id, true)
             .unwrap_or_else(|reason| QuitPreview::Refused { reason })
     }
 
-    fn prepare(&self, skip: &HashSet<ProcessKey>, id: &str) -> Result<QuitPreview, Reason> {
+    /// What ending every process of the app at once would do, its windowed
+    /// ones too: what Windows offers once asking it to close left some open.
+    #[cfg(windows)]
+    pub(crate) fn force_preview(&self, skip: &HashSet<ProcessKey>, id: &str) -> QuitPreview {
+        self.prepare(skip, id, false)
+            .unwrap_or_else(|reason| QuitPreview::Refused { reason })
+    }
+
+    /// `polite` false counts every process as a bare program.
+    fn prepare(
+        &self,
+        skip: &HashSet<ProcessKey>,
+        id: &str,
+        polite: bool,
+    ) -> Result<QuitPreview, Reason> {
         // Every check before the request relies on keys that change on exec.
         if !harbormaster_platform::tracks_exec() {
             return Err(Reason::UntrackedExec);
@@ -118,13 +139,22 @@ impl Quits {
                 key,
                 standing: guard.get(&key).copied().unwrap_or(Standing::Unknown),
                 own: own.contains(&key.pid.0),
-                app: appkit::is_app(key.pid.0),
+                app: polite && appkit::is_app(key.pid.0),
             })
             .collect();
         let plan = plan(&seen)?;
+        // Ending a program on Windows may end what it started outside the app.
+        #[cfg(windows)]
+        if let Plan::Programs { quits, .. } = &plan {
+            crate::stopping::alone(quits)?;
+        }
+        let reach = match &plan {
+            // Quitting an app ends everything it runs.
+            Plan::Apps(_) => app.members.clone(),
+            Plan::Programs { quits, .. } => quits.clone(),
+        };
         let shown = live::members(&app.members).map_err(failed)?;
-        let names = plan
-            .targets()
+        let names = reach
             .iter()
             .map(|&key| {
                 let name = shown
@@ -134,15 +164,11 @@ impl Quits {
                 (key, name)
             })
             .collect();
-        let reach = match &plan {
-            // Quitting an app ends everything it runs.
-            Plan::Apps(_) => app.members.clone(),
-            Plan::Programs { quits, .. } => quits.clone(),
-        };
         let token = self.approve(Approval {
             plan: plan.clone(),
             reach,
             names,
+            polite,
             at: Instant::now(),
         });
         Ok(match plan {
@@ -170,25 +196,12 @@ impl Quits {
         })
     }
 
-    /// Asks what was approved to quit, after the checks a stop runs, and waits
-    /// for it to go. Nothing is ever forced.
+    /// Does what was approved, after the checks a stop runs, and waits for
+    /// it to go.
     pub(crate) fn quit(&self, token: u64) -> Result<Stopped, Reason> {
         let approval = self.take(token, Instant::now())?;
         recheck(&approval)?;
-        let send: &dyn Fn(ProcessKey, Signal) -> SignalOutcome = match approval.plan {
-            Plan::Apps(_) => &ask_app,
-            Plan::Programs { .. } => &harbormaster_platform::signal,
-        };
-        let outcomes = harbormaster_engine::stop(
-            approval.plan.targets(),
-            Signal::Terminate,
-            GRACE,
-            &Signals {
-                send,
-                presence: &harbormaster_platform::presence,
-                sleep: &std::thread::sleep,
-            },
-        );
+        let outcomes = request(&approval)?;
         Ok(Stopped::new(outcomes, |key| {
             approval
                 .names
@@ -221,6 +234,75 @@ impl Quits {
 
     fn lock(&self) -> MutexGuard<'_, Ledger> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Asks the apps to quit as ⌘Q would, or the programs to exit as `kill`
+/// would, and waits for them; nothing is forced.
+#[cfg(target_os = "macos")]
+fn request(approval: &Approval) -> Result<Vec<(ProcessKey, Outcome)>, Reason> {
+    use harbormaster_engine::Signals;
+    use harbormaster_platform::{Signal, SignalOutcome};
+
+    let send: &dyn Fn(ProcessKey, Signal) -> SignalOutcome = match approval.plan {
+        Plan::Apps(_) => &ask_app,
+        Plan::Programs { .. } => &harbormaster_platform::signal,
+    };
+    Ok(harbormaster_engine::stop(
+        approval.plan.targets(),
+        Signal::Terminate,
+        GRACE,
+        &Signals {
+            send,
+            presence: &harbormaster_platform::presence,
+            sleep: &std::thread::sleep,
+        },
+    ))
+}
+
+/// Asks the apps to close their windows, then waits for every process they
+/// run, since asked is not closed. Programs are ended at once: Windows has
+/// no request to quit that every program heeds. Each process is held from
+/// before the first is asked to after the wait.
+#[cfg(windows)]
+fn request(approval: &Approval) -> Result<Vec<(ProcessKey, Outcome)>, Reason> {
+    use crate::stopping::{Grip, alone, hold_all, hold_all_through};
+    use harbormaster_platform::{Presence, watch};
+
+    match &approval.plan {
+        Plan::Apps(windowed) => {
+            // What is asked must be made sure of; the rest is only waited for, as far as it can be.
+            let mut holding = hold_all_through(windowed, &watch)?;
+            for &key in approval.reach.iter().filter(|key| !windowed.contains(key)) {
+                match watch(key) {
+                    Ok(held) => holding.held.push((key, Grip(held))),
+                    Err(Presence::Gone | Presence::Replaced) => {
+                        holding.gone.push((key, Outcome::AlreadyGone));
+                    }
+                    Err(_) => holding.gone.push((
+                        key,
+                        Outcome::Failed("could not tell whether it exited".into()),
+                    )),
+                }
+            }
+            let close = |grip: &Grip| {
+                if windowed.contains(&grip.0.key) {
+                    grip.0.close().map_err(|error| error.to_string())
+                } else {
+                    Ok(())
+                }
+            };
+            let mut outcomes = harbormaster_engine::end(&holding.held, GRACE, &close);
+            outcomes.extend(holding.gone);
+            Ok(outcomes)
+        }
+        Plan::Programs { quits, .. } => {
+            alone(quits)?;
+            let holding = hold_all(quits)?;
+            let mut outcomes = holding.gone;
+            outcomes.extend(harbormaster_engine::force(&holding.held, GRACE));
+            Ok(outcomes)
+        }
     }
 }
 
@@ -319,7 +401,8 @@ fn recheck(approval: &Approval) -> Result<(), Reason> {
 
 /// Whether what was approved can still go as it was shown: nothing it may end
 /// runs Harbormaster, every target may still be ended, and no program has
-/// become an app, which only a polite quit may reach.
+/// become an app, which only a polite quit may reach unless the user agreed
+/// to end it at once.
 fn still_fits(
     approval: &Approval,
     own: &[u32],
@@ -329,7 +412,7 @@ fn still_fits(
     if approval.reach.iter().any(|key| own.contains(&key.pid.0)) {
         return Err(Reason::Changed);
     }
-    let programs = matches!(approval.plan, Plan::Programs { .. });
+    let programs = approval.polite && matches!(approval.plan, Plan::Programs { .. });
     for &key in approval.plan.targets() {
         let now = standing(key);
         // What exited meanwhile is left for the request, which reports it gone.
@@ -342,7 +425,13 @@ fn still_fits(
 }
 
 /// Asks the app to quit as ⌘Q would, if it is still the process approved.
-fn ask_app(key: ProcessKey, _: Signal) -> SignalOutcome {
+#[cfg(target_os = "macos")]
+fn ask_app(
+    key: ProcessKey,
+    _: harbormaster_platform::Signal,
+) -> harbormaster_platform::SignalOutcome {
+    use harbormaster_platform::{Presence, SignalOutcome};
+
     match harbormaster_platform::presence(key) {
         Presence::Running if appkit::ask_to_quit(key.pid.0) => SignalOutcome::Sent,
         Presence::Running => SignalOutcome::Failed("the app didn't take the request".into()),
@@ -383,16 +472,11 @@ mod appkit {
     }
 }
 
-/// Until there is a way to ask an app to close its windows here, nothing
-/// counts as an app.
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 mod appkit {
-    pub(super) fn is_app(_: u32) -> bool {
-        false
-    }
-
-    pub(super) fn ask_to_quit(_: u32) -> bool {
-        false
+    /// A program with a window on the taskbar, which Windows can ask to close.
+    pub(super) fn is_app(pid: u32) -> bool {
+        harbormaster_platform::has_windows(pid)
     }
 }
 
@@ -433,6 +517,7 @@ mod tests {
             plan: Plan::Apps(vec![key(10)]),
             reach: vec![key(10)],
             names: Vec::new(),
+            polite: true,
             at,
         }
     }
@@ -568,6 +653,7 @@ mod tests {
             },
             reach: vec![key(20)],
             names: Vec::new(),
+            polite: true,
             at: Instant::now(),
         };
 
@@ -577,6 +663,25 @@ mod tests {
         );
         assert_eq!(
             still_fits(&approval, &[], |_| Standing::Clear, |_| false),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn lets_a_force_the_user_agreed_to_reach_an_app_too() {
+        let approval = Approval {
+            plan: Plan::Programs {
+                quits: vec![key(20)],
+                stays: Vec::new(),
+            },
+            reach: vec![key(20)],
+            names: Vec::new(),
+            polite: false,
+            at: Instant::now(),
+        };
+
+        assert_eq!(
+            still_fits(&approval, &[], |_| Standing::Clear, |_| true),
             Ok(())
         );
     }
@@ -681,5 +786,231 @@ mod tests {
                 "staysOpen": [{ "pid": 21, "name": "postgres" }],
             })
         );
+    }
+
+    /// Set, for the copies of this test program the Windows tests start:
+    /// where to write the pid once the window shows, how it answers a
+    /// request to close (`closes` or `stays`), and, for the copy that only
+    /// starts another and exits, which program that is.
+    #[cfg(windows)]
+    const SHOWN: &str = "HARBORMASTER_TEST_SHOWN";
+    #[cfg(windows)]
+    const ANSWERS: &str = "HARBORMASTER_TEST_ANSWERS";
+    #[cfg(windows)]
+    const LAUNCHES: &str = "HARBORMASTER_TEST_LAUNCHES";
+
+    /// A program showing a window, which no process of this test started:
+    /// anything Harbormaster starts is its own, which it never quits. Ended
+    /// whatever happens to the test.
+    #[cfg(windows)]
+    struct Window {
+        key: ProcessKey,
+        _folder: tempfile::TempDir,
+    }
+
+    #[cfg(windows)]
+    impl Drop for Window {
+        fn drop(&mut self) {
+            if let Ok(held) = harbormaster_platform::hold(self.key) {
+                let _ = held.terminate();
+                let _ = held.wait(Duration::from_secs(5));
+            }
+        }
+    }
+
+    /// Shows a window from a copy of this test program kept elsewhere, so it
+    /// counts as an app of its own, started by a copy that exits at once.
+    #[cfg(windows)]
+    fn window(answers: &str) -> Window {
+        use std::process::Command;
+
+        let folder = tempfile::tempdir().unwrap();
+        let program = folder.path().join("helper.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();
+        let shown = folder.path().join("shown");
+        let launcher = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "quitting::tests::starts_a_window_and_exits",
+                "--ignored",
+            ])
+            .env(LAUNCHES, &program)
+            .env(SHOWN, &shown)
+            .env(ANSWERS, answers)
+            .status()
+            .unwrap();
+        assert!(launcher.success());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(&shown)
+                .ok()
+                .and_then(|pid| pid.parse::<u32>().ok())
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "the window should show");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let key = harbormaster_platform::processes()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.key.pid.0 == pid)
+            .expect("the window's program should be listed")
+            .key;
+        Window {
+            key,
+            _folder: folder,
+        }
+    }
+
+    /// The id the memory breakdown gives the app that `key` is part of.
+    #[cfg(windows)]
+    fn id_of(key: ProcessKey) -> String {
+        harbormaster_engine::live::apps(&std::collections::HashSet::new())
+            .unwrap()
+            .into_iter()
+            .find(|app| app.members.contains(&key))
+            .expect("the breakdown should list the window's program")
+            .id
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn closes_an_app_on_windows_by_asking_its_window_to_close() {
+        let window = window("closes");
+        let quits = Quits::default();
+        let skip = std::collections::HashSet::new();
+
+        let token = match quits.preview(&skip, &id_of(window.key)) {
+            QuitPreview::App { token } => token,
+            other => panic!("closing it as an app wasn't offered: {other:?}"),
+        };
+        let stopped = quits.quit(token).unwrap();
+
+        assert!(!stopped.still_running, "{:?}", stopped.outcomes);
+        assert_eq!(
+            harbormaster_platform::presence(window.key),
+            harbormaster_platform::Presence::Gone
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn force_quits_an_app_on_windows_that_stayed_open_only_once_asked_again() {
+        use harbormaster_engine::Outcome;
+
+        let window = window("stays");
+        let quits = Quits::default();
+        let skip = std::collections::HashSet::new();
+        let id = id_of(window.key);
+
+        let token = match quits.preview(&skip, &id) {
+            QuitPreview::App { token } => token,
+            other => panic!("closing it as an app wasn't offered: {other:?}"),
+        };
+        let stopped = quits.quit(token).unwrap();
+        assert!(stopped.still_running, "{:?}", stopped.outcomes);
+        assert!(
+            harbormaster_platform::has_windows(window.key.pid.0),
+            "asked is not closed"
+        );
+
+        let (token, quits_shown) = match quits.force_preview(&skip, &id) {
+            QuitPreview::Programs { token, quits, .. } => (token, quits),
+            other => panic!("ending it wasn't offered: {other:?}"),
+        };
+        assert_eq!(
+            quits_shown
+                .iter()
+                .map(|shown| shown.pid)
+                .collect::<Vec<_>>(),
+            [window.key.pid.0]
+        );
+        let stopped = quits.quit(token).unwrap();
+
+        assert!(
+            stopped
+                .outcomes
+                .iter()
+                .all(|ended| ended.outcome == Outcome::Stopped),
+            "{:?}",
+            stopped.outcomes
+        );
+    }
+
+    /// Not a test of its own: starts the window's program the tests above
+    /// use, then exits, so that program has no parent left.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "the Windows quit tests run it to start their window"]
+    #[expect(
+        clippy::zombie_processes,
+        reason = "the program must outlive this copy, and Windows keeps no zombies"
+    )]
+    fn starts_a_window_and_exits() {
+        let Some(program) = std::env::var_os(LAUNCHES) else {
+            return;
+        };
+        std::process::Command::new(program)
+            .args([
+                "--exact",
+                "quitting::tests::shows_a_window_until_it_closes",
+                "--ignored",
+            ])
+            .env_remove(LAUNCHES)
+            .spawn()
+            .unwrap();
+    }
+
+    /// Not a test of its own: the window's program the tests above use.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "the Windows quit tests run it as their app"]
+    fn shows_a_window_until_it_closes() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DispatchMessageW, GetMessageW, IsWindow, MSG, WM_CLOSE,
+            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        };
+
+        let (Some(shown), Ok(answers)) = (std::env::var_os(SHOWN), std::env::var(ANSWERS)) else {
+            return;
+        };
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        // SAFETY: the class is one Windows registers, named with a closing nul.
+        let window = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                class.as_ptr(),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                0,
+                0,
+                320,
+                200,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(!window.is_null(), "{}", std::io::Error::last_os_error());
+        // Gone by itself in the end, should the test lose track of it.
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(60));
+            std::process::exit(2);
+        });
+        std::fs::write(shown, std::process::id().to_string()).unwrap();
+        let mut message = MSG::default();
+        // SAFETY: the window is this thread's, and `message` ours to fill.
+        while unsafe { IsWindow(window) } != 0
+            && unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) } > 0
+        {
+            // A window left to itself closes on WM_CLOSE.
+            if answers == "stays" && message.message == WM_CLOSE {
+                continue;
+            }
+            // SAFETY: the message came from this thread's queue.
+            unsafe { DispatchMessageW(&message) };
+        }
     }
 }

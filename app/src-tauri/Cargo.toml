@@ -25,6 +25,9 @@ tauri-plugin-single-instance.workspace = true
 libc.workspace = true
 tempfile.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 harbormaster-cleaner.workspace = true
 objc2.workspace = true

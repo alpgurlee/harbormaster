@@ -34,7 +34,9 @@ It can end processes and delete files, so both go through checks first:
   could start another program, or exit and have its PID reused, and the signal would reach a program
   you didn't approve; between the check and a removal, something could start using the item. The
   checks narrow these windows but don't close them. On Windows, a stop holds each process open from
-  the check of who it is until it has ended, so no other process can take its PID in between.
+  the check of who it is until it has ended, so no other process can take its PID in between. Right
+  before an app's window is asked to close, it is checked to still belong to the approved process; in
+  the moment between, the window could close and its handle pass to another program's window.
 - Command lines are shown with likely secrets hidden: the value of every `NAME=value` word; the value
   of a flag or header whose name mentions a credential, such as a token, secret, password, auth, cookie,
   or API or access key; a URL's user info, and query or fragment values under such names or named

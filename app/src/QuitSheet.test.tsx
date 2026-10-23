@@ -24,6 +24,7 @@ async function open(quitter: Partial<Quitter>, app: AppUsage = chrome) {
   const full: Quitter = {
     preview: vi.fn(async (): Promise<QuitPreview> => ({ kind: "app", token: 3 })),
     quit: vi.fn(async () => quit),
+    force: vi.fn(async (): Promise<QuitPreview> => ({ kind: "refused", reason: { code: "notFound" } })),
     ...quitter,
   };
   await act(async () => {
@@ -69,12 +70,13 @@ describe("QuitSheet", () => {
 
   it("says so when the app is still open, and never offers to force it", async () => {
     const open_: Stopped = { outcomes: [{ pid: 10, name: "Google Chrome", outcome: "stillRunning" }], stillRunning: true };
-    const { onDone } = await open({ quit: vi.fn(async () => open_) });
+    const { onDone, quitter } = await open({ quit: vi.fn(async () => open_) });
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Quit" })));
 
     expect(screen.getByText(/Google Chrome is still open/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Force/ })).toBeNull();
+    expect(quitter.force).not.toHaveBeenCalled();
     expect(onDone).not.toHaveBeenCalled();
   });
 

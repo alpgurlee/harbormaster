@@ -10,6 +10,7 @@ fn main() {
         "force_stop",
         "quit_app_preview",
         "quit_app",
+        "force_quit_app_preview",
         "open_cleaner",
         "open_settings",
         "settings_get",

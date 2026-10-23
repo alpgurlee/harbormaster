@@ -6,7 +6,8 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::scanning::{Scanning, Update};
+use crate::quitting::{QuitPreview, Quits};
+use crate::scanning::{self, Scanning, Update};
 use crate::settings::{Invalid, Settings, Store};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
 use crate::{panel, settings};
@@ -95,6 +96,48 @@ pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> 
 #[tauri::command]
 pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || app.state::<Approvals>().force(token)).await
+}
+
+/// `id` names an app as the breakdown lists it.
+#[tauri::command]
+pub(crate) async fn quit_app_preview(id: String, app: AppHandle) -> Result<QuitPreview, Reason> {
+    blocking(move || {
+        Ok(match app.state::<Arc<Scanning>>().snapshot() {
+            Some(snapshot) => app
+                .state::<Quits>()
+                .preview(&scanning::servers(&snapshot.services), &id),
+            None => QuitPreview::Refused {
+                reason: Reason::NotFound,
+            },
+        })
+    })
+    .await
+}
+
+/// What ending every process of the app `id` names at once would do, for
+/// Windows to offer once asking it to close left some of it open.
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) async fn force_quit_app_preview(
+    id: String,
+    app: AppHandle,
+) -> Result<QuitPreview, Reason> {
+    blocking(move || {
+        Ok(match app.state::<Arc<Scanning>>().snapshot() {
+            Some(snapshot) => app
+                .state::<Quits>()
+                .force_preview(&scanning::servers(&snapshot.services), &id),
+            None => QuitPreview::Refused {
+                reason: Reason::NotFound,
+            },
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
+    blocking(move || app.state::<Quits>().quit(token)).await
 }
 
 #[tauri::command]

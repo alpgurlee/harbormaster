@@ -6,7 +6,7 @@ import { useI18n } from "./i18n";
 import { Chevron, Gear, Mark, OpenOut, PutBack, Search, Square, Sweep } from "./icons";
 import { groupByProject, projectOf, totals } from "./model";
 import { Plate } from "./Plate";
-import { platform, stopsAtOnce } from "./platform";
+import { closesWindows, platform, stopsAtOnce } from "./platform";
 import { agentOf, displayName } from "./session";
 import { trendOf } from "./store";
 import { Trend } from "./Trend";
@@ -360,10 +360,10 @@ function Breakdown({ servers, projects, apps, total, onQuit }: BreakdownProps) {
                 <button
                   type="button"
                   className={styles.partQuit}
-                  aria-label={i18n.t("quitApp", { name })}
+                  aria-label={i18n.t(closesWindows ? "closeApp" : "quitApp", { name })}
                   onClick={() => onQuit(app)}
                 >
-                  {i18n.t("quit")}
+                  {i18n.t(closesWindows ? "close" : "quit")}
                 </button>
               ) : null}
             </span>
