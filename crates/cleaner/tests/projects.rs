@@ -81,6 +81,7 @@ fn takes_a_rust_target_only_when_it_says_it_is_a_cache() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn never_picks_what_a_process_is_using() {
     let machine = machine();
     let project = node_project(&machine, "busy");

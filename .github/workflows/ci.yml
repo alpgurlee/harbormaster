@@ -87,12 +87,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      # The cleaner is macOS's alone for now.
       - name: Lint
-        run: cargo clippy --workspace --exclude harbormaster-cleaner --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --exclude harbormaster-cleaner --locked
+        run: cargo test --workspace --locked
 
       - name: Test binding every address
         run: cargo test -p harbormaster-platform --test bind --locked -- --ignored

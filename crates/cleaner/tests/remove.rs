@@ -2,12 +2,13 @@ mod common;
 
 use std::fs;
 use std::io;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, MIB, Machine, age, machine, node_project, reach, set_mode, write};
+use common::{DAY, Machine, age, link_folder, machine, node_project, reach, write};
+#[cfg(target_os = "macos")]
+use common::{MIB, set_mode};
 use harbormaster_cleaner::{
     Cleaned, Finding, Group, Identity, Kind, Outcome, Survey, Usage, Why, remove, scan,
 };
@@ -65,6 +66,7 @@ fn never(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// A stand-in for the system's Trash: moves what it is given into `bin`.
+#[cfg(target_os = "macos")]
 fn into(bin: &Path) -> impl Fn(&Path) -> io::Result<PathBuf> + '_ {
     move |path| {
         let to = bin.join(path.file_name().expect("a name"));
@@ -99,6 +101,7 @@ fn deletes_a_build_output_folder_and_nothing_beside_it() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn empties_a_cache_but_keeps_its_folder() {
     let machine = machine();
     let cache = machine.home.join(".npm/_cacache");
@@ -122,11 +125,10 @@ fn removes_a_link_inside_without_following_it() {
     let elsewhere = machine();
     write(&elsewhere.home.join("kept/file"), b"keep me");
     let project = node_project(&mine, "linked");
-    symlink(
-        elsewhere.home.join("kept"),
-        project.join("node_modules/kept"),
-    )
-    .expect("the link");
+    link_folder(
+        &elsewhere.home.join("kept"),
+        &project.join("node_modules/kept"),
+    );
     age(&project, 60 * DAY);
 
     let cleaned = removed(&mine, &["linked · node_modules"], &never);
@@ -137,6 +139,67 @@ fn removes_a_link_inside_without_following_it() {
     );
     assert!(!project.join("node_modules").exists());
     assert!(elsewhere.home.join("kept/file").exists());
+}
+
+#[test]
+fn deletes_read_only_files_along_with_the_rest() {
+    let machine = machine();
+    let project = node_project(&machine, "packed");
+    let object = project.join("node_modules/left-pad/.git/objects/ab/cdef");
+    write(&object, b"blob");
+    let mut read_only = fs::metadata(&object).expect("the file").permissions();
+    read_only.set_readonly(true);
+    fs::set_permissions(&object, read_only).expect("read-only");
+    age(&project, 60 * DAY);
+
+    let cleaned = removed(&machine, &["packed · node_modules"], &never);
+
+    assert_eq!(
+        outcome(&cleaned, &project.join("node_modules")),
+        &Outcome::Deleted
+    );
+    assert!(!project.join("node_modules").exists());
+}
+
+/// A program that opened a file without letting others delete it keeps it,
+/// and with it its folder; the next finding goes all the same.
+#[test]
+#[cfg(windows)]
+fn leaves_what_a_program_holds_shut_and_goes_on_with_the_rest() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    let machine = machine();
+    let held = node_project(&machine, "held");
+    let free = node_project(&machine, "free");
+    age(&held, 60 * DAY);
+    age(&free, 60 * DAY);
+    let locked = held.join("node_modules/left-pad/index.js");
+    let _open = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(&locked)
+        .expect("held open");
+
+    let cleaned = removed(
+        &machine,
+        &["held · node_modules", "free · node_modules"],
+        &never,
+    );
+
+    assert!(
+        matches!(
+            outcome(&cleaned, &held.join("node_modules")),
+            Outcome::Failed { .. }
+        ),
+        "{cleaned:?}"
+    );
+    assert!(locked.exists());
+    assert_eq!(
+        outcome(&cleaned, &free.join("node_modules")),
+        &Outcome::Deleted
+    );
 }
 
 #[test]
@@ -188,7 +251,7 @@ fn refuses_a_folder_swapped_for_a_link_since_the_scan() {
     let survey = survey(&mine.home, &roots, &[]);
     let chosen = chosen(&survey, &["swapped · node_modules"]);
     fs::remove_dir_all(project.join("node_modules")).expect("the folder");
-    symlink(elsewhere.home.join("kept"), project.join("node_modules")).expect("the link");
+    link_folder(&elsewhere.home.join("kept"), &project.join("node_modules"));
 
     let cleaned = remove(
         &reach(survey.home),
@@ -289,6 +352,7 @@ fn refuses_anything_outside_the_home_folder() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn moves_a_personal_item_to_the_trash_whole() {
     let machine = machine();
     let archive = machine
@@ -306,6 +370,7 @@ fn moves_a_personal_item_to_the_trash_whole() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn moves_a_personal_place_to_the_trash_whole() {
     let machine = machine();
     let caches = machine.home.join("Library/Caches/JetBrains");
@@ -327,6 +392,7 @@ fn moves_a_personal_place_to_the_trash_whole() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn tells_when_the_trash_took_something_other_than_what_was_scanned() {
     let mine = machine();
     let elsewhere = machine();
@@ -341,7 +407,7 @@ fn tells_when_the_trash_took_something_other_than_what_was_scanned() {
     // before the Trash looks the path up.
     let racing = |path: &Path| {
         fs::rename(&archives, &aside)?;
-        symlink(&decoys, &archives)?;
+        std::os::unix::fs::symlink(&decoys, &archives)?;
         into(&bin)(path)
     };
 
@@ -359,6 +425,7 @@ fn tells_when_the_trash_took_something_other_than_what_was_scanned() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn empties_the_trash_before_moving_anything_into_it() {
     let machine = machine();
     let trash = machine.home.join(".Trash");
@@ -377,6 +444,7 @@ fn empties_the_trash_before_moving_anything_into_it() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn goes_on_with_the_rest_when_one_fails_and_tells_of_each() {
     let machine = machine();
     let cache = machine.home.join(".npm/_cacache");

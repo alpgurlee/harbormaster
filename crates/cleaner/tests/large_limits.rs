@@ -1,6 +1,8 @@
 //! On its own, as a process of its own: it lowers how many files the
 //! process may hold open, which every other test would feel.
 
+#![cfg(unix)]
+
 mod common;
 
 use std::sync::atomic::AtomicBool;

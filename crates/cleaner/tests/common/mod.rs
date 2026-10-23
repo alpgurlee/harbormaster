@@ -2,7 +2,8 @@
 
 #![allow(dead_code)]
 
-use std::fs::{self, File};
+use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -13,7 +14,8 @@ pub const TAG: &[u8] = b"Signature: 8a477f597d28d172789f06886806bc55\n# a cache\
 
 /// A temp folder standing in for a home folder, under its real path: temp
 /// folders sit under `/var`, a link to `/private/var`, and the cleaner only
-/// starts from a real path.
+/// starts from a real path. On Windows it is written as the account's home
+/// is, without the `\\?\` the real path comes with.
 pub struct Machine {
     _place: tempfile::TempDir,
     pub home: PathBuf,
@@ -22,9 +24,36 @@ pub struct Machine {
 pub fn machine() -> Machine {
     let place = tempfile::tempdir().expect("a temp folder");
     let home = place.path().canonicalize().expect("its real path");
+    #[cfg(windows)]
+    let home = PathBuf::from(
+        home.to_str()
+            .and_then(|home| home.strip_prefix(r"\\?\"))
+            .expect("a temp folder on a drive"),
+    );
     Machine {
         _place: place,
         home,
+    }
+}
+
+/// A link at `link` to the folder `target`: on Windows a junction, which
+/// needs no privilege, as a symbolic link would.
+pub fn link_folder(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("the link");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        let made = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                r#"/c mklink /J "{}" "{}""#,
+                link.display(),
+                target.display()
+            ))
+            .output()
+            .expect("cmd");
+        assert!(made.status.success(), "{made:?}");
     }
 }
 
@@ -45,16 +74,30 @@ pub fn write(path: &Path, bytes: &[u8]) {
 pub fn age(project: &Path, age: Duration) {
     let when = SystemTime::now() - age;
     for entry in fs::read_dir(project).expect("the project") {
-        let path = entry.expect("an entry").path();
-        File::open(&path)
-            .expect("open")
-            .set_modified(when)
-            .expect("touch");
+        touch(&entry.expect("an entry").path(), when);
     }
-    File::open(project)
-        .expect("open")
-        .set_modified(when)
-        .expect("touch");
+    touch(project, when);
+}
+
+fn touch(path: &Path, when: SystemTime) {
+    #[cfg(unix)]
+    let file = fs::File::open(path);
+    // A folder opens only with backup semantics, and setting a time takes
+    // the right to write attributes.
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+        };
+
+        fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    };
+    file.expect("open").set_modified(when).expect("touch");
 }
 
 /// A Node project called `name` under `code`, with 2 MiB each in its
@@ -71,6 +114,7 @@ pub fn node_project(machine: &Machine, name: &str) -> PathBuf {
 }
 
 /// A folder's mode, set until the guard drops.
+#[cfg(unix)]
 pub struct Mode {
     path: PathBuf,
     original: fs::Permissions,
@@ -78,6 +122,7 @@ pub struct Mode {
 
 /// Sets `path` to `mode`. Root reads past a folder's mode, so a test that
 /// relies on one needs an ordinary user.
+#[cfg(unix)]
 pub fn set_mode(path: &Path, mode: u32) -> Mode {
     // SAFETY: geteuid has no preconditions.
     let user = unsafe { libc::geteuid() };
@@ -93,6 +138,7 @@ pub fn set_mode(path: &Path, mode: u32) -> Mode {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Mode {
     fn drop(&mut self) {
         let _ = fs::set_permissions(&self.path, self.original.clone());
