@@ -415,7 +415,8 @@ pub fn scan_with(
     let mut candidates = catalog::candidates(&root, survey.home, stop);
     candidates.extend(projects::candidates(&root, survey, stop));
     for candidate in &mut candidates {
-        candidate.in_use = in_use(
+        candidate.in_use = using(
+            survey.home,
             &candidate.path,
             candidate.project.as_deref(),
             survey.busy,
@@ -510,7 +511,8 @@ pub fn recheck(reach: &Reach, findings: &[Finding], usage: &Usage) -> io::Result
         .iter()
         .filter(|finding| roots.still_there(finding))
         .map(|finding| Finding {
-            in_use: in_use(
+            in_use: using(
+                reach.home,
                 &finding.path,
                 finding.project.as_deref(),
                 &usage.busy,
@@ -535,6 +537,28 @@ pub fn in_use(
     });
     let holder = || busy.iter().find(|(held, _)| holds(held, path, project));
     server.or_else(holder).map(|(_, who)| who.clone())
+}
+
+/// Who is using what is at `path` in `home`, by `in_use`, or else which of
+/// the programs the catalog says use the place there is running.
+pub(crate) fn using(
+    home: &Path,
+    path: &Path,
+    project: Option<&Path>,
+    busy: &[(PathBuf, String)],
+    running: &[(PathBuf, String)],
+) -> Option<String> {
+    in_use(path, project, busy, running).or_else(|| {
+        let programs = catalog::used_by(path.strip_prefix(home).ok()?);
+        busy.iter()
+            .map(|(_, who)| who)
+            .find(|who| {
+                programs
+                    .iter()
+                    .any(|program| who.eq_ignore_ascii_case(program))
+            })
+            .cloned()
+    })
 }
 
 /// Whether a process holding `held` keeps the folder at `path`, a build

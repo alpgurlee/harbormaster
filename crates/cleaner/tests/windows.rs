@@ -6,14 +6,20 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
-use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, write};
-use harbormaster_cleaner::{Finding, Group, Survey, scan, usual_roots};
+use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
+use harbormaster_cleaner::{
+    Finding, Group, Outcome, Survey, Usage, Why, remove, scan, usual_roots,
+};
 
 fn scanned(home: &Path, roots: &[PathBuf]) -> Vec<Finding> {
+    scanned_while(home, roots, &[])
+}
+
+fn scanned_while(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> Vec<Finding> {
     let survey = Survey {
         home,
         roots,
-        busy: &[],
+        busy,
         running: &[],
         idle_after: 30 * DAY,
         now: SystemTime::now(),
@@ -93,4 +99,54 @@ fn looks_for_projects_where_visual_studio_and_github_desktop_put_them() {
         assert_eq!(output.path, moved.join("node_modules"));
         std::fs::remove_dir_all(machine.home.join(folder)).expect("cleared");
     }
+}
+
+/// What a tool has open can't be read on Windows, so its running is taken
+/// as its using its own cache.
+#[test]
+fn takes_a_cache_to_be_in_use_while_its_tool_runs() {
+    let machine = machine();
+    let registry = machine.home.join(r".cargo\registry\cache");
+    write(&registry.join(r"index\a.crate"), &vec![1; 2 * MIB]);
+    write(&machine.home.join(NPM).join("a"), &vec![1; 2 * MIB]);
+    let cargo = [(PathBuf::from(r"C:\Rust\bin\cargo.exe"), "Cargo".to_string())];
+
+    let findings = scanned_while(&machine.home, &[], &cargo);
+
+    let registry = named(&findings, "Cargo").expect("Cargo's cache");
+    assert_eq!(
+        (registry.picked, registry.in_use.as_deref()),
+        (false, Some("Cargo"))
+    );
+    let npm = named(&findings, "npm").expect("npm's cache");
+    assert_eq!((npm.picked, npm.in_use.as_deref()), (true, None));
+
+    let cleaned = remove(
+        &reach(&machine.home),
+        std::slice::from_ref(registry),
+        &|| {
+            Ok(Usage {
+                busy: cargo.to_vec(),
+                running: Vec::new(),
+            })
+        },
+        &|_| panic!("nothing goes to the Recycle Bin"),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("removal should run");
+
+    assert!(
+        matches!(
+            &cleaned.removals[0].outcome,
+            Outcome::Refused { why: Why::InUse { by } } if by == "Cargo"
+        ),
+        "{cleaned:?}"
+    );
+    assert!(
+        machine
+            .home
+            .join(r".cargo\registry\cache\index\a.crate")
+            .exists()
+    );
 }

@@ -345,9 +345,9 @@ fn entries(bytes: &[u8], device: u64) -> Vec<(OsString, Stat)> {
                 modified: from_ticks(entry.LastWriteTime),
             },
         ));
-        // The next entry starts past this one's fixed part, or there is none.
+        // The next entry starts past this one's name, or there is none.
         let next = entry.NextEntryOffset as usize;
-        if next < name_at {
+        if next < name_at + entry.FileNameLength as usize {
             break;
         }
         at += next;

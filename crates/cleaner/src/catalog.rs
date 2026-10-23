@@ -19,6 +19,10 @@ struct Place {
     /// Of entries found one by one, the one changed last stays unpicked:
     /// the device symbols Xcode used most recently.
     keep_latest: bool,
+    /// The programs that keep it in use while any of them runs, by name.
+    /// Windows doesn't tell what a program has open, as macOS does, so
+    /// there a tool's running is taken as its using its cache.
+    used_by: &'static [&'static str],
 }
 
 const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
@@ -29,6 +33,17 @@ const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
         path,
         each: false,
         keep_latest: false,
+        used_by: &[],
+    }
+}
+
+impl Place {
+    #[cfg(windows)]
+    const fn used_by(self, programs: &'static [&'static str]) -> Self {
+        Self {
+            used_by: programs,
+            ..self
+        }
     }
 }
 
@@ -155,68 +170,77 @@ const PLACES: &[Place] = &[
 /// what an app has open.
 #[cfg(windows)]
 const PLACES: &[Place] = &[
+    // npm, npx, Yarn and node-gyp run as node, which says nothing of what it runs.
     whole(Group::Packages, "npm", r"AppData\Local\npm-cache\_cacache"),
     whole(Group::Packages, "npx", r"AppData\Local\npm-cache\_npx"),
-    whole(Group::Packages, "pnpm", r"AppData\Local\pnpm\store"),
+    whole(Group::Packages, "pnpm", r"AppData\Local\pnpm\store").used_by(&["pnpm"]),
     whole(
         Group::Packages,
         "pnpm metadata",
         r"AppData\Local\pnpm-cache",
-    ),
+    )
+    .used_by(&["pnpm"]),
     whole(Group::Packages, "Yarn", r"AppData\Local\Yarn\Cache"),
     whole(
         Group::Packages,
         "Yarn Berry",
         r"AppData\Local\Yarn\Berry\cache",
     ),
-    whole(Group::Packages, "Bun", r".bun\install\cache"),
-    whole(Group::Packages, "pip", r"AppData\Local\pip\Cache"),
-    whole(Group::Packages, "uv", r"AppData\Local\uv\cache"),
-    whole(Group::Packages, "Poetry", r"AppData\Local\pypoetry\Cache"),
-    whole(Group::Packages, "Cargo", r".cargo\registry\cache"),
-    whole(Group::Packages, "Cargo sources", r".cargo\registry\src"),
-    whole(Group::Packages, "Cargo git", r".cargo\git\checkouts"),
-    whole(Group::Packages, "Go build cache", r"AppData\Local\go-build"),
-    whole(Group::Packages, "Composer", r"AppData\Local\Composer"),
+    whole(Group::Packages, "Bun", r".bun\install\cache").used_by(&["bun"]),
+    whole(Group::Packages, "pip", r"AppData\Local\pip\Cache").used_by(&["pip", "pip3"]),
+    whole(Group::Packages, "uv", r"AppData\Local\uv\cache").used_by(&["uv", "uvx"]),
+    whole(Group::Packages, "Poetry", r"AppData\Local\pypoetry\Cache").used_by(&["poetry"]),
+    whole(Group::Packages, "Cargo", r".cargo\registry\cache").used_by(CARGO),
+    whole(Group::Packages, "Cargo sources", r".cargo\registry\src").used_by(CARGO),
+    whole(Group::Packages, "Cargo git", r".cargo\git\checkouts").used_by(CARGO),
+    whole(Group::Packages, "Go build cache", r"AppData\Local\go-build").used_by(&["go"]),
+    whole(Group::Packages, "Composer", r"AppData\Local\Composer").used_by(&["composer"]),
     // Only what pub downloaded: its bin and global_packages are tools the user activated.
     whole(
         Group::Packages,
         "Dart packages",
         r"AppData\Local\Pub\Cache\hosted",
-    ),
+    )
+    .used_by(DART),
     whole(
         Group::Packages,
         "Dart git packages",
         r"AppData\Local\Pub\Cache\git",
-    ),
+    )
+    .used_by(DART),
     // Only what Deno downloaded or compiled: location_data holds what programs stored.
     whole(
         Group::Packages,
         "Deno modules",
         r"AppData\Local\deno\remote",
-    ),
+    )
+    .used_by(DENO),
     whole(
         Group::Packages,
         "Deno npm packages",
         r"AppData\Local\deno\npm",
-    ),
+    )
+    .used_by(DENO),
     whole(
         Group::Packages,
         "Deno compiled code",
         r"AppData\Local\deno\gen",
-    ),
+    )
+    .used_by(DENO),
     // What NuGet fetched over HTTP; the packages builds use stay.
     whole(
         Group::Packages,
         "NuGet downloads",
         r"AppData\Local\NuGet\v3-cache",
-    ),
-    whole(Group::Packages, "Gradle", r".gradle\caches"),
+    )
+    .used_by(NUGET),
+    whole(Group::Packages, "Gradle", r".gradle\caches").used_by(GRADLE),
     whole(
         Group::Packages,
         "Gradle distributions",
         r".gradle\wrapper\dists",
-    ),
+    )
+    .used_by(GRADLE),
     whole(Group::Packages, "node-gyp", r"AppData\Local\node-gyp\Cache"),
     whole(Group::Packages, "Next.js SWC", r"AppData\Local\next-swc"),
     whole(
@@ -224,12 +248,25 @@ const PLACES: &[Place] = &[
         "TypeScript",
         r"AppData\Local\Microsoft\TypeScript",
     ),
+    // A browser Playwright runs is a program inside it, which is seen anyway.
     whole(
         Group::Packages,
         "Playwright browsers",
         r"AppData\Local\ms-playwright",
     ),
 ];
+
+#[cfg(windows)]
+const CARGO: &[&str] = &["cargo", "rustc"];
+#[cfg(windows)]
+const DART: &[&str] = &["dart"];
+#[cfg(windows)]
+const DENO: &[&str] = &["deno"];
+#[cfg(windows)]
+const NUGET: &[&str] = &["dotnet", "msbuild", "nuget"];
+/// The daemons that run Gradle's builds, as the engine names them.
+#[cfg(windows)]
+const GRADLE: &[&str] = &["Gradle daemon", "Kotlin daemon"];
 
 /// Where apps keep caches, each in a folder named after the app.
 #[cfg(target_os = "macos")]
@@ -305,6 +342,18 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
         }
     }
     found
+}
+
+/// The programs that keep the place at `relative` from the home folder, or
+/// one of its entries, in use while they run.
+pub(crate) fn used_by(relative: &Path) -> &'static [&'static str] {
+    PLACES
+        .iter()
+        .find(|place| {
+            let at = Path::new(place.path);
+            relative == at || (place.each && relative.parent() == Some(at))
+        })
+        .map_or(&[], |place| place.used_by)
 }
 
 /// The real folders inside `dir`, with when each last changed; links and

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir, Item};
-use crate::{Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, in_use};
+use crate::{Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, using};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
@@ -110,7 +110,8 @@ fn one(
         Ok(reached) => reached,
         Err(why) => return refused(why),
     };
-    if let Some(who) = in_use(
+    if let Some(who) = using(
+        at,
         &finding.path,
         finding.project.as_deref(),
         &usage.busy,
