@@ -73,13 +73,18 @@ export function note(finding: Finding, home: string, now: number, i18n: Translat
   return why === null ? where : `${where} · ${why}`;
 }
 
+/** What separates the names in a path: `/`, or on Windows `\` too. */
+const SEPARATORS = ["/", "\\"];
+
 function folderOf(path: string): string {
-  return path.slice(0, Math.max(0, path.lastIndexOf("/"))) || "/";
+  const last = Math.max(...SEPARATORS.map((separator) => path.lastIndexOf(separator)));
+  return path.slice(0, Math.max(0, last)) || "/";
 }
 
-/** `~/code/shop` for a path in the home folder. */
+/** `~/code/shop`, or `~\code\shop` on Windows, for a path in the home folder. */
 export function shown(path: string, home: string): string {
-  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+  const inside = SEPARATORS.some((separator) => path.startsWith(home + separator));
+  return inside ? `~${path.slice(home.length)}` : path;
 }
 
 export function outcomeText(removal: Removal, i18n: Translator): string {

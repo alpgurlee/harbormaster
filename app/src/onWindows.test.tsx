@@ -331,6 +331,7 @@ describe("the cleaner on Windows", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: /^Developer/ }));
+    expect(screen.getByText("~\\AppData\\Local\\npm-cache\\_cacache")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show in File Explorer: npm" }));
 
     expect(driver.revealed).toEqual([npm.path]);
