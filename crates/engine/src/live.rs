@@ -241,16 +241,41 @@ pub fn members(keys: &[ProcessKey]) -> Result<Vec<Member>, Error> {
 /// to be Windows' own program.
 pub fn lineage() -> Result<Option<Vec<u32>>, Error> {
     let processes = harbormaster_platform::processes()?;
+    Ok(lineage_in(&processes))
+}
+
+/// This process, everything above it, and everything it started, such as
+/// the web view that draws its windows: what quitting an app must never
+/// reach. `None` as for [`lineage`].
+pub fn ours() -> Result<Option<Vec<u32>>, Error> {
+    let processes = harbormaster_platform::processes()?;
+    Ok(lineage_in(&processes).map(|mut ours| {
+        ours.extend(below(std::process::id(), &processes));
+        ours
+    }))
+}
+
+/// What `pid` started, and what those started, as `processes` show them.
+fn below(pid: u32, processes: &[ProcessEntry]) -> Vec<u32> {
+    crate::tree::ProcessTree::new(processes)
+        .subtree(harbormaster_platform::Pid(pid))
+        .into_iter()
+        .map(|entry| entry.key.pid.0)
+        .filter(|&found| found != pid)
+        .collect()
+}
+
+fn lineage_in(processes: &[ProcessEntry]) -> Option<Vec<u32>> {
     let parents: HashMap<u32, u32> = processes
         .iter()
         .filter_map(|entry| entry.parent.map(|parent| (entry.key.pid.0, parent.0)))
         .collect();
     let windows = harbormaster_platform::windows_folder();
     let shell = harbormaster_platform::shell_process();
-    let roots = roots(&processes, windows.as_deref(), shell, &|key| {
+    let roots = roots(processes, windows.as_deref(), shell, &|key| {
         harbormaster_platform::executable(key).known().cloned()
     });
-    Ok(lineage_from(std::process::id(), &parents, &roots))
+    lineage_from(std::process::id(), &parents, &roots)
 }
 
 /// The processes a chain may end at. Without a Windows folder it is
@@ -393,10 +418,34 @@ mod tests {
 
     use harbormaster_platform::{Owner, Pid, ProcessEntry, ProcessKey, StartTime};
 
-    use super::{Daemon, daemon, lineage_from, roots, strays_among};
+    use super::{Daemon, below, daemon, lineage_from, roots, strays_among};
 
     fn args(args: &[&str]) -> Vec<String> {
         args.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn finds_what_this_process_started_and_what_that_started() {
+        let child = |pid, parent, start| ProcessEntry {
+            key: ProcessKey {
+                pid: Pid(pid),
+                start: StartTime(start),
+                exec: 0,
+            },
+            parent: Some(Pid(parent)),
+            ..entry(pid, "msedgewebview2.exe", Owner::CurrentUser)
+        };
+        let processes = [
+            child(10, 1, 10),
+            child(11, 10, 11),
+            child(12, 11, 12),
+            // Started before us, under a pid ours took over later.
+            child(13, 10, 5),
+            child(14, 1, 14),
+        ];
+
+        assert_eq!(below(10, &processes), [11, 12]);
+        assert_eq!(below(99, &processes), [0u32; 0]);
     }
 
     #[test]

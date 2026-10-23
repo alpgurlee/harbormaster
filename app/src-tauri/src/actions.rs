@@ -19,14 +19,14 @@ use crate::scanning::{self, Scanning};
 use crate::settings::Store;
 use crate::stopping::{Reason, Stopped};
 
-/// `name` is an app as the breakdown lists it.
+/// `id` names an app as the breakdown lists it.
 #[tauri::command]
-pub(crate) async fn quit_app_preview(name: String, app: AppHandle) -> Result<QuitPreview, Reason> {
+pub(crate) async fn quit_app_preview(id: String, app: AppHandle) -> Result<QuitPreview, Reason> {
     blocking(move || {
         Ok(match app.state::<Arc<Scanning>>().snapshot() {
             Some(snapshot) => app
                 .state::<Quits>()
-                .preview(&scanning::servers(&snapshot.services), &name),
+                .preview(&scanning::servers(&snapshot.services), &id),
             None => QuitPreview::Refused {
                 reason: Reason::NotFound,
             },

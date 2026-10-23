@@ -3,13 +3,19 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use harbormaster_platform::{ProcessEntry, ProcessKey};
+use harbormaster_platform::{Owner, ProcessEntry, ProcessKey};
 use serde::Serialize;
+
+use crate::role::normalize;
+use crate::tree::ProcessTree;
 
 /// One app's share of memory: every process its bundle runs, or one plain program.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUsage {
+    /// Which app this is, whose processes it counts, for the panel to name
+    /// it by when it asks to quit it.
+    pub id: String,
     pub name: String,
     pub memory_bytes: u64,
     /// Part of the OS all through, which the panel never offers to quit.
@@ -18,6 +24,10 @@ pub struct AppUsage {
     #[serde(skip)]
     pub members: Vec<ProcessKey>,
 }
+
+/// Windows' shared runtime for web pages inside apps: its processes serve
+/// the app that started them, and count as that app's.
+const WEB_VIEW: &str = "msedgewebview2";
 
 /// The memory of `processes` by app, largest first, leaving out `skip`: the
 /// dev servers, which the panel counts on their own. A process whose memory
@@ -28,19 +38,15 @@ pub fn usage(
     executable: &dyn Fn(ProcessKey) -> Option<PathBuf>,
     skip: &HashSet<ProcessKey>,
 ) -> Vec<AppUsage> {
+    let tree = ProcessTree::new(processes);
     let mut by_app: HashMap<String, AppUsage> = HashMap::new();
     for entry in processes {
         if skip.contains(&entry.key) {
             continue;
         }
-        let path = executable(entry.key);
-        let name = path
-            .as_deref()
-            .and_then(app_name)
-            .unwrap_or_else(|| entry.name.clone());
-        let system =
-            crate::service::is_system(entry) || path.as_deref().is_some_and(crate::is_os_component);
-        let app = by_app.entry(name.clone()).or_insert(AppUsage {
+        let (id, name, system) = describe(served(entry, &tree, skip), executable);
+        let app = by_app.entry(id.clone()).or_insert(AppUsage {
+            id,
             name,
             memory_bytes: 0,
             system: true,
@@ -58,8 +64,69 @@ pub fn usage(
         b.memory_bytes
             .cmp(&a.memory_bytes)
             .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
     });
     apps
+}
+
+/// The app `entry` counts as: the one a web view serves, or its own. A web
+/// view whose app is gone, or is left out, counts as a program of its own.
+fn served<'a>(
+    entry: &'a ProcessEntry,
+    tree: &ProcessTree<'a>,
+    skip: &HashSet<ProcessKey>,
+) -> &'a ProcessEntry {
+    let mut current = entry;
+    let mut seen = HashSet::new();
+    while normalize(&current.name) == WEB_VIEW && seen.insert(current.key.pid) {
+        match tree.parent(current.key.pid) {
+            Some(parent) => current = parent,
+            None => return entry,
+        }
+    }
+    if skip.contains(&current.key) {
+        entry
+    } else {
+        current
+    }
+}
+
+/// The app's id, its name, and whether it is part of the OS. Programs of
+/// one name kept in different places are different programs, and what
+/// another user or the system runs is apart from the user's own.
+fn describe(
+    entry: &ProcessEntry,
+    executable: &dyn Fn(ProcessKey) -> Option<PathBuf>,
+) -> (String, String, bool) {
+    let path = executable(entry.key);
+    let (what, name) = match path.as_deref() {
+        Some(path) => match app_name(path) {
+            Some(name) => (format!("app:{name}"), name),
+            None => (format!("path:{}", folded(path)), entry.name.clone()),
+        },
+        None => (format!("name:{}", entry.name), entry.name.clone()),
+    };
+    let whose = match entry.owner {
+        Owner::CurrentUser => "user",
+        Owner::OtherSession => "session",
+        Owner::OtherUser => "other",
+        Owner::System => "system",
+        Owner::Unknown => "unknown",
+    };
+    let system =
+        crate::service::is_system(entry) || path.as_deref().is_some_and(crate::is_os_component);
+    (format!("{whose}/{what}"), name, system)
+}
+
+/// A Windows path, whose case doesn't tell files apart, in lower case;
+/// any other as it is.
+fn folded(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if path.as_bytes().get(1) == Some(&b':') || path.starts_with(r"\\") {
+        path.to_lowercase()
+    } else {
+        path.into_owned()
+    }
 }
 
 /// `Google Chrome` for anything inside `…/Google Chrome.app/…`: the outermost
@@ -101,7 +168,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
-    use harbormaster_platform::{ProcessEntry, ProcessKey};
+    use harbormaster_platform::{Owner, Pid, ProcessEntry, ProcessKey};
 
     use super::{AppUsage, usage};
     use crate::tree::tests::entry;
@@ -139,12 +206,14 @@ mod tests {
             usage(&processes, &executable, &HashSet::new()),
             [
                 AppUsage {
+                    id: "user/app:Google Chrome".into(),
                     name: "Google Chrome".into(),
                     memory_bytes: 500 * MIB,
                     system: false,
                     members: vec![processes[0].key, processes[1].key],
                 },
                 AppUsage {
+                    id: "user/path:/opt/homebrew/bin/node".into(),
                     name: "node".into(),
                     memory_bytes: 50 * MIB,
                     system: false,
@@ -170,6 +239,7 @@ mod tests {
         assert_eq!(
             usage(&processes, &executable, &HashSet::new()),
             [AppUsage {
+                id: "user/app:claude".into(),
                 name: "claude".into(),
                 memory_bytes: 1700 * MIB,
                 system: false,
@@ -225,6 +295,175 @@ mod tests {
         assert_eq!(apps.len(), 1, "{apps:?}");
         assert_eq!(apps[0].memory_bytes, 300 * MIB);
         assert_eq!(apps[0].members, [processes[0].key, processes[1].key]);
+    }
+
+    #[test]
+    fn tells_apart_programs_of_one_name_kept_in_different_places() {
+        let processes = [
+            using(80, "node.exe", Some(100)),
+            using(81, "node.exe", Some(200)),
+            using(82, "node.exe", Some(300)),
+        ];
+        let paths = HashMap::from([
+            (80, r"C:\Program Files\nodejs\node.exe"),
+            (81, r"C:\Users\dev\AppData\Roaming\nvm\v22.1.0\node.exe"),
+            (82, r"c:\program files\NODEJS\NODE.EXE"),
+        ]);
+        let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
+
+        let apps = usage(&processes, &executable, &HashSet::new());
+
+        let groups: Vec<(&str, &str, Vec<ProcessKey>)> = apps
+            .iter()
+            .map(|app| (app.id.as_str(), app.name.as_str(), app.members.clone()))
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                (
+                    r"user/path:c:\program files\nodejs\node.exe",
+                    "node.exe",
+                    vec![processes[0].key, processes[2].key]
+                ),
+                (
+                    r"user/path:c:\users\dev\appdata\roaming\nvm\v22.1.0\node.exe",
+                    "node.exe",
+                    vec![processes[1].key]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_the_case_of_a_path_where_it_may_tell_files_apart() {
+        let processes = [using(83, "tool", Some(10)), using(84, "tool", Some(20))];
+        let paths = HashMap::from([(83, "/Users/dev/bin/tool"), (84, "/Users/dev/bin/TOOL")]);
+        let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
+
+        assert_eq!(usage(&processes, &executable, &HashSet::new()).len(), 2);
+    }
+
+    #[test]
+    fn keeps_apart_what_others_run_from_the_same_program() {
+        let processes = [
+            using(85, "node.exe", Some(10)),
+            ProcessEntry {
+                owner: Owner::OtherUser,
+                ..using(86, "node.exe", Some(20))
+            },
+            ProcessEntry {
+                owner: Owner::OtherSession,
+                ..using(87, "node.exe", Some(30))
+            },
+        ];
+        let executable = |_| Some(PathBuf::from(r"C:\Program Files\nodejs\node.exe"));
+
+        let apps = usage(&processes, &executable, &HashSet::new());
+
+        let ids: Vec<&str> = apps.iter().map(|app| app.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                r"session/path:c:\program files\nodejs\node.exe",
+                r"other/path:c:\program files\nodejs\node.exe",
+                r"user/path:c:\program files\nodejs\node.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn counts_a_web_view_as_the_app_it_serves() {
+        let web_view = |pid, parent| ProcessEntry {
+            parent: Some(Pid(parent)),
+            ..using(pid, "msedgewebview2.exe", Some(100))
+        };
+        let processes = [
+            using(100, "ms-teams.exe", Some(300)),
+            web_view(101, 100),
+            web_view(102, 101),
+            using(200, "SearchHost.exe", Some(50)),
+            web_view(201, 200),
+            // Its app is gone.
+            web_view(301, 300),
+        ];
+        let paths = HashMap::from([
+            (100, r"C:\Program Files\WindowsApps\MSTeams\ms-teams.exe"),
+            (
+                200,
+                r"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS\SearchHost.exe",
+            ),
+        ]);
+        let executable = |key: ProcessKey| {
+            Some(PathBuf::from(paths.get(&key.pid.0).copied().unwrap_or(
+                r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\msedgewebview2.exe",
+            )))
+        };
+
+        let apps = usage(&processes, &executable, &HashSet::new());
+
+        let groups: Vec<(&str, u64, bool, Vec<u32>)> = apps
+            .iter()
+            .map(|app| {
+                let pids = app.members.iter().map(|key| key.pid.0).collect();
+                (app.name.as_str(), app.memory_bytes / MIB, app.system, pids)
+            })
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("ms-teams.exe", 500, false, vec![100, 101, 102]),
+                ("SearchHost.exe", 150, true, vec![200, 201]),
+                ("msedgewebview2.exe", 100, false, vec![301]),
+            ]
+        );
+    }
+
+    #[test]
+    fn leaves_a_web_view_a_dev_server_started_on_its_own() {
+        let server = using(400, "node.exe", Some(200));
+        let processes = [
+            server.clone(),
+            ProcessEntry {
+                parent: Some(Pid(400)),
+                ..using(401, "msedgewebview2.exe", Some(100))
+            },
+        ];
+        let executable = |key: ProcessKey| {
+            Some(PathBuf::from(if key.pid.0 == 400 {
+                r"C:\Program Files\nodejs\node.exe"
+            } else {
+                r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\msedgewebview2.exe"
+            }))
+        };
+
+        let apps = usage(&processes, &executable, &HashSet::from([server.key]));
+
+        let groups: Vec<(&str, Vec<ProcessKey>)> = apps
+            .iter()
+            .map(|app| (app.name.as_str(), app.members.clone()))
+            .collect();
+        assert_eq!(groups, [("msedgewebview2.exe", vec![processes[1].key])]);
+    }
+
+    #[test]
+    fn groups_what_it_cannot_locate_by_its_name() {
+        let processes = [
+            using(90, "Discord.exe", Some(100)),
+            using(91, "Discord.exe", Some(50)),
+        ];
+
+        let apps = usage(&processes, &|_| None, &HashSet::new());
+
+        assert_eq!(
+            apps,
+            [AppUsage {
+                id: "user/name:Discord.exe".into(),
+                name: "Discord.exe".into(),
+                memory_bytes: 150 * MIB,
+                system: false,
+                members: vec![processes[0].key, processes[1].key],
+            }]
+        );
     }
 
     #[test]

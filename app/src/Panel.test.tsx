@@ -55,8 +55,8 @@ const update: Update = {
   ],
   memory: { used: 16 * 1024 * MIB, total: 32 * 1024 * MIB },
   apps: [
-    { name: "Google Chrome", memoryBytes: 3.2 * 1024 * MIB, system: false },
-    { name: "Slack", memoryBytes: 640 * MIB, system: false },
+    { id: "app:Google Chrome", name: "Google Chrome", memoryBytes: 3.2 * 1024 * MIB, system: false },
+    { id: "app:Slack", name: "Slack", memoryBytes: 640 * MIB, system: false },
   ],
   scannedAt: NOW,
   thermal: "nominal",
@@ -149,7 +149,7 @@ describe("Panel", () => {
   });
 
   it("offers to quit each app, but neither the dev servers nor the system", () => {
-    const replayd = { name: "replayd", memoryBytes: 300 * MIB, system: true };
+    const replayd = { id: "path:/usr/libexec/replayd", name: "replayd", memoryBytes: 300 * MIB, system: true };
     const { onQuit } = show({ update: { ...update, apps: [...(update.apps ?? []), replayd] } });
     fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
 
@@ -160,6 +160,23 @@ describe("Panel", () => {
     ]);
     fireEvent.click(within(list).getByRole("button", { name: "Quit Slack" }));
     expect(onQuit).toHaveBeenCalledWith(update.apps?.[1]);
+  });
+
+  it("tells apart two programs of one name, and quits the one picked", () => {
+    const node = (id: string, mib: number) => ({ id, name: "node.exe", memoryBytes: mib * MIB, system: false });
+    const apps = [node(String.raw`path:c:\program files\nodejs\node.exe`, 900), node(String.raw`path:c:\nvm\node.exe`, 700)];
+    // React says so when two rows share a key, and may then mix them up.
+    const warned = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { onQuit } = show({ update: { ...update, apps } });
+    fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
+
+    expect(warned).not.toHaveBeenCalled();
+    warned.mockRestore();
+    const list = screen.getByRole("list", { name: "Memory by app" });
+    const quits = within(list).getAllByRole("button", { name: "Quit node" });
+    expect(quits).toHaveLength(2);
+    fireEvent.click(quits[1]);
+    expect(onQuit).toHaveBeenCalledWith(apps[1]);
   });
 
   it("says so while it is still measuring the apps", () => {
@@ -181,7 +198,7 @@ describe("Panel", () => {
   });
 
   it("names a coding agent the way the rest of the panel does", () => {
-    show({ update: { ...update, apps: [{ name: "claude", memoryBytes: 1.7 * 1024 * MIB, system: false }] } });
+    show({ update: { ...update, apps: [{ id: "app:claude", name: "claude", memoryBytes: 1.7 * 1024 * MIB, system: false }] } });
 
     fireEvent.click(screen.getByRole("button", { name: "16.0 of 32 GB" }));
 

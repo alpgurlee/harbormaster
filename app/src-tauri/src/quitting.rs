@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use harbormaster_engine::apps::AppUsage;
 use harbormaster_engine::{Holder, Protection, Signals, Standing, live};
 use harbormaster_platform::{Presence, ProcessKey, Signal, SignalOutcome};
 use serde::Serialize;
@@ -45,7 +46,7 @@ pub(crate) enum QuitPreview {
 struct Seen {
     key: ProcessKey,
     standing: Standing,
-    /// Harbormaster itself or something above it.
+    /// Harbormaster itself, something above it, or something it started.
     own: bool,
     /// An app the system can ask to quit, rather than a bare program.
     app: bool,
@@ -93,25 +94,22 @@ struct Ledger {
 }
 
 impl Quits {
-    /// `skip` holds the dev servers' processes, which the breakdown leaves out.
-    pub(crate) fn preview(&self, skip: &HashSet<ProcessKey>, name: &str) -> QuitPreview {
-        self.prepare(skip, name)
+    /// `skip` holds the dev servers' processes, which the breakdown leaves
+    /// out; `id` names an app as the breakdown lists it.
+    pub(crate) fn preview(&self, skip: &HashSet<ProcessKey>, id: &str) -> QuitPreview {
+        self.prepare(skip, id)
             .unwrap_or_else(|reason| QuitPreview::Refused { reason })
     }
 
-    fn prepare(&self, skip: &HashSet<ProcessKey>, name: &str) -> Result<QuitPreview, Reason> {
+    fn prepare(&self, skip: &HashSet<ProcessKey>, id: &str) -> Result<QuitPreview, Reason> {
         // Every check before the request relies on keys that change on exec.
         if !harbormaster_platform::tracks_exec() {
             return Err(Reason::UntrackedExec);
         }
-        let own = live::lineage()
+        let own = live::ours()
             .map_err(failed)?
             .ok_or(Reason::UnknownLineage)?;
-        let app = live::apps(skip)
-            .map_err(failed)?
-            .into_iter()
-            .find(|app| app.name == name)
-            .ok_or(Reason::NotFound)?;
+        let app = chosen(live::apps(skip).map_err(failed)?, id)?;
         let guard = live::guards(&home(), &app.members).map_err(failed)?;
         let seen: Vec<Seen> = app
             .members
@@ -226,6 +224,20 @@ impl Quits {
     }
 }
 
+/// The app `id` names, unless it is part of the OS.
+fn chosen(apps: Vec<AppUsage>, id: &str) -> Result<AppUsage, Reason> {
+    let app = apps
+        .into_iter()
+        .find(|app| app.id == id)
+        .ok_or(Reason::NotFound)?;
+    if app.system {
+        return Err(Reason::Protected {
+            protection: Protection::System,
+        });
+    }
+    Ok(app)
+}
+
 /// What to ask to quit, or why nothing.
 fn plan(seen: &[Seen]) -> Result<Plan, Reason> {
     let alive: Vec<&Seen> = seen
@@ -293,7 +305,7 @@ fn recheck(approval: &Approval) -> Result<(), Reason> {
     if !harbormaster_platform::tracks_exec() {
         return Err(Reason::UntrackedExec);
     }
-    let own = live::lineage()
+    let own = live::ours()
         .map_err(failed)?
         .ok_or(Reason::UnknownLineage)?;
     let guard = live::guards(&home(), approval.plan.targets()).map_err(failed)?;
@@ -392,7 +404,11 @@ mod tests {
     use harbormaster_engine::{Holder, Protection, Standing};
     use harbormaster_platform::{Pid, ProcessKey, StartTime};
 
-    use super::{APPROVAL_LIFETIME, Approval, Plan, QuitPreview, Quits, Seen, plan, still_fits};
+    use harbormaster_engine::apps::AppUsage;
+
+    use super::{
+        APPROVAL_LIFETIME, Approval, Plan, QuitPreview, Quits, Seen, chosen, plan, still_fits,
+    };
     use crate::stopping::{Reason, Stopping};
 
     fn key(pid: u32) -> ProcessKey {
@@ -419,6 +435,37 @@ mod tests {
             names: Vec::new(),
             at,
         }
+    }
+
+    fn app(id: &str, system: bool) -> AppUsage {
+        AppUsage {
+            id: id.into(),
+            name: "node.exe".into(),
+            memory_bytes: 1,
+            system,
+            members: vec![key(10)],
+        }
+    }
+
+    #[test]
+    fn picks_the_app_by_id_and_never_a_part_of_the_system() {
+        let apps = vec![
+            app(r"user/path:c:\nvm\node.exe", false),
+            app(r"user/path:c:\program files\nodejs\node.exe", false),
+            app("system/name:svchost.exe", true),
+        ];
+
+        assert_eq!(
+            chosen(apps.clone(), r"user/path:c:\program files\nodejs\node.exe").map(|app| app.id),
+            Ok(r"user/path:c:\program files\nodejs\node.exe".into())
+        );
+        assert_eq!(
+            chosen(apps.clone(), "system/name:svchost.exe").err(),
+            Some(Reason::Protected {
+                protection: Protection::System
+            })
+        );
+        assert_eq!(chosen(apps, "node.exe").err(), Some(Reason::NotFound));
     }
 
     #[test]

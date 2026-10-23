@@ -290,6 +290,7 @@ mod tests {
             services: Vec::new(),
             memory: Some(Memory { used: 1, total: 2 }),
             apps: Some(vec![AppUsage {
+                id: "user/app:Google Chrome".into(),
                 name: "Google Chrome".into(),
                 memory_bytes: 3,
                 system: false,
@@ -304,7 +305,12 @@ mod tests {
             serde_json::json!({
                 "services": [],
                 "memory": { "used": 1, "total": 2 },
-                "apps": [{ "name": "Google Chrome", "memoryBytes": 3, "system": false }],
+                "apps": [{
+                    "id": "user/app:Google Chrome",
+                    "name": "Google Chrome",
+                    "memoryBytes": 3,
+                    "system": false
+                }],
                 "scannedAt": 42,
                 "thermal": "serious"
             })

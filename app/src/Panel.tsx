@@ -345,7 +345,7 @@ function Breakdown({ servers, projects, apps, total, onQuit }: BreakdownProps) {
   }
   const parts = [
     { key: "servers", name: i18n.t("devServers"), bytes: servers, app: null },
-    ...apps.map((app) => ({ key: `app:${app.name}`, name: displayName(app.name), bytes: app.memoryBytes, app })),
+    ...apps.map((app) => ({ key: `app:${app.id}`, name: displayName(app.name), bytes: app.memoryBytes, app })),
   ].filter((part) => part.bytes > 0);
   return (
     <div id="memory-by-app" className={styles.breakdown}>

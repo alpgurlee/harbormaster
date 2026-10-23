@@ -10,7 +10,8 @@ import styles from "./Sheet.module.css";
 
 /** The backend's quit calls, which tests hand in themselves. */
 export interface Quitter {
-  preview: (name: string) => Promise<QuitPreview>;
+  /** `id` names the app as the breakdown lists it. */
+  preview: (id: string) => Promise<QuitPreview>;
   quit: (token: number) => Promise<Stopped>;
 }
 
@@ -44,7 +45,7 @@ export function QuitSheet({ app, quitter = BACKEND, onClose, onDone }: QuitSheet
   useEffect(() => {
     let current = true;
     quitter
-      .preview(app.name)
+      .preview(app.id)
       .then((preview) => {
         if (current) setStep(preview.kind === "refused" ? preview : { kind: "ready", preview });
       })
@@ -54,7 +55,7 @@ export function QuitSheet({ app, quitter = BACKEND, onClose, onDone }: QuitSheet
     return () => {
       current = false;
     };
-  }, [app.name, quitter]);
+  }, [app.id, quitter]);
 
   // The main button takes the focus at each step, or the sheet itself while none is usable.
   useEffect(() => {

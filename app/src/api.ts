@@ -51,7 +51,7 @@ export const stopPreview = (id: string) => invoke<Preview>("stop_preview", { id 
 /** Rejects with a `Reason` when the server changed since it was approved. */
 export const stopServer = (token: number) => invoke<Stopped>("stop", { token });
 export const forceStop = (token: number) => invoke<Stopped>("force_stop", { token });
-export const quitAppPreview = (name: string) => invoke<QuitPreview>("quit_app_preview", { name });
+export const quitAppPreview = (id: string) => invoke<QuitPreview>("quit_app_preview", { id });
 /** Asks politely and never forces; rejects with a `Reason` when the app changed since it was approved. */
 export const quitApp = (token: number) => invoke<Stopped>("quit_app", { token });
 export const resizePanel = (height: number) => invoke<void>("resize_panel", { height });

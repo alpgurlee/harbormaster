@@ -8,7 +8,7 @@ import type { AppUsage } from "./types";
 
 afterEach(cleanup);
 
-const chrome: AppUsage = { name: "Google Chrome", memoryBytes: 3 * 1024 * 1024 * 1024, system: false };
+const chrome: AppUsage = { id: "app:Google Chrome", name: "Google Chrome", memoryBytes: 3 * 1024 * 1024 * 1024, system: false };
 
 const programs: QuitPreview = {
   kind: "programs",
@@ -42,7 +42,7 @@ describe("QuitSheet", () => {
 
     expect(screen.getByRole("dialog", { name: "Quit Google Chrome?" })).toBeTruthy();
     expect(screen.getByText(/as ⌘Q would/)).toBeTruthy();
-    expect(quitter.preview).toHaveBeenCalledWith("Google Chrome");
+    expect(quitter.preview).toHaveBeenCalledWith("app:Google Chrome");
     expect(quitter.quit).not.toHaveBeenCalled();
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Quit" })));
@@ -52,7 +52,7 @@ describe("QuitSheet", () => {
   });
 
   it("warns before closing command-line programs, and says what closes and what stays", async () => {
-    await open({ preview: vi.fn(async () => programs) }, { name: "node", memoryBytes: 1, system: false });
+    await open({ preview: vi.fn(async () => programs) }, { id: "path:/usr/local/bin/node", name: "node", memoryBytes: 1, system: false });
 
     expect(screen.getByText(/a coding agent's session, a language server/)).toBeTruthy();
     expect(screen.getByText("node server.js")).toBeTruthy();
@@ -62,7 +62,7 @@ describe("QuitSheet", () => {
   });
 
   it("names a coding agent as the rest of the panel does", async () => {
-    await open({}, { name: "claude", memoryBytes: 1, system: false });
+    await open({}, { id: "app:claude", name: "claude", memoryBytes: 1, system: false });
 
     expect(screen.getByRole("dialog", { name: "Quit Claude Code?" })).toBeTruthy();
   });
@@ -86,7 +86,7 @@ describe("QuitSheet", () => {
       ],
       stillRunning: true,
     };
-    await open({ preview: vi.fn(async () => programs), quit: vi.fn(async () => stuck) }, { name: "node", memoryBytes: 1, system: false });
+    await open({ preview: vi.fn(async () => programs), quit: vi.fn(async () => stuck) }, { id: "path:/usr/local/bin/node", name: "node", memoryBytes: 1, system: false });
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Quit" })));
 

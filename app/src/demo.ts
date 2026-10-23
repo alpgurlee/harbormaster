@@ -84,7 +84,7 @@ export function sample(now: number): Update {
   return {
     services: SAMPLES.map((entry, index) => service(entry, index, now)),
     memory: { used: 14.9 * GIB, total: 32 * GIB },
-    apps: APPS.map(([name, memoryMib]) => ({ name, memoryBytes: memoryMib * MIB, system: false })),
+    apps: APPS.map(([name, memoryMib]) => ({ id: `user/app:${name}`, name, memoryBytes: memoryMib * MIB, system: false })),
     scannedAt: now,
     thermal: "nominal",
   };

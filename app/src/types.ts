@@ -64,6 +64,8 @@ export interface Memory {
 
 /** One app's processes together, or one plain program. */
 export interface AppUsage {
+  /** Which app this is, to ask about quitting it by; never shown. */
+  id: string;
   name: string;
   memoryBytes: number;
   /** Part of the OS, which the panel never offers to quit. */
