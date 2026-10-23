@@ -211,7 +211,12 @@ pub fn guards(home: &Path, keys: &[ProcessKey]) -> Result<HashMap<ProcessKey, St
 pub fn apps(skip: &HashSet<ProcessKey>) -> Result<Vec<AppUsage>, Error> {
     let processes = harbormaster_platform::processes()?;
     let executable = |key| harbormaster_platform::executable(key).known().cloned();
-    Ok(crate::apps::usage(&processes, &executable, skip))
+    Ok(crate::apps::usage(
+        &processes,
+        &executable,
+        &harbormaster_platform::description,
+        skip,
+    ))
 }
 
 /// `keys` as a stop shows them, leaving out what exited or changed since.

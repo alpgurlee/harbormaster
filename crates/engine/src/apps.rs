@@ -29,13 +29,19 @@ pub struct AppUsage {
 /// the app that started them, and count as that app's.
 const WEB_VIEW: &str = "msedgewebview2";
 
+/// The longest description that names a program in the panel's rows.
+const LONGEST_NAME: usize = 64;
+
 /// The memory of `processes` by app, largest first, leaving out `skip`: the
 /// dev servers, which the panel counts on their own. A process whose memory
 /// can't be read still belongs to its app, so quitting the app sees all it
-/// would reach; an app with nothing measured is left out.
+/// would reach; an app with nothing measured is left out. A program outside
+/// a bundle goes by what `described` says its file is, where that can stand
+/// in for a name.
 pub fn usage(
     processes: &[ProcessEntry],
     executable: &dyn Fn(ProcessKey) -> Option<PathBuf>,
+    described: &dyn Fn(&Path) -> Option<String>,
     skip: &HashSet<ProcessKey>,
 ) -> Vec<AppUsage> {
     let tree = ProcessTree::new(processes);
@@ -44,7 +50,7 @@ pub fn usage(
         if skip.contains(&entry.key) {
             continue;
         }
-        let (id, name, system) = describe(served(entry, &tree, skip), executable);
+        let (id, name, system) = describe(served(entry, &tree, skip), executable, described);
         let app = by_app.entry(id.clone()).or_insert(AppUsage {
             id,
             name,
@@ -97,12 +103,18 @@ fn served<'a>(
 fn describe(
     entry: &ProcessEntry,
     executable: &dyn Fn(ProcessKey) -> Option<PathBuf>,
+    described: &dyn Fn(&Path) -> Option<String>,
 ) -> (String, String, bool) {
     let path = executable(entry.key);
     let (what, name) = match path.as_deref() {
         Some(path) => match app_name(path) {
             Some(name) => (format!("app:{name}"), name),
-            None => (format!("path:{}", folded(path)), entry.name.clone()),
+            None => (
+                format!("path:{}", folded(path)),
+                described(path)
+                    .and_then(|description| presentable(&description))
+                    .unwrap_or_else(|| entry.name.clone()),
+            ),
         },
         None => (format!("name:{}", entry.name), entry.name.clone()),
     };
@@ -116,6 +128,45 @@ fn describe(
     let system =
         crate::service::is_system(entry) || path.as_deref().is_some_and(crate::is_os_component);
     (format!("{whose}/{what}"), name, system)
+}
+
+/// Unicode's default-ignorable code points (DerivedCoreProperties.txt):
+/// drawn as nothing, and some reorder or hide what comes after them.
+const IGNORABLE: [(char, char); 17] = [
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{034F}', '\u{034F}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{115F}', '\u{1160}'),
+    ('\u{17B4}', '\u{17B5}'),
+    ('\u{180B}', '\u{180F}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{206F}'),
+    ('\u{3164}', '\u{3164}'),
+    ('\u{FE00}', '\u{FE0F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFA0}', '\u{FFA0}'),
+    ('\u{FFF0}', '\u{FFF8}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0FFF}'),
+];
+
+/// A program's description, where it can stand in for its name: some text
+/// short enough for a row, with nothing in it that hides or reorders what
+/// is shown. Any program can say anything of itself, so it only ever names.
+fn presentable(description: &str) -> Option<String> {
+    let description = description.trim();
+    let hidden = |c: char| {
+        c.is_control()
+            || IGNORABLE
+                .iter()
+                .any(|&(first, last)| (first..=last).contains(&c))
+    };
+    (!description.is_empty()
+        && description.chars().count() <= LONGEST_NAME
+        && !description.chars().any(hidden))
+    .then(|| description.to_string())
 }
 
 /// A Windows path, whose case doesn't tell files apart, in lower case;
@@ -166,7 +217,7 @@ fn is_version(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use harbormaster_platform::{Owner, Pid, ProcessEntry, ProcessKey};
 
@@ -203,7 +254,7 @@ mod tests {
         let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
 
         assert_eq!(
-            usage(&processes, &executable, &HashSet::new()),
+            usage(&processes, &executable, &|_| None, &HashSet::new()),
             [
                 AppUsage {
                     id: "user/app:Google Chrome".into(),
@@ -237,7 +288,7 @@ mod tests {
         };
 
         assert_eq!(
-            usage(&processes, &executable, &HashSet::new()),
+            usage(&processes, &executable, &|_| None, &HashSet::new()),
             [AppUsage {
                 id: "user/app:claude".into(),
                 name: "claude".into(),
@@ -263,7 +314,7 @@ mod tests {
         ]);
         let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
 
-        let apps = usage(&processes, &executable, &HashSet::new());
+        let apps = usage(&processes, &executable, &|_| None, &HashSet::new());
 
         let system: Vec<(&str, bool)> = apps
             .iter()
@@ -290,7 +341,7 @@ mod tests {
         ]);
         let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
 
-        let apps = usage(&processes, &executable, &HashSet::new());
+        let apps = usage(&processes, &executable, &|_| None, &HashSet::new());
 
         assert_eq!(apps.len(), 1, "{apps:?}");
         assert_eq!(apps[0].memory_bytes, 300 * MIB);
@@ -311,7 +362,7 @@ mod tests {
         ]);
         let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
 
-        let apps = usage(&processes, &executable, &HashSet::new());
+        let apps = usage(&processes, &executable, &|_| None, &HashSet::new());
 
         let groups: Vec<(&str, &str, Vec<ProcessKey>)> = apps
             .iter()
@@ -340,7 +391,10 @@ mod tests {
         let paths = HashMap::from([(83, "/Users/dev/bin/tool"), (84, "/Users/dev/bin/TOOL")]);
         let executable = |key: ProcessKey| paths.get(&key.pid.0).map(PathBuf::from);
 
-        assert_eq!(usage(&processes, &executable, &HashSet::new()).len(), 2);
+        assert_eq!(
+            usage(&processes, &executable, &|_| None, &HashSet::new()).len(),
+            2
+        );
     }
 
     #[test]
@@ -358,7 +412,7 @@ mod tests {
         ];
         let executable = |_| Some(PathBuf::from(r"C:\Program Files\nodejs\node.exe"));
 
-        let apps = usage(&processes, &executable, &HashSet::new());
+        let apps = usage(&processes, &executable, &|_| None, &HashSet::new());
 
         let ids: Vec<&str> = apps.iter().map(|app| app.id.as_str()).collect();
         assert_eq!(
@@ -399,7 +453,7 @@ mod tests {
             )))
         };
 
-        let apps = usage(&processes, &executable, &HashSet::new());
+        let apps = usage(&processes, &executable, &|_| None, &HashSet::new());
 
         let groups: Vec<(&str, u64, bool, Vec<u32>)> = apps
             .iter()
@@ -436,7 +490,12 @@ mod tests {
             }))
         };
 
-        let apps = usage(&processes, &executable, &HashSet::from([server.key]));
+        let apps = usage(
+            &processes,
+            &executable,
+            &|_| None,
+            &HashSet::from([server.key]),
+        );
 
         let groups: Vec<(&str, Vec<ProcessKey>)> = apps
             .iter()
@@ -446,13 +505,79 @@ mod tests {
     }
 
     #[test]
+    fn names_a_program_as_its_file_describes_it() {
+        let processes = [
+            using(500, "chrome.exe", Some(300)),
+            using(501, "chrome.exe", Some(100)),
+            using(510, "Google Chrome", Some(50)),
+        ];
+        let executable = |key: ProcessKey| {
+            Some(PathBuf::from(match key.pid.0 {
+                510 => "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                _ => r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            }))
+        };
+        // A bundle names its app, whatever its file says.
+        let described = |_: &Path| Some("Chrome Browser".to_string());
+        let windows = |path: &Path| (!path.starts_with("/")).then(|| "Google Chrome".to_string());
+
+        let apps = usage(&processes, &executable, &windows, &HashSet::new());
+        let named: Vec<(&str, &str)> = apps
+            .iter()
+            .map(|app| (app.id.as_str(), app.name.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                (
+                    r"user/path:c:\program files\google\chrome\application\chrome.exe",
+                    "Google Chrome"
+                ),
+                ("user/app:Google Chrome", "Google Chrome"),
+            ]
+        );
+        let apps = usage(&processes, &executable, &described, &HashSet::new());
+        assert_eq!(apps[1].name, "Google Chrome");
+    }
+
+    #[test]
+    fn keeps_a_programs_own_name_where_its_description_cant_stand_in() {
+        for description in [
+            "   ",
+            "An app that describes itself at a length no row of the panel can hold",
+            "Google\u{202E}emorhC",
+            "Tab\tbed",
+            "Zero\u{200B}width",
+            "Arabic\u{061C}mark",
+            "Word\u{2060}joiner",
+            "Soft\u{00AD}hyphen",
+            "Tagged\u{E0041}",
+        ] {
+            let processes = [using(520, "tool.exe", Some(10))];
+            let executable = |_| Some(PathBuf::from(r"C:\Tools\tool.exe"));
+            let described = |_: &Path| Some(description.to_string());
+
+            let apps = usage(&processes, &executable, &described, &HashSet::new());
+
+            assert_eq!(apps[0].name, "tool.exe", "{description:?}");
+        }
+        let processes = [using(521, "tool.exe", Some(10))];
+        let executable = |_| Some(PathBuf::from(r"C:\Tools\tool.exe"));
+        let described = |_: &Path| Some("  Build Tool  ".to_string());
+        assert_eq!(
+            usage(&processes, &executable, &described, &HashSet::new())[0].name,
+            "Build Tool"
+        );
+    }
+
+    #[test]
     fn groups_what_it_cannot_locate_by_its_name() {
         let processes = [
             using(90, "Discord.exe", Some(100)),
             using(91, "Discord.exe", Some(50)),
         ];
 
-        let apps = usage(&processes, &|_| None, &HashSet::new());
+        let apps = usage(&processes, &|_| None, &|_| None, &HashSet::new());
 
         assert_eq!(
             apps,
@@ -471,7 +596,12 @@ mod tests {
         let server = using(30, "node", Some(400));
         let processes = [server.clone(), using(40, "WindowServer", None)];
 
-        let apps = usage(&processes, &|_| None, &HashSet::from([server.key]));
+        let apps = usage(
+            &processes,
+            &|_| None,
+            &|_| None,
+            &HashSet::from([server.key]),
+        );
 
         assert!(apps.is_empty(), "{apps:?}");
     }
