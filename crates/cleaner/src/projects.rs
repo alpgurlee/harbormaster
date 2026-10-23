@@ -5,8 +5,6 @@
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
@@ -52,7 +50,7 @@ pub(crate) fn candidates(home: &Dir, survey: &Survey, stop: &AtomicBool) -> Vec<
     let mut roots: Vec<PathBuf> = survey
         .roots
         .iter()
-        .filter_map(|root| fs::canonicalize(root).ok())
+        .filter_map(|root| walk::canonical(root).ok())
         .collect();
     // A folder is walked once, so the deeper of two nested roots goes first:
     // from it, more of what lies below is within the depth limit.
@@ -173,7 +171,7 @@ fn named(name: &OsStr, any: &[&str]) -> bool {
 }
 
 fn hidden(name: &OsStr) -> bool {
-    name.as_bytes().starts_with(b".")
+    name.as_encoded_bytes().starts_with(b".")
 }
 
 fn modified(stat: &Stat) -> u64 {

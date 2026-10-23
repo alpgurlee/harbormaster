@@ -2,6 +2,7 @@
 //! build outputs of projects left alone, logs, and the Trash. A scan only
 //! looks; removal takes what the user confirmed, checking each item again.
 
+mod account;
 #[cfg(target_os = "macos")]
 mod apps;
 mod catalog;
@@ -13,11 +14,8 @@ mod remove;
 mod space;
 mod walk;
 
-use std::ffi::{CStr, OsStr};
 use std::fmt;
 use std::io;
-use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
@@ -526,7 +524,7 @@ pub fn in_use(
     running: &[(PathBuf, String)],
 ) -> Option<String> {
     let server = running.iter().find(|(root, _)| {
-        project.is_some_and(|project| root.starts_with(project) || project.starts_with(root))
+        project.is_some_and(|project| within(root, project) || within(project, root))
     });
     let holder = || busy.iter().find(|(held, _)| holds(held, path, project));
     server.or_else(holder).map(|(_, who)| who.clone())
@@ -536,7 +534,22 @@ pub fn in_use(
 /// output of `project` if any, in use: it holds something inside the folder
 /// or the project.
 pub fn holds(held: &Path, path: &Path, project: Option<&Path>) -> bool {
-    held.starts_with(path) || project.is_some_and(|project| held.starts_with(project))
+    within(held, path) || project.is_some_and(|project| within(held, project))
+}
+
+/// Whether `path` is `folder` or inside it, a whole name at a time and with
+/// names compared as the disk compares them: on Windows, whatever the case.
+fn within(path: &Path, folder: &Path) -> bool {
+    let mut names = path.components();
+    folder.components().all(|own| {
+        names.next().is_some_and(|name| match (own, name) {
+            #[cfg(windows)]
+            (std::path::Component::Normal(own), std::path::Component::Normal(name)) => {
+                walk::same_name(own, name)
+            }
+            (own, name) => own == name,
+        })
+    })
 }
 
 /// The usual project folders that exist under `home`.
@@ -549,35 +562,11 @@ pub fn usual_roots(home: &Path) -> Vec<PathBuf> {
 }
 
 /// The home folder the user's account names, which the cleaner trusts over
-/// whatever `$HOME` says, spelled as the disk spells it and with any link
-/// resolved, so that it reads like the paths processes report.
+/// whatever `$HOME` or `%USERPROFILE%` says, spelled as the disk spells it
+/// and with any link resolved, so that it reads like the paths processes
+/// report.
 pub fn account_home() -> io::Result<PathBuf> {
-    let mut entry = MaybeUninit::<libc::passwd>::uninit();
-    let mut text = vec![0; 16 * 1024];
-    let mut found = std::ptr::null_mut();
-    // SAFETY: `entry` and `text` are the sizes passed, and `found` is where
-    // getpwuid_r reports the entry it filled.
-    let status = unsafe {
-        libc::getpwuid_r(
-            libc::getuid(),
-            entry.as_mut_ptr(),
-            text.as_mut_ptr(),
-            text.len(),
-            &raw mut found,
-        )
-    };
-    if status != 0 {
-        return Err(io::Error::from_raw_os_error(status));
-    }
-    if found.is_null() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "this account has no entry in the user database",
-        ));
-    }
-    // SAFETY: `found` points at `entry`, whose strings live in `text`.
-    let folder = unsafe { CStr::from_ptr((*found).pw_dir) };
-    std::fs::canonicalize(OsStr::from_bytes(folder.to_bytes()))
+    walk::canonical(&account::home()?)
 }
 
 #[cfg(test)]

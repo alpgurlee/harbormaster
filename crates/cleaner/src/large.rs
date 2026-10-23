@@ -3,7 +3,6 @@
 
 use std::ffi::OsStr;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
@@ -121,7 +120,7 @@ pub(crate) fn hunt(
                 places.push((name, stat));
             }
         } else {
-            found.extend(finding(hunt, Path::new(&name), &stat));
+            found.extend(finding(hunt, &home, &name, Path::new(""), &stat));
         }
     }
     let next = AtomicUsize::new(0);
@@ -183,23 +182,30 @@ fn looked(
         if passed_over(&name, &stat, device) {
             continue;
         }
-        let relative = relative.join(&name);
         if walk::is_folder(&stat) {
             if !entered(&name) {
                 continue;
             }
             if let Ok(Some(child)) = dir.child_if_same(&name, &stat) {
-                looked(&child, &relative, device, depth + 1, hunt, stop, found);
+                looked(
+                    &child,
+                    &relative.join(&name),
+                    device,
+                    depth + 1,
+                    hunt,
+                    stop,
+                    found,
+                );
             }
         } else if walk::is_file(&stat) {
-            found.extend(finding(hunt, &relative, &stat));
+            found.extend(finding(hunt, dir, &name, relative, &stat));
         }
     }
 }
 
 /// What is never looked at: a hidden name, a link, or another disk.
 fn passed_over(name: &OsStr, stat: &Stat, device: u64) -> bool {
-    name.as_bytes().starts_with(b".") || walk::is_link(stat) || stat.device != device
+    name.as_encoded_bytes().starts_with(b".") || walk::is_link(stat) || stat.device != device
 }
 
 /// Whether a folder called `name` is looked into: not a package, nor the
@@ -209,16 +215,19 @@ fn entered(name: &OsStr) -> bool {
     !package && name != "node_modules"
 }
 
-/// The file `relative` from the home folder, stored as `stat`, if it is a
-/// regular file large enough to list. A file with other links is left out:
-/// trashing one of its names would free nothing.
-fn finding(hunt: &Hunt, relative: &Path, stat: &Stat) -> Option<Finding> {
+/// The file `name` in `dir`, which is `folder` from the home folder, listed
+/// as `stat`, if it is a regular file large enough to list. A file with
+/// other links is left out: trashing one of its names would free nothing.
+fn finding(hunt: &Hunt, dir: &Dir, name: &OsStr, folder: &Path, stat: &Stat) -> Option<Finding> {
     let bytes = stat.bytes;
-    if !walk::is_file(stat) || stat.may_have_other_names() || bytes < hunt.smallest {
+    if !walk::is_file(stat) || bytes < hunt.smallest {
         return None;
     }
-    let name = relative.file_name()?;
-    let path = hunt.home.join(relative);
+    let stat = &with_links(dir, name, stat)?;
+    if stat.may_have_other_names() {
+        return None;
+    }
+    let path = hunt.home.join(folder.join(name));
     Some(Finding {
         group: group_of(name),
         kind: Kind::Personal,
@@ -236,6 +245,16 @@ fn finding(hunt: &Hunt, relative: &Path, stat: &Stat) -> Option<Finding> {
         emptied: false,
         identity: Identity::of(stat),
     })
+}
+
+/// `stat`, listed for `name` in `dir`, with how many names the file has:
+/// a listing on Windows doesn't say, so the file is looked at for it.
+fn with_links(dir: &Dir, name: &OsStr, stat: &Stat) -> Option<Stat> {
+    if stat.links.is_some() {
+        return Some(*stat);
+    }
+    let now = dir.item(name).ok()?.metadata().ok()?;
+    (now.device == stat.device && now.inode == stat.inode).then_some(now)
 }
 
 fn group_of(name: &OsStr) -> Group {

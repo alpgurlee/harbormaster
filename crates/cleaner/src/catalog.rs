@@ -21,6 +21,7 @@ struct Place {
     keep_latest: bool,
 }
 
+#[cfg(target_os = "macos")]
 const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
     Place {
         group,
@@ -241,6 +242,7 @@ fn folders(dir: &Dir, stop: &AtomicBool) -> Vec<(String, SystemTime)> {
 
 /// `com.spotify.client`: a folder named after an app's bundle, except
 /// Apple's own, which the system relies on.
+#[cfg(target_os = "macos")]
 fn is_app_folder(name: &str) -> bool {
     let labels: Vec<&str> = name.split('.').collect();
     labels.len() >= 3
@@ -254,6 +256,7 @@ fn is_app_folder(name: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use super::is_app_folder;
 

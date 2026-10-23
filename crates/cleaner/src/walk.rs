@@ -3,13 +3,18 @@
 //! folder swapped for a link in the meantime is refused, not followed.
 
 use std::io;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[cfg(unix)]
 mod unix;
+#[cfg(windows)]
+mod windows;
 
 #[cfg(unix)]
 pub(crate) use unix::{Dir, Item, changed};
+#[cfg(windows)]
+pub(crate) use windows::{Dir, Item, changed, plain, same_name};
 
 /// How a folder or file is stored, as far as the cleaner looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +44,7 @@ pub(crate) enum FileType {
     /// A link, which is never followed.
     Link,
     /// A pipe, a socket or a device.
+    #[cfg(unix)]
     Other,
 }
 
@@ -62,6 +68,14 @@ pub(crate) fn is_file(stat: &Stat) -> bool {
 /// Whether `stat` describes a link.
 pub(crate) fn is_link(stat: &Stat) -> bool {
     stat.kind == FileType::Link
+}
+
+/// `path` with every link in it resolved, spelled as the disk spells it.
+pub(crate) fn canonical(path: &Path) -> io::Result<PathBuf> {
+    let path = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    let path = plain(path);
+    Ok(path)
 }
 
 fn plain_path() -> io::Error {

@@ -276,6 +276,7 @@ fn numbered(area: &mut Area, next: &mut u32) {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use std::ffi::OsStr;
     use std::fs;

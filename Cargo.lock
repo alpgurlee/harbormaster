@@ -1580,6 +1580,7 @@ dependencies = [
  "libc",
  "serde",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

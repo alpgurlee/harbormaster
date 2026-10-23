@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::io;
+#[cfg(unix)]
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -16,6 +17,7 @@ const WORKERS: usize = 4;
 /// per level it is down.
 const DEEPEST: usize = 64;
 /// Open files left for everything else the process does.
+#[cfg(unix)]
 const RESERVE: u64 = 64;
 
 /// Measures every candidate under `home`, several at a time, telling
@@ -88,6 +90,12 @@ pub(crate) fn all(
         .collect()
 }
 
+/// As many workers as are worth it: Windows has no open-file limit to mind.
+#[cfg(windows)]
+pub(crate) fn workers() -> usize {
+    WORKERS
+}
+
 /// As many workers as the open-file limit leaves room for.
 #[cfg(unix)]
 pub(crate) fn workers() -> usize {
@@ -102,6 +110,7 @@ pub(crate) fn workers() -> usize {
     workers_for(soft)
 }
 
+#[cfg(unix)]
 fn workers_for(open_files: u64) -> usize {
     let room = usize::try_from(open_files.saturating_sub(RESERVE)).unwrap_or(usize::MAX);
     (room / (DEEPEST + 2)).clamp(1, WORKERS)
@@ -143,7 +152,7 @@ fn below(
                 continue;
             };
             total += stat.bytes + below(&child, device, depth + 1, linked, stop)?;
-        } else if !stat.may_have_other_names() || linked.insert(stat.inode) {
+        } else if stat.bytes == 0 || !stat.may_have_other_names() || linked.insert(stat.inode) {
             total += stat.bytes;
         }
     }
@@ -157,7 +166,9 @@ fn below(
 mod tests {
     use std::sync::atomic::AtomicBool;
 
-    use super::{size, workers_for};
+    use super::size;
+    #[cfg(unix)]
+    use super::workers_for;
     use crate::walk::Dir;
 
     #[test]
@@ -170,6 +181,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn runs_only_as_many_workers_as_open_files_allow() {
         assert_eq!(workers_for(64), 1);
         assert_eq!(workers_for(256), 2);
