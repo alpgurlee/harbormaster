@@ -9,9 +9,9 @@ use harbormaster_engine::{
 };
 use harbormaster_platform::{BindProbe, ProcessKey, Signal};
 
+use crate::FAILED;
 use crate::format::{label, ports, printable, table};
 
-pub(crate) const FAILED: u8 = 1;
 pub(crate) const NOT_FOUND: u8 = 3;
 pub(crate) const REFUSED: u8 = 4;
 pub(crate) const PARTIAL: u8 = 5;

@@ -1,7 +1,6 @@
-// Stopping and cleaning are macOS's alone for now.
-#[cfg(target_os = "macos")]
 mod clean;
 mod format;
+// Stopping from the command line is macOS's alone for now.
 #[cfg(target_os = "macos")]
 mod stop;
 mod why;
@@ -20,6 +19,8 @@ use harbormaster_engine::{Classification, Scanner, Service, Snapshot, live};
 
 /// How long to wait between the two samples a CPU reading needs.
 const CPU_SAMPLE_GAP: Duration = Duration::from_millis(400);
+/// The exit code of a stop or a clean-up that failed, in part or whole.
+pub(crate) const FAILED: u8 = 1;
 const COMMAND_WIDTH: usize = 60;
 const NAME_WIDTH: usize = 32;
 
@@ -74,7 +75,6 @@ enum Command {
         wait: u64,
     },
     /// Show the build outputs, caches and other leftovers that could go
-    #[cfg(target_os = "macos")]
     Clean {
         /// Print machine-readable JSON
         #[arg(long)]
@@ -110,7 +110,6 @@ fn main() -> ExitCode {
         None => list(cli.list),
         Some(Command::Ls(args)) => list(args),
         Some(Command::Why { port }) => explain(port),
-        #[cfg(target_os = "macos")]
         Some(Command::Clean { json, yes }) => clean::run(json, yes),
         #[cfg(target_os = "macos")]
         Some(Command::Stop {
@@ -264,7 +263,6 @@ mod tests {
         assert_eq!(row[2].chars().count(), NAME_WIDTH);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn removes_only_when_told_to() {
         let dry = Cli::try_parse_from(["harbormaster", "clean"]).unwrap();

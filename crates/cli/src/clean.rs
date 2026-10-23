@@ -10,7 +10,7 @@ use anyhow::Context;
 use harbormaster_cleaner::{Cleaned, Finding, Group, Kind, Outcome, Removal, Survey, Usage};
 use harbormaster_engine::{Classification, Scanner, live};
 
-use crate::{format, stop};
+use crate::{FAILED, format};
 
 const NAME_WIDTH: usize = 32;
 /// How long a project sits untouched before its build outputs are picked.
@@ -226,7 +226,7 @@ pub(crate) fn status(cleaned: &Cleaned) -> u8 {
         .removals
         .iter()
         .any(|removal| matches!(removal.outcome, Outcome::Failed { .. }));
-    if failed { stop::FAILED } else { 0 }
+    if failed { FAILED } else { 0 }
 }
 
 fn title(group: Group) -> &'static str {
@@ -481,7 +481,7 @@ mod tests {
             "{said:?}"
         );
         assert_eq!(super::freed(&cleaned), "Freed 1.0 GB.");
-        assert_eq!(super::status(&cleaned), crate::stop::FAILED);
+        assert_eq!(super::status(&cleaned), crate::FAILED);
     }
 
     #[test]
@@ -566,14 +566,28 @@ mod tests {
         assert_eq!(text, "  deleted  a\n  deleted  c\nFreed 1.0 GB.\n");
     }
 
+    /// `path` and then a unit that isn't text, as a disk may hold in a name.
+    fn untextual(path: &str) -> PathBuf {
+        #[cfg(unix)]
+        let path = {
+            use std::os::unix::ffi::OsStrExt;
+            std::ffi::OsStr::from_bytes(&[path.as_bytes(), b"\xff"].concat()).to_owned()
+        };
+        #[cfg(windows)]
+        let path = {
+            use std::os::windows::ffi::OsStringExt;
+            let lone_surrogate = 0xD800;
+            let units: Vec<u16> = path.encode_utf16().chain([lone_surrogate]).collect();
+            std::ffi::OsString::from_wide(&units)
+        };
+        PathBuf::from(path)
+    }
+
     #[test]
     fn removes_nothing_when_the_json_could_not_be_written() {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
-
         let mut findings = three();
         findings[2].picked = false;
-        findings[2].path = PathBuf::from(OsStr::from_bytes(b"/Users/\xff/Library/Logs"));
+        findings[2].path = untextual("/Users/");
         let mut out = Vec::new();
 
         let outcome = super::remove_picked(&findings, true, &mut out, |_, _, _| {
@@ -674,11 +688,8 @@ mod tests {
 
     #[test]
     fn reports_a_path_json_cant_hold_instead_of_panicking() {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
-
         let mut odd = finding(Group::Logs, Kind::Rebuildable, "Logs", "/", 1, true);
-        odd.path = PathBuf::from(OsStr::from_bytes(b"/Users/\xff/Library/Logs"));
+        odd.path = untextual("/Users/");
 
         assert!(super::document(&[odd], None).is_err());
     }
