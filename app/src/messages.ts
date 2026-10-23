@@ -63,6 +63,7 @@ export interface Messages {
   wontStop: string;
   protectedSystem: string;
   protectedOtherUser: string;
+  protectedOtherSession: string;
   protectedSession: string;
   protectedUnverified: string;
   protectedDatabase: string;
@@ -326,6 +327,7 @@ export const en: Messages = {
   wontStop: "Harbormaster won't stop this: {reason}.",
   protectedSystem: "it is part of the operating system",
   protectedOtherUser: "it runs as another user",
+  protectedOtherSession: "it runs in another of your sessions",
   protectedSession: "the port belongs to your shell, terminal or coding agent",
   protectedUnverified: "some of its processes couldn't be read, so it can't be checked",
   protectedDatabase: "it runs a database; stop that with the database's own tools",
@@ -599,6 +601,7 @@ export const tr: Messages = {
   wontStop: "Harbormaster bunu durdurmaz: {reason}.",
   protectedSystem: "işletim sisteminin bir parçası",
   protectedOtherUser: "başka bir kullanıcı olarak çalışıyor",
+  protectedOtherSession: "senin başka bir oturumunda çalışıyor",
   protectedSession: "port kabuğunuza, terminalinize ya da kod ajanınıza ait",
   protectedUnverified: "bazı süreçleri okunamadı, bu yüzden denetlenemiyor",
   protectedDatabase: "bir veritabanı çalıştırıyor; onu veritabanının kendi araçlarıyla durdurun",

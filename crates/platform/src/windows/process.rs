@@ -11,8 +11,9 @@ use windows_sys::Win32::Foundation::{
     HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::{
-    GetLengthSid, GetTokenInformation, IsWellKnownSid, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
-    WELL_KNOWN_SID_TYPE, WinLocalServiceSid, WinLocalSystemSid, WinNetworkServiceSid,
+    GetLengthSid, GetTokenInformation, IsWellKnownSid, PSID, TOKEN_QUERY, TOKEN_USER,
+    TokenSessionId, TokenUser, WELL_KNOWN_SID_TYPE, WinLocalServiceSid, WinLocalSystemSid,
+    WinNetworkServiceSid,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -111,7 +112,7 @@ pub(crate) fn tracks_exec() -> bool {
 
 pub(crate) fn processes() -> io::Result<Vec<ProcessEntry>> {
     // SAFETY: the current process's pseudo handle needs no closing.
-    let own = user(unsafe { GetCurrentProcess() })
+    let own = identity(unsafe { GetCurrentProcess() })
         .ok_or_else(|| io::Error::other("couldn't read whom this process runs as"))?;
     // Each process the first snapshot lists, held open: while it is, its pid
     // names no other process, so the second snapshot's row for that pid is
@@ -185,7 +186,7 @@ fn name(wide: &[u16]) -> String {
 /// One process from the snapshot, read through the handle that holds it. A
 /// process whose start can't be read can't be told from a later one under
 /// its pid, so it is left out.
-fn entry(row: Row, process: &Handle, own: &Sid) -> Option<ProcessEntry> {
+fn entry(row: Row, process: &Handle, own: &Identity) -> Option<ProcessEntry> {
     let times = times(process)?;
     Some(ProcessEntry {
         key: ProcessKey {
@@ -227,13 +228,28 @@ fn private_working_set(process: &Handle) -> Option<u64> {
     (read != 0).then_some(counters.PrivateWorkingSetSize as u64)
 }
 
-fn owner(process: &Handle, own: &Sid) -> Owner {
-    match user(process.0) {
-        Some(user) if user == *own => Owner::CurrentUser,
-        Some(user) if user.is_service() => Owner::System,
+fn owner(process: &Handle, own: &Identity) -> Owner {
+    match identity(process.0) {
+        // A session that can't be read can't be told to be this one.
+        Some(theirs)
+            if theirs.user == own.user
+                && theirs.session.is_some()
+                && theirs.session == own.session =>
+        {
+            Owner::CurrentUser
+        }
+        Some(theirs) if theirs.user == own.user => Owner::OtherSession,
+        Some(theirs) if theirs.user.is_service() => Owner::System,
         Some(_) => Owner::OtherUser,
         None => Owner::Unknown,
     }
+}
+
+/// Whom a process runs as, and in which of the machine's sessions.
+#[derive(Debug)]
+struct Identity {
+    user: Sid,
+    session: Option<u32>,
 }
 
 /// A security identifier, copied out of the token that held it. Kept in u32s
@@ -274,14 +290,39 @@ impl Sid {
     }
 }
 
-/// The user a process runs as, from its token.
-fn user(process: HANDLE) -> Option<Sid> {
+/// Whom a process runs as and where, from its token.
+fn identity(process: HANDLE) -> Option<Identity> {
     let mut token = std::ptr::null_mut();
     // SAFETY: `process` is open, and `token` receives a new handle.
     if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
         return None;
     }
     let token = Handle(token);
+    Some(Identity {
+        user: user(&token)?,
+        session: session(&token),
+    })
+}
+
+/// The session a token's process runs in.
+fn session(token: &Handle) -> Option<u32> {
+    let mut session = 0u32;
+    let mut returned = 0;
+    // SAFETY: the token is open to query, and `session` is as large as the call is told.
+    let read = unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenSessionId,
+            (&raw mut session).cast(),
+            size_of::<u32>() as u32,
+            &mut returned,
+        )
+    };
+    (read != 0).then_some(session)
+}
+
+/// The user a token's process runs as.
+fn user(token: &Handle) -> Option<Sid> {
     let mut needed = 0;
     // SAFETY: an empty buffer only asks for the size needed.
     unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
@@ -310,7 +351,7 @@ fn user(process: HANDLE) -> Option<Sid> {
 /// Whether this process runs as LocalSystem, Windows' own account.
 pub(crate) fn runs_as_root() -> bool {
     // SAFETY: the current process's pseudo handle needs no closing.
-    user(unsafe { GetCurrentProcess() }).is_some_and(|user| user.is(WinLocalSystemSid))
+    identity(unsafe { GetCurrentProcess() }).is_some_and(|own| own.user.is(WinLocalSystemSid))
 }
 
 /// Why nothing about a process can be read.

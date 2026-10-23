@@ -72,6 +72,8 @@ pub enum Protection {
     System,
     /// Runs as another user, root included.
     OtherUser,
+    /// Runs as the user, in another of their sessions.
+    OtherSession,
     /// The user's own shell, terminal or coding agent holds the socket.
     Session,
     /// Some of its processes couldn't be read, so none of the above can be
@@ -225,9 +227,9 @@ impl Scanner {
         let is_database =
             |entry: &&ProcessEntry| DATABASES.contains(&normalize(&entry.name).as_str());
         let database = is_database(&owner) || members.iter().any(is_database);
-        let someone_elses = members
-            .iter()
-            .any(|entry| entry.owner != Owner::CurrentUser);
+        let owners = || std::iter::once(owner.owner).chain(members.iter().map(|entry| entry.owner));
+        let someone_elses = owners().any(|owner| foreign(owner) == Some(Protection::OtherUser));
+        let elsewhere = owners().any(|owner| owner == Owner::OtherSession);
 
         let unreadable = members.iter().any(|entry| {
             let details = details_of(entry.key);
@@ -276,8 +278,10 @@ impl Scanner {
         // nor promise a free port while someone outside keeps the socket.
         let protected = if service::is_system(owner) {
             Some(Protection::System)
-        } else if owner.owner != Owner::CurrentUser || someone_elses {
+        } else if someone_elses {
             Some(Protection::OtherUser)
+        } else if elsewhere {
+            Some(Protection::OtherSession)
         } else if os_component {
             Some(Protection::System)
         } else if unreadable {
@@ -368,13 +372,23 @@ pub fn standings(
         .collect()
 }
 
+/// Why a process that isn't the user's own, here, is out of reach: one the
+/// OS wouldn't say whose it is counts as another user's.
+fn foreign(owner: Owner) -> Option<Protection> {
+    match owner {
+        Owner::CurrentUser => None,
+        Owner::OtherSession => Some(Protection::OtherSession),
+        Owner::OtherUser | Owner::System | Owner::Unknown => Some(Protection::OtherUser),
+    }
+}
+
 /// Reads the process once, so a second read can't change the verdict.
 fn judge(entry: &ProcessEntry, tree: &ProcessTree<'_>, input: Input<'_>) -> Standing {
     if service::is_system(entry) {
         return Standing::Protected(Protection::System);
     }
-    if entry.owner != Owner::CurrentUser {
-        return Standing::Protected(Protection::OtherUser);
+    if let Some(protection) = foreign(entry.owner) {
+        return Standing::Protected(protection);
     }
     let details = (input.details)(entry.key);
     let (Some(exe), Some(args)) = (details.exe.known(), details.args.known()) else {
@@ -761,6 +775,84 @@ mod tests {
 
         assert_eq!(snapshot.services[0].classification, Classification::System);
         assert_eq!(snapshot.services[0].protected, Some(Protection::OtherUser));
+    }
+
+    #[test]
+    fn keeps_what_runs_in_another_of_the_users_sessions_out_of_reach() {
+        let home = tempfile::tempdir().unwrap();
+        let mut server = proc(
+            910,
+            1,
+            "node",
+            "/usr/local/bin/node",
+            &["node", "server.js"],
+            home.path(),
+        );
+        server.entry.owner = Owner::OtherSession;
+        let mut theirs = proc(
+            920,
+            1,
+            "node",
+            "/usr/local/bin/node",
+            &["node", "api.js"],
+            home.path(),
+        );
+        theirs.entry.owner = Owner::OtherUser;
+        let mut helper = proc(
+            921,
+            920,
+            "node",
+            "/usr/local/bin/node",
+            &["node", "worker.js"],
+            home.path(),
+        );
+        helper.entry.owner = Owner::OtherSession;
+        let procs = [server, theirs, helper];
+
+        let snapshot = scan(
+            &mut Scanner::default(),
+            &procs,
+            &[(910, 3000), (920, 3001)],
+            home.path(),
+            Instant::now(),
+        );
+
+        let protected: Vec<(u16, Option<Protection>)> = snapshot
+            .services
+            .iter()
+            .map(|service| (service.ports[0].port, service.protected))
+            .collect();
+        assert_eq!(
+            protected,
+            [
+                (3000, Some(Protection::OtherSession)),
+                // Another user's comes first.
+                (3001, Some(Protection::OtherUser)),
+            ]
+        );
+        let processes: Vec<ProcessEntry> = procs.iter().map(|p| p.entry.clone()).collect();
+        let details = |key: ProcessKey| {
+            procs
+                .iter()
+                .find(|p| p.entry.key == key)
+                .unwrap()
+                .details
+                .clone()
+        };
+        let input = Input {
+            listeners: &[],
+            processes: &processes,
+            details: &details,
+            home: home.path(),
+            now: Instant::now(),
+        };
+        assert_eq!(
+            super::standings(input, &[procs[0].entry.key], &|_| Presence::Running),
+            [(
+                procs[0].entry.key,
+                Standing::Protected(Protection::OtherSession)
+            )]
+        );
     }
 
     #[test]

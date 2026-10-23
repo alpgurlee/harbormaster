@@ -4,6 +4,7 @@ export type Classification = "dev" | "other" | "system";
 export type Protection =
   | "system"
   | "otherUser"
+  | "otherSession"
   | "session"
   | "unverified"
   | "database"

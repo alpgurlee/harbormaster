@@ -4,6 +4,7 @@ import type { Protection } from "./types";
 const REASONS: Record<Protection, TextKey> = {
   system: "protectedSystem",
   otherUser: "protectedOtherUser",
+  otherSession: "protectedOtherSession",
   session: "protectedSession",
   unverified: "protectedUnverified",
   database: "protectedDatabase",

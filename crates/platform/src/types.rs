@@ -31,6 +31,9 @@ pub struct Whereabouts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owner {
     CurrentUser,
+    /// The user's own, in another of their sessions, such as one over
+    /// Remote Desktop, or a task Windows runs while they aren't signed in.
+    OtherSession,
     OtherUser,
     System,
     /// The OS wouldn't say whose it is.
