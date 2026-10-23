@@ -626,3 +626,16 @@ fn has_no_window_to_close_for_a_program_that_shows_none() {
     assert!(held.close().is_err());
     assert_eq!(held.wait(Duration::ZERO), Ended::StillRunning);
 }
+
+#[test]
+fn watches_a_child_without_the_right_to_end_it() {
+    use harbormaster_platform::{Ended, watch};
+
+    let (mut waiting, key) = wait();
+    let watched = watch(key).expect("our child should be watched");
+
+    assert!(watched.terminate().is_err(), "a watch can't end it");
+    assert_eq!(watched.wait(Duration::ZERO), Ended::StillRunning);
+    drop(waiting.0.stdin.take());
+    assert_eq!(watched.wait(PATIENCE), Ended::Exited);
+}

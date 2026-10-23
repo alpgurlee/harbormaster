@@ -38,7 +38,19 @@ pub enum Ended {
 /// Holds the process `key` names, if its pid still names it and it is
 /// still running. `Presence::Running` is never returned.
 pub fn hold(key: ProcessKey) -> Result<Held, Presence> {
-    let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE;
+    held(
+        key,
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE,
+    )
+}
+
+/// Holds the process `key` names as `hold` does, only to wait for it: it
+/// can't be ended through this hold, which asking it to close doesn't need.
+pub fn watch(key: ProcessKey) -> Result<Held, Presence> {
+    held(key, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)
+}
+
+fn held(key: ProcessKey, access: u32) -> Result<Held, Presence> {
     let handle = hold_with(key, access)?;
     let held = Held { handle, key };
     // An exited process stays openable while anyone holds a handle to it.

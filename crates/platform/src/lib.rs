@@ -18,7 +18,7 @@ mod windows;
 use windows as sys;
 /// Ending a process, which Windows does through a held handle.
 #[cfg(windows)]
-pub use windows::control::{Ended, Held, hold};
+pub use windows::control::{Ended, Held, hold, watch};
 #[cfg(windows)]
 pub use windows::window::has_windows;
 
