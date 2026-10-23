@@ -453,10 +453,16 @@ pub(crate) fn whereabouts() -> io::Result<Vec<Whereabouts>> {
             if let Ok(readable) = readable {
                 paths.extend(parameters::working_folder(&readable).known().cloned());
             }
-            let name = entry.name.strip_suffix(".exe").unwrap_or(&entry.name);
+            let program = std::path::Path::new(&entry.name);
+            let name = match program.extension() {
+                Some(extension) if extension.eq_ignore_ascii_case("exe") => program.file_stem(),
+                _ => None,
+            };
             Some(Whereabouts {
                 key: entry.key,
-                name: name.to_owned(),
+                name: name.map_or(entry.name.clone(), |name| {
+                    name.to_string_lossy().into_owned()
+                }),
                 paths: paths
                     .into_iter()
                     .map(|path| super::canonical(&path).unwrap_or(path))
