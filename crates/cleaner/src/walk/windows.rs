@@ -81,7 +81,12 @@ impl Dir {
         let letter = match components.next() {
             Some(Component::Prefix(prefix)) => match prefix.kind() {
                 Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => letter,
-                _ => return Err(plain_path()),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "only folders on a drive are looked through, not on a network share",
+                    ));
+                }
             },
             _ => return Err(plain_path()),
         };
@@ -316,7 +321,10 @@ fn entries(bytes: &[u8], device: u64) -> Vec<(OsString, Stat)> {
         let entry: FILE_ID_EXTD_DIR_INFO =
             unsafe { ptr::read_unaligned(bytes[at..].as_ptr().cast()) };
         let start = at + name_at;
-        let Some(name) = bytes.get(start..start + entry.FileNameLength as usize) else {
+        let name = start
+            .checked_add(entry.FileNameLength as usize)
+            .and_then(|end| bytes.get(start..end));
+        let Some(name) = name else {
             break;
         };
         let name: Vec<u16> = name
@@ -337,10 +345,12 @@ fn entries(bytes: &[u8], device: u64) -> Vec<(OsString, Stat)> {
                 modified: from_ticks(entry.LastWriteTime),
             },
         ));
-        if entry.NextEntryOffset == 0 {
+        // The next entry starts past this one's fixed part, or there is none.
+        let next = entry.NextEntryOffset as usize;
+        if next < name_at {
             break;
         }
-        at += entry.NextEntryOffset as usize;
+        at += next;
     }
     found
 }

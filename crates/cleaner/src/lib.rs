@@ -582,6 +582,20 @@ mod tests {
     use super::{Outcome, Why, holds, in_use};
 
     #[test]
+    #[cfg(windows)]
+    fn tells_a_path_inside_a_folder_however_windows_spells_either() {
+        let inside = |path: &str, folder: &str| super::within(Path::new(path), Path::new(folder));
+
+        assert!(inside(
+            r"c:\users\dev\code\web\src",
+            r"C:\Users\Dev\Code\Web"
+        ));
+        assert!(inside(r"C:\Users\Dev\code", r"c:\users\dev"));
+        assert!(!inside(r"C:\Users\Dev\codes", r"C:\Users\Dev\code"));
+        assert!(!inside(r"D:\Users\Dev\code", r"C:\Users\Dev"));
+    }
+
+    #[test]
     fn tells_what_was_left_just_as_the_scan_measured_it() {
         let refused = |why| Outcome::Refused { why };
         let error = || "x".to_string();
