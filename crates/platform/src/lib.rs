@@ -19,6 +19,8 @@ use windows as sys;
 /// Ending a process, which Windows does through a held handle.
 #[cfg(windows)]
 pub use windows::control::{Ended, Held, hold};
+#[cfg(windows)]
+pub use windows::window::has_windows;
 
 pub use bind::{BindProbe, probe_bind};
 pub use types::{

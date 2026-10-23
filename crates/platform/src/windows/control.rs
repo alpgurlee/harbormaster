@@ -66,6 +66,13 @@ impl Held {
         Err(error)
     }
 
+    /// Asks the process to close each window it shows on the taskbar, as
+    /// their close buttons do. It may ask the user first, or stay open; the
+    /// handle keeps its pid from naming another process meanwhile.
+    pub fn close(&self) -> io::Result<()> {
+        super::window::close(self.key.pid.0)
+    }
+
     /// Waits up to `grace` for the process to be gone; a wait longer than
     /// Windows counts is cut short rather than made endless.
     pub fn wait(&self, grace: Duration) -> Ended {

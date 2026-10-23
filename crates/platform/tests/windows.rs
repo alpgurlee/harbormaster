@@ -477,3 +477,152 @@ fn tells_whose_socket_a_listener_is() {
     assert_eq!(found[0].owner, key);
     assert_ne!(found[0].owner, own().key);
 }
+
+/// Set, to how the window answers, for the copy of this test program that
+/// shows one: `closes` when asked to, `stays` open, or is a `tool` palette.
+const SHOWS: &str = "HARBORMASTER_TEST_WINDOW";
+
+/// A copy of this test program showing a window, ended whatever happens to the test.
+struct Showing {
+    _process: Waiting,
+    key: ProcessKey,
+}
+
+fn shows(how: &str) -> Showing {
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+
+    let program = std::env::current_exe().expect("this test program should know its file");
+    let mut child = Command::new(program)
+        .args([
+            "--exact",
+            "shows_a_window_until_it_closes",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env(SHOWS, how)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("this test program should start again");
+    let output = child.stdout.take().expect("its output is piped");
+    let process = Waiting(child);
+    let (shown, seen) = mpsc::channel();
+    // Read to the end, so the copy never writes into a closed pipe.
+    std::thread::spawn(move || {
+        for line in BufReader::new(output).lines().map_while(Result::ok) {
+            if line == "shown" {
+                let _ = shown.send(());
+            }
+        }
+    });
+    seen.recv_timeout(PATIENCE)
+        .expect("the copy should show its window");
+    let key = find(process.0.id()).expect("the copy should be listed").key;
+    Showing {
+        _process: process,
+        key,
+    }
+}
+
+#[test]
+#[ignore = "run as a program of its own by the tests that need a window"]
+fn shows_a_window_until_it_closes() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DispatchMessageW, GetMessageW, IsWindow, MSG, WM_CLOSE, WS_EX_TOOLWINDOW,
+        WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+
+    let Ok(how) = std::env::var(SHOWS) else {
+        return;
+    };
+    let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+    let extended = if how == "tool" { WS_EX_TOOLWINDOW } else { 0 };
+    // SAFETY: the class is one Windows registers, named with a closing nul.
+    let window = unsafe {
+        CreateWindowExW(
+            extended,
+            class.as_ptr(),
+            class.as_ptr(),
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0,
+            0,
+            320,
+            200,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    assert!(!window.is_null(), "{}", std::io::Error::last_os_error());
+    println!("shown");
+    let mut message = MSG::default();
+    // SAFETY: the window is this thread's, and `message` ours to fill.
+    while unsafe { IsWindow(window) } != 0
+        && unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) } > 0
+    {
+        // A window left to itself closes on WM_CLOSE.
+        if how == "stays" && message.message == WM_CLOSE {
+            continue;
+        }
+        // SAFETY: the message came from this thread's queue.
+        unsafe { DispatchMessageW(&message) };
+    }
+}
+
+#[test]
+fn tells_a_program_showing_a_window_from_one_that_shows_none() {
+    use harbormaster_platform::has_windows;
+
+    let showing = shows("closes");
+    let palette = shows("tool");
+    let (_waiting, quiet) = wait();
+
+    assert!(has_windows(showing.key.pid.0));
+    assert!(
+        !has_windows(palette.key.pid.0),
+        "a tool palette has no taskbar button"
+    );
+    assert!(!has_windows(quiet.pid.0));
+}
+
+#[test]
+fn asks_a_held_program_to_close_its_window_and_sees_it_go() {
+    use harbormaster_platform::{Ended, hold};
+
+    let showing = shows("closes");
+    let held = hold(showing.key).expect("our copy should be held");
+
+    held.close()
+        .expect("asking our own copy to close should work");
+
+    assert_eq!(held.wait(PATIENCE), Ended::Exited);
+}
+
+#[test]
+fn leaves_a_program_that_wont_close_running_until_it_is_ended() {
+    use harbormaster_platform::{Ended, has_windows, hold};
+
+    let showing = shows("stays");
+    let held = hold(showing.key).expect("our copy should be held");
+
+    held.close().expect("the request should go out");
+
+    // Asked is not closed.
+    assert_eq!(held.wait(Duration::from_secs(1)), Ended::StillRunning);
+    assert!(has_windows(showing.key.pid.0));
+    held.terminate().expect("ending our own copy should work");
+    assert_eq!(held.wait(PATIENCE), Ended::Exited);
+}
+
+#[test]
+fn has_no_window_to_close_for_a_program_that_shows_none() {
+    use harbormaster_platform::{Ended, hold};
+
+    let (_waiting, key) = wait();
+    let held = hold(key).expect("our child should be held");
+
+    assert!(held.close().is_err());
+    assert_eq!(held.wait(Duration::ZERO), Ended::StillRunning);
+}

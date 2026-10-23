@@ -7,6 +7,7 @@ mod process;
 mod socket;
 mod tcp;
 mod theme;
+pub mod window;
 
 use std::io;
 use std::path::{Path, PathBuf};
