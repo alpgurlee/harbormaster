@@ -23,7 +23,9 @@ impl<'a> Roots<'a> {
     pub(crate) fn open(reach: &Reach<'a>) -> io::Result<Self> {
         Ok(Self {
             home: (Dir::open(reach.home)?, reach.home),
-            shared: Dir::open(reach.shared).ok().map(|dir| (dir, reach.shared)),
+            shared: reach
+                .shared
+                .and_then(|at| Dir::open(at).ok().map(|dir| (dir, at))),
         })
     }
 
@@ -343,7 +345,7 @@ mod tests {
 
         let reach = Reach {
             home: &home,
-            shared: &home.join("no shared apps"),
+            shared: None,
         };
         let outcome = one(
             &Roots::open(&reach).unwrap(),
@@ -363,7 +365,7 @@ mod tests {
         let home = place.path().canonicalize().unwrap();
         let reach = Reach {
             home: &home,
-            shared: &home.join("no shared apps"),
+            shared: None,
         };
         let freed = |before: u64, after: u64| {
             let reads = std::cell::Cell::new(0);

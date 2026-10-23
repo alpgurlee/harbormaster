@@ -64,10 +64,7 @@ pub fn link_folder(target: &Path, link: &Path) {
 
 /// What removing may reach from `home`, on a Mac with no shared app folder.
 pub fn reach(home: &Path) -> harbormaster_cleaner::Reach<'_> {
-    harbormaster_cleaner::Reach {
-        home,
-        shared: Path::new("/nonexistent"),
-    }
+    harbormaster_cleaner::Reach { home, shared: None }
 }
 
 pub fn write(path: &Path, bytes: &[u8]) {

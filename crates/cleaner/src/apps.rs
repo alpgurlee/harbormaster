@@ -30,7 +30,8 @@ pub(crate) fn listed(
     measured: &(dyn Fn(Measured) + Sync),
 ) -> io::Result<Vec<Finding>> {
     let mut shelves = Vec::new();
-    for folder in [reach.shared.to_path_buf(), reach.home.join("Applications")] {
+    let shared = reach.shared.map(Path::to_path_buf);
+    for folder in shared.into_iter().chain([reach.home.join("Applications")]) {
         // A Mac may lack either folder.
         let Ok(root) = Dir::open(&folder) else {
             continue;

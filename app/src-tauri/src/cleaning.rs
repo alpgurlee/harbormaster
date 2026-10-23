@@ -575,7 +575,7 @@ fn place(area: &Area, id: u32) -> Option<&Area> {
 fn reach(home: &Path) -> Reach<'_> {
     Reach {
         home,
-        shared: Path::new(harbormaster_cleaner::SHARED_APPS),
+        shared: harbormaster_cleaner::SHARED_APPS.map(Path::new),
     }
 }
 

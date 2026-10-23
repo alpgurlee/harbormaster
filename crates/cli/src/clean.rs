@@ -48,7 +48,7 @@ pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
     remove_picked(&findings, json, &mut out, |picked, stop, told| {
         let reach = harbormaster_cleaner::Reach {
             home: &home,
-            shared: Path::new(harbormaster_cleaner::SHARED_APPS),
+            shared: harbormaster_cleaner::SHARED_APPS.map(Path::new),
         };
         harbormaster_cleaner::remove(
             &reach,

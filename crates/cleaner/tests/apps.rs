@@ -39,7 +39,7 @@ fn lists_the_users_own_apps_largest_first_and_picks_none() {
     bundle(&mine.home.join("Applications"), "Mine.app", 2 * MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
 
     let found = listed(&reach, &[]);
@@ -85,7 +85,7 @@ fn leaves_out_links_deeper_apps_and_bundles_without_their_info() {
     bundle(&shared.home, "Kept.app", MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
 
     assert_eq!(names(&listed(&reach, &[])), ["Kept"]);
@@ -99,7 +99,7 @@ fn locks_an_app_something_runs_from() {
     let program = shared.home.join("Busy.app/Contents/MacOS/app");
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
 
     let found = listed(&reach, &[(program, "Busy".into())]);
@@ -113,7 +113,7 @@ fn lists_the_home_folders_apps_when_there_is_no_shared_folder() {
     bundle(&mine.home.join("Applications"), "Mine.app", MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &mine.home.join("nowhere"),
+        shared: Some(&mine.home.join("nowhere")),
     };
 
     assert_eq!(names(&listed(&reach, &[])), ["Mine"]);
@@ -151,7 +151,7 @@ fn moves_an_app_from_the_shared_folder_to_the_trash() {
     bundle(&shared.home, "Big.app", MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
     let app = listed(&reach, &[]).remove(0);
 
@@ -166,7 +166,7 @@ fn never_deletes_from_the_shared_folder_nor_takes_anything_but_an_app_from_it() 
     bundle(&shared.home, "Big.app", MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
     let app = listed(&reach, &[]).remove(0);
     let deleted = Finding {
@@ -195,7 +195,7 @@ fn looks_again_at_an_app_in_the_shared_folder() {
     bundle(&shared.home, "Big.app", MIB);
     let reach = Reach {
         home: &mine.home,
-        shared: &shared.home,
+        shared: Some(&shared.home),
     };
     let app = listed(&reach, &[]).remove(0);
     let again = || recheck(&reach, std::slice::from_ref(&app), &Usage::default()).expect("a look");

@@ -301,8 +301,12 @@ pub struct Hunt<'a> {
     pub busy: &'a [(PathBuf, String)],
 }
 
-/// The folder apps are shared from on a Mac.
-pub const SHARED_APPS: &str = "/Applications";
+/// The folder apps are shared from, which only a Mac has.
+pub const SHARED_APPS: Option<&str> = if cfg!(target_os = "macos") {
+    Some("/Applications")
+} else {
+    None
+};
 
 /// Where removing may go: anywhere in the home folder, and in the shared
 /// app folder for apps alone, which only ever go to the Trash.
@@ -310,8 +314,8 @@ pub const SHARED_APPS: &str = "/Applications";
 pub struct Reach<'a> {
     /// The account's home folder as the disk spells it, which `account_home` gives.
     pub home: &'a Path,
-    /// The shared app folder: `SHARED_APPS` on a Mac.
-    pub shared: &'a Path,
+    /// The shared app folder, `SHARED_APPS`, where the machine has one.
+    pub shared: Option<&'a Path>,
 }
 
 /// What a map of the home folder looks through.
