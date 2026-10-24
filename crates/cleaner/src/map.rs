@@ -23,7 +23,15 @@ const DEEPEST: usize = 64;
 /// How often `told` hears how far the map has come.
 const TELL_EVERY: Duration = Duration::from_millis(200);
 /// Other apps' data, from the home folder: macOS may ask before it is read.
+#[cfg(target_os = "macos")]
 const OTHER_APPS: &[&str] = &["Library/Containers", "Library/Group Containers"];
+/// Windows asks nothing before any of the home folder is read.
+#[cfg(not(target_os = "macos"))]
+const OTHER_APPS: &[&str] = &[];
+/// The most records of an NTFS file table kept a bit for, a few times what
+/// a large disk holds; a file past them is kept by its whole id.
+#[cfg(windows)]
+const RECORDS: u64 = 1 << 28;
 
 pub(crate) fn chart(
     chart: &Chart,
@@ -51,7 +59,7 @@ fn charted(
         kept,
         tell_every,
         device: stat.device,
-        linked: HashSet::new(),
+        linked: Linked::default(),
         bytes: 0,
         items: 0,
         last: Instant::now(),
@@ -69,7 +77,7 @@ struct Walker<'a> {
     tell_every: Duration,
     device: u64,
     /// Files with more than one name, so each is counted once.
-    linked: HashSet<(u64, u128)>,
+    linked: Linked,
     bytes: u64,
     items: u64,
     last: Instant,
@@ -102,8 +110,7 @@ impl Walker<'_> {
                 self.inner(dir, name, &below, stat, depth)
             } else {
                 // A file with more names takes its room once, under the first one met.
-                let again =
-                    stat.may_have_other_names() && !self.linked.insert((stat.device, stat.inode));
+                let again = stat.may_have_other_names() && !self.linked.first(stat.inode);
                 let bytes = if again { 0 } else { stat.bytes };
                 self.counted(bytes, &below);
                 self.area(&below, stat, bytes)
@@ -187,6 +194,43 @@ impl Walker<'_> {
     fn stopped(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
     }
+}
+
+/// The files met so far that may have more names, by their ids on the one
+/// disk mapped. A listing on Windows doesn't say how many names a file
+/// has, so there every file is kept, each by a bit for its record in the
+/// NTFS file table, which its id numbers: a few bytes for a million files.
+#[derive(Debug, Default)]
+struct Linked {
+    #[cfg(windows)]
+    records: Vec<u64>,
+    others: HashSet<u128>,
+}
+
+impl Linked {
+    /// Whether the file `inode` is met for the first time.
+    fn first(&mut self, inode: u128) -> bool {
+        #[cfg(windows)]
+        if let Some(record) = record_of(inode) {
+            let (word, bit) = ((record / 64) as usize, record % 64);
+            if self.records.len() <= word {
+                self.records.resize(word + 1, 0);
+            }
+            let met = self.records[word] & (1 << bit) != 0;
+            self.records[word] |= 1 << bit;
+            return !met;
+        }
+        self.others.insert(inode)
+    }
+}
+
+/// The record in the NTFS file table that `inode` names: the low 48 bits
+/// of its id, the rest of which counts how often the record was used. An id
+/// of another kind, as ReFS's, has none.
+#[cfg(windows)]
+fn record_of(inode: u128) -> Option<u64> {
+    let record = (inode as u64) & 0xFFFF_FFFF_FFFF;
+    (inode >> 64 == 0 && record < RECORDS).then_some(record)
 }
 
 /// Why a folder listed a moment ago couldn't be opened: gone since, or made
@@ -453,5 +497,23 @@ mod tests {
         let odd = Path::new(OsStr::from_bytes(b"Downloads/caf\xe9"));
 
         assert_eq!(shown(odd), "Downloads/caf\u{fffd}");
+    }
+}
+
+#[cfg(test)]
+mod linked {
+    use super::Linked;
+
+    #[test]
+    fn counts_each_file_once_whatever_kind_its_id_is() {
+        let mut linked = Linked::default();
+
+        assert!(linked.first(42));
+        assert!(!linked.first(42));
+        assert!(linked.first(43));
+        // An id past an NTFS file table's numbers, as ReFS gives.
+        let wide = 1u128 << 100;
+        assert!(linked.first(wide));
+        assert!(!linked.first(wide));
     }
 }

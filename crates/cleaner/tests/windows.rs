@@ -9,8 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
-    Cleaned, Finding, Group, Hunt, Kind, Outcome, Survey, Usage, Why, large, remove, scan,
-    usual_roots,
+    Chart, Cleaned, Finding, Group, Hunt, Kind, Outcome, Survey, Usage, Why, large, map, remove,
+    scan, usual_roots,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, SetFileAttributesW,
@@ -647,4 +647,37 @@ fn leaves_a_temporary_file_a_program_writes_to_even_when_it_lets_others_delete_i
         "{cleaned:?}"
     );
     assert!(temp.join("written.log").exists());
+}
+
+#[test]
+fn maps_a_file_with_two_names_once_and_nothing_through_a_junction() {
+    let mine = machine();
+    let elsewhere = machine();
+    let home = &mine.home;
+    write(&home.join(r"Videos\trip.mp4"), &vec![1; 4 * MIB]);
+    std::fs::create_dir_all(home.join("Desktop")).expect("a folder");
+    std::fs::hard_link(
+        home.join(r"Videos\trip.mp4"),
+        home.join(r"Desktop\trip.mp4"),
+    )
+    .expect("a hard link");
+    write(&home.join(r"AppData\Local\cache.bin"), &vec![1; 2 * MIB]);
+    write(&elsewhere.home.join(r"films\big.mp4"), &vec![1; 8 * MIB]);
+    link_folder(&elsewhere.home.join("films"), &home.join(r"Videos\films"));
+
+    let root = map(
+        &Chart {
+            home,
+            others: false,
+        },
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("the map");
+
+    assert!(
+        (6 * MIB as u64..7 * MIB as u64).contains(&root.bytes),
+        "{}",
+        root.bytes
+    );
 }
