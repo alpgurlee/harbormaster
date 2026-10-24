@@ -91,6 +91,7 @@ export type CleanGroup =
   | "packages"
   | "xcode"
   | "apps"
+  | "temp"
   | "logs"
   | "trash"
   | "videos"
@@ -133,6 +134,8 @@ export type Why =
 
 export type Removal = { path: string } & (
   | { outcome: "deleted" | "trashed" | "stopped" | "interrupted" }
+  /** Gone but for `left` items, which programs held. */
+  | { outcome: "partly"; left: number }
   | { outcome: "refused"; why: Why }
   | { outcome: "failed"; why: string }
 );

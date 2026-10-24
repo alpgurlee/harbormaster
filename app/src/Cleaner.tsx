@@ -846,7 +846,8 @@ function Done({
   onBack: () => void;
 }) {
   const removals = step.cleaned.removals.length > 0 ? step.cleaned.removals : step.removals;
-  const cleaned = removals.filter(({ outcome }) => outcome === "deleted" || outcome === "trashed").length;
+  // What partly went is counted as cleaned, and listed first for what stayed.
+  const cleaned = removals.filter(({ outcome }) => outcome === "deleted" || outcome === "trashed" || outcome === "partly").length;
   const left = removals.length - cleaned;
   // What went to the Trash is still on the disk; its room comes once the Trash is emptied.
   const trashed = removals

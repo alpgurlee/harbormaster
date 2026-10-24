@@ -8,6 +8,7 @@ export const NAMES: Record<CleanGroup, TextKey> = {
   packages: "groupPackages",
   xcode: "groupXcode",
   apps: "groupApps",
+  temp: "groupTemp",
   logs: "groupLogs",
   trash: platform === "windows" ? "groupTrashWindows" : "groupTrash",
   videos: "groupVideos",
@@ -25,6 +26,7 @@ export const ABOUT: Record<CleanGroup, TextKey> = {
   packages: "aboutPackages",
   xcode: "aboutXcode",
   apps: "aboutApps",
+  temp: "aboutTemp",
   logs: platform === "windows" ? "aboutLogsWindows" : "aboutLogs",
   trash: "aboutTrash",
   videos: platform === "windows" ? "aboutVideosWindows" : "aboutVideos",
@@ -43,6 +45,7 @@ export const TINTS: Record<CleanGroup, number> = {
   packages: 3,
   xcode: 1,
   apps: 5,
+  temp: 3,
   logs: 4,
   trash: 2,
   videos: 2,
@@ -94,6 +97,8 @@ export function outcomeText(removal: Removal, i18n: Translator): string {
       return i18n.t("outcomeDeleted");
     case "trashed":
       return i18n.t(bin.outcome);
+    case "partly":
+      return i18n.plural("outcomePartly", removal.left);
     case "stopped":
       return i18n.t("outcomeNotReached");
     case "interrupted":

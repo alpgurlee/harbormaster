@@ -127,6 +127,7 @@ export interface Messages {
   groupPackages: string;
   groupXcode: string;
   groupApps: string;
+  groupTemp: string;
   groupLogs: string;
   groupTrash: string;
   groupTrashWindows: string;
@@ -142,6 +143,7 @@ export interface Messages {
   aboutPackages: string;
   aboutXcode: string;
   aboutApps: string;
+  aboutTemp: string;
   aboutLogs: string;
   aboutLogsWindows: string;
   aboutTrash: string;
@@ -183,6 +185,7 @@ export interface Messages {
   leftItems: Plural;
   outcomeDeleted: string;
   outcomeTrashed: string;
+  outcomePartly: Plural;
   outcomeRecycled: string;
   outcomeLeft: string;
   outcomeFailedWith: string;
@@ -414,6 +417,7 @@ export const en: Messages = {
   groupPackages: "Package caches",
   groupXcode: "Xcode",
   groupApps: "App caches",
+  groupTemp: "Temporary files",
   groupLogs: "Logs",
   groupTrash: "Trash",
   groupTrashWindows: "Recycle Bin",
@@ -432,6 +436,7 @@ export const en: Messages = {
   aboutPackages: "Downloads your package managers keep. They come back when needed.",
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
+  aboutTemp: "What apps put aside while they ran. Only what nothing has touched for a week goes, and none of what a program works in.",
   aboutLogs: "What apps wrote down about their past runs.",
   aboutLogsWindows: "What apps left behind when they crashed, kept to find out why. It goes to the Recycle Bin.",
   aboutTrash: "What you threw away. Emptying it is for good.",
@@ -476,6 +481,7 @@ export const en: Messages = {
   leftItems: { one: "{count} not cleaned up", other: "{count} not cleaned up" },
   outcomeDeleted: "deleted",
   outcomeTrashed: "moved to the Trash",
+  outcomePartly: { one: "deleted, all but 1 item, which a program holds", other: "deleted, all but {count} items, which programs hold" },
   outcomeRecycled: "moved to the Recycle Bin",
   outcomeLeft: "left alone: {why}",
   outcomeFailedWith: "failed: {why}",
@@ -712,6 +718,7 @@ export const tr: Messages = {
   groupPackages: "Paket önbellekleri",
   groupXcode: "Xcode",
   groupApps: "Uygulama önbellekleri",
+  groupTemp: "Geçici dosyalar",
   groupLogs: "Kayıtlar",
   groupTrash: "Çöp Sepeti",
   groupTrashWindows: "Geri Dönüşüm Kutusu",
@@ -730,6 +737,7 @@ export const tr: Messages = {
   aboutPackages: "Paket yöneticilerinin sakladığı indirmeler. Gerektiğinde yeniden iner.",
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
+  aboutTemp: "Uygulamaların çalışırken bir kenara koydukları. Yalnızca bir haftadır dokunulmamış olanlar gider; bir programın içinde çalıştığı hiçbir şey gitmez.",
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
   aboutLogsWindows: "Uygulamaların çöktüklerinde geride bıraktıkları, nedenini bulmak için tutulan dökümler. Geri Dönüşüm Kutusu'na gider.",
   aboutTrash: "Attıkların. Boşaltmak kalıcıdır.",
@@ -774,6 +782,7 @@ export const tr: Messages = {
   leftItems: { one: "{count} öğe temizlenmedi", other: "{count} öğe temizlenmedi" },
   outcomeDeleted: "silindi",
   outcomeTrashed: "Çöp Sepeti'ne taşındı",
+  outcomePartly: { one: "silindi; bir programın tuttuğu 1 öğe kaldı", other: "silindi; programların tuttuğu {count} öğe kaldı" },
   outcomeRecycled: "Geri Dönüşüm Kutusu'na taşındı",
   outcomeLeft: "bırakıldı: {why}",
   outcomeFailedWith: "başarısız: {why}",

@@ -469,4 +469,30 @@ describe("the cleaner on Windows", () => {
 
     expect(within(screen.getByRole("dialog")).getByText("The Recycle Bin is emptied for good.")).toBeTruthy();
   });
+
+  it("says how much of the temporary files stayed, as programs hold them", async () => {
+    const temp: Finding = {
+      ...npm,
+      group: "temp",
+      name: "Temporary files",
+      path: "C:\\Users\\dev\\AppData\\Local\\Temp",
+    };
+    const driver = cleaner();
+    await act(async () => {});
+    scanned(driver, [temp]);
+    fireEvent.click(screen.getByRole("button", { name: /^Leftovers/ }));
+    expect(
+      screen.getByText("What apps put aside while they ran. Only what nothing has touched for a week goes, and none of what a program works in."),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    act(() => driver.runs[0]({ kind: "removed", path: temp.path, outcome: "partly", left: 3 }));
+    act(() =>
+      driver.runs[0]({ kind: "done", removals: [], freedBytes: 900 * 1024 ** 2, token: 9, findings: [], scanned: true, hunted: false, appsListed: false }),
+    );
+
+    expect(screen.getByText("deleted, all but 3 items, which programs hold")).toBeTruthy();
+    expect(screen.getByTestId("hero").textContent).toBe("900 MB freed1 item cleaned up");
+  });
 });
