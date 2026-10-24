@@ -344,6 +344,7 @@ fn entries(bytes: &[u8], device: u64) -> Vec<(OsString, Stat)> {
                 links: None,
                 bytes: u64::try_from(entry.AllocationSize).unwrap_or(0),
                 modified: from_ticks(entry.LastWriteTime),
+                touched: latest(entry.CreationTime, entry.LastWriteTime, entry.ChangeTime),
                 hidden: hidden(entry.FileAttributes),
             },
         ));
@@ -505,8 +506,15 @@ fn stat_of(handle: &OwnedHandle) -> io::Result<Stat> {
         links: Some(u64::from(standard.NumberOfLinks)),
         bytes: u64::try_from(standard.AllocationSize).unwrap_or(0),
         modified: from_ticks(basic.LastWriteTime),
+        touched: latest(basic.CreationTime, basic.LastWriteTime, basic.ChangeTime),
         hidden: hidden(basic.FileAttributes),
     })
+}
+
+/// The latest of when a file was made, written and changed: a file copied
+/// in keeps the write time it had, but is made anew.
+fn latest(created: i64, written: i64, changed: i64) -> SystemTime {
+    from_ticks(created.max(written).max(changed))
 }
 
 /// Whether `attributes` keep a file out of File Explorer's sight.

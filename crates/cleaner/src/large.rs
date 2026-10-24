@@ -131,7 +131,7 @@ pub(crate) fn hunt(
     // A machine kept right in the home folder keeps its disks there too.
     let machine = holds_a_machine(&entries);
     for (name, stat) in entries {
-        if passed_over(&name, &stat, device) || is_named(&name, APP_DATA) {
+        if passed_over(&name, &stat, device) || walk::is_named(&name, APP_DATA) {
             continue;
         }
         if walk::is_folder(&stat) {
@@ -234,19 +234,6 @@ fn passed_over(name: &OsStr, stat: &Stat, device: u64) -> bool {
     hidden || walk::is_link(stat) || stat.device != device
 }
 
-/// Whether `name` is `expected`, compared as the disk compares names: on
-/// Windows, whatever the case.
-fn is_named(name: &OsStr, expected: &str) -> bool {
-    #[cfg(windows)]
-    {
-        walk::same_name(name, OsStr::new(expected))
-    }
-    #[cfg(not(windows))]
-    {
-        name == expected
-    }
-}
-
 /// Whether the folder listed as `entries` is a virtual machine.
 fn holds_a_machine(entries: &[(OsString, Stat)]) -> bool {
     entries.iter().any(|(name, stat)| {
@@ -259,7 +246,7 @@ fn holds_a_machine(entries: &[(OsString, Stat)]) -> bool {
 /// packages a Node project downloaded, nor what an app keeps whole.
 fn entered(name: &OsStr) -> bool {
     let package = extension(name).is_some_and(|extension| PACKAGES.contains(&extension.as_str()));
-    !package && name != "node_modules" && !KEPT_WHOLE.iter().any(|kept| is_named(name, kept))
+    !package && name != "node_modules" && !KEPT_WHOLE.iter().any(|kept| walk::is_named(name, kept))
 }
 
 /// The file `name` in `dir`, which is `folder` from the home folder, listed

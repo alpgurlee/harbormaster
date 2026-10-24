@@ -172,6 +172,7 @@ mod tests {
             links: Some(1),
             bytes: 0,
             modified: UNIX_EPOCH,
+            touched: UNIX_EPOCH,
             owner,
             flags,
         }

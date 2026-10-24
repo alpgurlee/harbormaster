@@ -292,6 +292,9 @@ fn described(stat: &libc::stat) -> Stat {
         links: Some(u64::from(stat.st_nlink)),
         bytes: u64::try_from(stat.st_blocks).unwrap_or(0) * 512,
         modified: since_epoch(stat.st_mtime, stat.st_mtime_nsec),
+        // A file's status changes as it is made and moved, and as it is written.
+        touched: since_epoch(stat.st_mtime, stat.st_mtime_nsec)
+            .max(since_epoch(stat.st_ctime, stat.st_ctime_nsec)),
         owner: stat.st_uid,
         #[cfg(target_os = "macos")]
         flags: stat.st_flags,

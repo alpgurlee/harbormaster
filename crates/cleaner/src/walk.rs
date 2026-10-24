@@ -29,6 +29,9 @@ pub(crate) struct Stat {
     /// The room it takes on disk.
     pub(crate) bytes: u64,
     pub(crate) modified: SystemTime,
+    /// The latest it was made, written to or changed, renamed or copied in
+    /// included, whatever its write time says.
+    pub(crate) touched: SystemTime,
     /// The user it belongs to.
     #[cfg(unix)]
     pub(crate) owner: u32,
@@ -72,6 +75,19 @@ pub(crate) fn is_file(stat: &Stat) -> bool {
 /// Whether `stat` describes a link.
 pub(crate) fn is_link(stat: &Stat) -> bool {
     stat.kind == FileType::Link
+}
+
+/// Whether `name` is `expected`, compared as the disk compares names: on
+/// Windows, whatever the case.
+pub(crate) fn is_named(name: &std::ffi::OsStr, expected: &str) -> bool {
+    #[cfg(windows)]
+    {
+        same_name(name, std::ffi::OsStr::new(expected))
+    }
+    #[cfg(not(windows))]
+    {
+        name == expected
+    }
 }
 
 /// `path` with every link in it resolved, spelled as the disk spells it.
