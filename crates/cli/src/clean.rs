@@ -236,6 +236,7 @@ fn title(group: Group) -> &'static str {
         Group::Xcode => "Xcode",
         Group::Apps => "App caches",
         Group::Logs => "Logs",
+        Group::Trash if cfg!(windows) => "Recycle Bin",
         Group::Trash => "Trash",
         Group::Videos => "Videos",
         Group::Archives => "Archives and disk images",
