@@ -89,7 +89,7 @@ fn finds_large_files_by_kind_largest_first_and_never_picks_them() {
 }
 
 #[test]
-fn never_looks_in_the_library_hidden_folders_packages_or_caches() {
+fn never_looks_in_the_library_hidden_folders_packages_machines_or_caches() {
     let machine = machine();
     let home = &machine.home;
     for inside in [
@@ -107,6 +107,14 @@ fn never_looks_in_the_library_hidden_folders_packages_or_caches() {
         write(&home.join(inside), &vec![1; 2 * MIB]);
     }
     write(&home.join("code/tool/target/CACHEDIR.TAG"), TAG);
+    write(
+        &home.join("VirtualBox VMs/Ubuntu/Ubuntu.vbox"),
+        b"<VirtualBox/>",
+    );
+    write(
+        &home.join("VirtualBox VMs/Ubuntu/Ubuntu.vdi"),
+        &vec![1; 2 * MIB],
+    );
 
     assert_eq!(names(&hunted(home, &[])), []);
 }

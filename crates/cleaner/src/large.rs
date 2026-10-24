@@ -51,6 +51,16 @@ const PACKAGES: &[&str] = &[
     "xcworkspace",
 ];
 
+/// Files that make the folder they are in a virtual machine, VirtualBox's
+/// or VMware's, by extension. Its disks are left with it, never listed: a
+/// disk taken from one would break it.
+const MACHINES: &[&str] = &["vbox", "vmx"];
+
+/// Folders an app keeps whole where the user's files are, by name: the
+/// device backups iTunes makes on Windows. A file taken from one would
+/// break it.
+const KEPT_WHOLE: &[&str] = &["MobileSync"];
+
 /// Each kind of large file, by the extensions that name it.
 const KINDS: &[(Group, &[&str])] = &[
     (
@@ -181,6 +191,13 @@ fn looked(
     let Ok(entries) = dir.entries_while(|| !stop.load(Ordering::Relaxed)) else {
         return;
     };
+    let machine = entries.iter().any(|(name, stat)| {
+        walk::is_file(stat)
+            && extension(name).is_some_and(|extension| MACHINES.contains(&extension.as_str()))
+    });
+    if machine {
+        return;
+    }
     for (name, stat) in entries {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -231,10 +248,10 @@ fn is_app_data(name: &OsStr) -> bool {
 }
 
 /// Whether a folder called `name` is looked into: not a package, nor the
-/// packages a Node project downloaded.
+/// packages a Node project downloaded, nor what an app keeps whole.
 fn entered(name: &OsStr) -> bool {
     let package = extension(name).is_some_and(|extension| PACKAGES.contains(&extension.as_str()));
-    !package && name != "node_modules"
+    !package && name != "node_modules" && !KEPT_WHOLE.iter().any(|kept| name == *kept)
 }
 
 /// The file `name` in `dir`, which is `folder` from the home folder, listed

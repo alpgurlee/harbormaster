@@ -490,8 +490,9 @@ pub fn still_there(home: &Path, path: &Path, identity: Identity) -> bool {
 }
 
 /// The large files in the home folder, by kind and largest first, never
-/// picked: each is the user's own, and goes only to the Trash. The Library,
-/// hidden folders, apps and other packages, and caches are never looked in.
+/// picked: each is the user's own, and goes only to the Trash. The Library
+/// or AppData, hidden folders, apps and other packages, virtual machines,
+/// device backups and caches are never looked in.
 /// `measured` hears after each folder of the home folder is looked through;
 /// `stop` cuts the hunt short, keeping what was found.
 pub fn large(

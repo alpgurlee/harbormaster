@@ -64,11 +64,12 @@ A scan looks for:
 - **Xcode data**: DerivedData, simulator caches, device support files and archives.
 - **Leftovers**: app caches, logs and the Trash.
 
-Two more sections look only when you ask. **Large files** lists files taking 50 MB or more on disk in your
-home folder outside the Library, leaving out hidden files, the insides of app bundles and other packages,
-`node_modules`, folders tagged as caches, and files with more than one hard link. **Apps** lists the apps
-in `/Applications` and `~/Applications`, and one folder down in each, that belong to you and aren't locked,
-with the room each takes; one it can't measure in full is left out.
+Two more sections look only when you ask. **Large files** lists files taking 50 MB or more on disk in
+your home folder outside the Library (on Windows, AppData), leaving out hidden files, the insides of app
+bundles and other packages, virtual machines and iTunes device backups, `node_modules`, folders tagged as
+caches, and files with more than one hard link. **Apps** lists the apps in `/Applications` and
+`~/Applications`, and one folder down in each, that belong to you and aren't locked, with the room each
+takes; one it can't measure in full is left out.
 
 What gets chosen, and what happens to it:
 

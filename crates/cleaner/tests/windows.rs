@@ -260,6 +260,8 @@ fn hunts_large_files_but_never_in_appdata_or_among_what_windows_hides() {
     );
     write(&home.join(r"Documents\Private\film.mkv"), &vec![1; 2 * MIB]);
     hide(&home.join(r"Documents\Private"), FILE_ATTRIBUTE_HIDDEN);
+    write(&home.join(r"Documents\swap.img"), &vec![1; 2 * MIB]);
+    hide(&home.join(r"Documents\swap.img"), FILE_ATTRIBUTE_SYSTEM);
 
     let found = hunted(home);
 
@@ -276,6 +278,34 @@ fn hunts_large_files_but_never_in_appdata_or_among_what_windows_hides() {
     );
     assert_eq!(found[0].path, home.join(r"Videos\trip.mp4"));
     assert_eq!((found[0].kind, found[0].picked), (Kind::Personal, false));
+}
+
+#[test]
+fn never_hunts_inside_a_virtual_machine_or_a_device_backup() {
+    let machine = machine();
+    let home = &machine.home;
+    write(
+        &home.join(r"VirtualBox VMs\Ubuntu\Ubuntu.vbox"),
+        b"<VirtualBox/>",
+    );
+    write(
+        &home.join(r"VirtualBox VMs\Ubuntu\Ubuntu.vdi"),
+        &vec![1; 2 * MIB],
+    );
+    write(
+        &home.join(r"Documents\Virtual Machines\Win\Win.vmx"),
+        b"config",
+    );
+    write(
+        &home.join(r"Documents\Virtual Machines\Win\Win-disk1.vmdk"),
+        &vec![1; 2 * MIB],
+    );
+    write(
+        &home.join(r"Apple\MobileSync\Backup\00008030\ab\ab12cd"),
+        &vec![1; 2 * MIB],
+    );
+
+    assert_eq!(hunted(home), []);
 }
 
 #[test]
