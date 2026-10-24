@@ -615,3 +615,36 @@ fn says_how_many_temporary_files_stayed_as_a_program_holds_them() {
     );
     assert!(temp.join("held.log").exists() && !temp.join("loose.log").exists());
 }
+
+#[test]
+fn leaves_a_temporary_file_a_program_writes_to_even_when_it_lets_others_delete_it() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let machine = machine();
+    let temp = machine.home.join(r"AppData\Local\Temp");
+    write(&temp.join("written.log"), &vec![1; 2 * MIB]);
+    left_long_ago(&temp, 30 * DAY);
+    let findings = scanned_with_temp(&machine.home, &temp, &[]);
+    let files = named(&findings, "Temporary files").expect("the temporary files");
+    // As a log is written: others may do anything with it meanwhile.
+    let _writing = std::fs::OpenOptions::new()
+        .append(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .open(temp.join("written.log"))
+        .expect("being written");
+
+    let cleaned = removed(&machine.home, files, &|_| {
+        panic!("nothing goes to the Recycle Bin")
+    });
+
+    assert_eq!(
+        cleaned.removals[0].outcome,
+        Outcome::Partly { left: 1 },
+        "{cleaned:?}"
+    );
+    assert!(temp.join("written.log").exists());
+}

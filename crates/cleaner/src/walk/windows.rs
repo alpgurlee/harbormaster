@@ -127,7 +127,7 @@ impl Dir {
 
     /// The folder `name` inside this one, refused when it is a link or not a folder.
     pub(crate) fn child(&self, name: &OsStr) -> io::Result<Self> {
-        let child = open_at(&self.0, name, FOLDER, FILE_DIRECTORY_FILE)?;
+        let child = open_at(&self.0, name, FOLDER, SHARED, FILE_DIRECTORY_FILE)?;
         refuse_reparse_point(&child)?;
         Ok(Self(child))
     }
@@ -135,7 +135,7 @@ impl Dir {
     /// What is called `name` inside this folder, opened only to look at it;
     /// a link is refused.
     pub(crate) fn item(&self, name: &OsStr) -> io::Result<Item> {
-        let item = open_at(&self.0, name, LOOK, 0)?;
+        let item = open_at(&self.0, name, LOOK, SHARED, 0)?;
         refuse_reparse_point(&item)?;
         Ok(Item(item))
     }
@@ -147,6 +147,7 @@ impl Dir {
             &self.0,
             name,
             FILE_READ_DATA | LOOK,
+            SHARED,
             FILE_NON_DIRECTORY_FILE,
         )?;
         if !is_file(&stat_of(&file)?) {
@@ -171,7 +172,7 @@ impl Dir {
     /// even while others have it open.
     pub(crate) fn unlink(&self, name: &OsStr, folder: bool) -> io::Result<()> {
         let options = if folder { FILE_DIRECTORY_FILE } else { 0 };
-        let target = open_at(&self.0, name, DELETE | LOOK, options)?;
+        let target = open_at(&self.0, name, DELETE | LOOK, SHARED, options)?;
         let basic: FILE_BASIC_INFO = query(&target, FileBasicInfo)?;
         // A link to a folder is a folder to Windows, opened as itself here.
         if (kind_of(basic.FileAttributes, false) == FileType::Folder) != folder {
@@ -191,7 +192,15 @@ impl Dir {
         name: &OsStr,
         may: &dyn Fn(&Stat) -> bool,
     ) -> io::Result<()> {
-        let target = open_at(&self.0, name, DELETE | LOOK, 0)?;
+        // No one may write to it while it is held: a file being written
+        // isn't opened, and one opened can't become new before it goes.
+        let target = open_at(
+            &self.0,
+            name,
+            DELETE | LOOK,
+            FILE_SHARE_READ | FILE_SHARE_DELETE,
+            0,
+        )?;
         let stat = stat_of(&target)?;
         if is_folder(&stat) {
             return Err(io::Error::other("a folder stands where a file was"));
@@ -253,7 +262,7 @@ impl Dir {
     /// This folder opened again: a listing reads through a handle's own
     /// place in the folder, so each gets a handle of its own.
     fn reopened(&self) -> io::Result<Self> {
-        open_relative(&self.0, &[], FOLDER, FILE_DIRECTORY_FILE).map(Self)
+        open_relative(&self.0, &[], FOLDER, SHARED, FILE_DIRECTORY_FILE).map(Self)
     }
 
     /// The entries a listing of its own reads in batches. Windows lists a
@@ -405,13 +414,15 @@ pub(crate) fn plain(path: PathBuf) -> PathBuf {
     plain
 }
 
-/// `name` inside `parent`, opened as itself with `access` and `options`. A
-/// name is one plain name, never a path, so that only it can be a reparse
-/// point, and FILE_OPEN_REPARSE_POINT opens that as itself.
+/// `name` inside `parent`, opened as itself with `access` and `options`,
+/// letting others do what `share` says meanwhile. A name is one plain
+/// name, never a path, so that only it can be a reparse point, and
+/// FILE_OPEN_REPARSE_POINT opens that as itself.
 fn open_at(
     parent: &OwnedHandle,
     name: &OsStr,
     access: u32,
+    share: u32,
     options: u32,
 ) -> io::Result<OwnedHandle> {
     let name: Vec<u16> = name.encode_wide().collect();
@@ -420,7 +431,7 @@ fn open_at(
     if name.is_empty() || dots || name.iter().any(separator) {
         return Err(plain_path());
     }
-    open_relative(parent, &name, access, options)
+    open_relative(parent, &name, access, share, options)
 }
 
 /// `name` relative to `parent`, or `parent` itself again for no name.
@@ -428,6 +439,7 @@ fn open_relative(
     parent: &OwnedHandle,
     name: &[u16],
     access: u32,
+    share: u32,
     options: u32,
 ) -> io::Result<OwnedHandle> {
     let length = u16::try_from(name.len() * 2).map_err(|_| plain_path())?;
@@ -457,7 +469,7 @@ fn open_relative(
             &mut status,
             ptr::null(),
             0,
-            SHARED,
+            share,
             FILE_OPEN,
             options | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
             ptr::null(),
