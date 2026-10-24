@@ -231,7 +231,7 @@ fn deleted(
 /// Removes everything inside `dir`, staying on `device` and never following
 /// a link: a link goes, what it points to stays. A folder goes once it is
 /// empty. Anything out of the ordinary stops this finding.
-pub(crate) fn empty(dir: &Dir, device: u64, depth: usize, stop: &AtomicBool) -> io::Result<()> {
+fn empty(dir: &Dir, device: u64, depth: usize, stop: &AtomicBool) -> io::Result<()> {
     if depth >= DEEPEST {
         return Err(io::Error::other("the folder goes deeper than is removed"));
     }

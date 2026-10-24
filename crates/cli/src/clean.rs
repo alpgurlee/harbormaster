@@ -202,7 +202,9 @@ pub(crate) fn removal(removal: &Removal, findings: &[Finding]) -> String {
         Outcome::Deleted => ("deleted", None),
         Outcome::Partly { left } => (
             "deleted",
-            Some(format!("all but {left}, which programs hold")),
+            Some(format!(
+                "all but {left} of its items, in use or changed meanwhile"
+            )),
         ),
         Outcome::Trashed => ("trashed", None),
         Outcome::Refused { why } => ("skipped", Some(why.to_string())),

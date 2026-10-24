@@ -104,6 +104,20 @@ impl Dir {
         Ok(())
     }
 
+    /// Removes the file `name`, but only if `may` says so of it as it is
+    /// read a moment before.
+    pub(crate) fn unlink_file_if(
+        &self,
+        name: &OsStr,
+        may: &dyn Fn(&Stat) -> bool,
+    ) -> io::Result<()> {
+        let stat = self.item(name)?.metadata()?;
+        if !may(&stat) {
+            return Err(io::Error::other("changed since it was looked at"));
+        }
+        self.unlink(name, false)
+    }
+
     fn open_at(&self, name: &OsStr, flags: libc::c_int) -> io::Result<OwnedFd> {
         let name = CString::new(name.as_bytes())?;
         // SAFETY: `self.0` is an open folder and `name` a valid C string.

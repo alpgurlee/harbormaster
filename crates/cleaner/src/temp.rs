@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use crate::walk::{self, Dir, Stat};
-use crate::{Finding, Group, Identity, Kind, Outcome, Survey, remove, within};
+use crate::{Finding, Group, Identity, Kind, Outcome, Survey, within};
 
 /// How long an entry goes untouched before it may go, as long as Disk
 /// Cleanup waits for temporary files.
@@ -94,15 +94,17 @@ pub(crate) fn removed(
         }
         let gone = if walk::is_folder(&stat) {
             match dir.child_if_same(&name, &stat) {
+                // A folder goes once it is empty, which it no longer is if
+                // something came into it since.
                 Ok(Some(child)) => {
-                    remove::empty(&child, device, 1, stop).and_then(|()| dir.unlink(&name, true))
+                    emptied(&child, device, 1, now, stop).and_then(|()| dir.unlink(&name, true))
                 }
                 // Something else is in its place now.
                 Ok(None) => continue,
                 Err(error) => Err(error),
             }
         } else {
-            dir.unlink(&name, false)
+            dir.unlink_file_if(&name, &|own| old(own.touched, now))
         };
         match gone {
             Ok(()) => {}
@@ -140,9 +142,55 @@ fn room_if_old(
         return None;
     }
     let (bytes, touched) = aged(dir, name, stat, 0, stop)?;
-    // A time ahead of now says nothing of how old the entry is.
-    let old = touched <= now && touched.checked_add(AGE).is_some_and(|until| until <= now);
-    old.then_some(bytes)
+    old(touched, now).then_some(bytes)
+}
+
+/// Whether what was last touched at `touched` was left `AGE` before `now`;
+/// a time ahead of now says nothing of how old it is.
+fn old(touched: SystemTime, now: SystemTime) -> bool {
+    touched <= now && touched.checked_add(AGE).is_some_and(|until| until <= now)
+}
+
+/// Removes what `dir`, on `device`, holds, each file only if it is still
+/// old before `now` as the handle that removes it reads it, and each folder
+/// once it is empty. Anything young, out of the ordinary or that Windows
+/// won't let go stops it, with what went before gone.
+fn emptied(
+    dir: &Dir,
+    device: u64,
+    depth: usize,
+    now: SystemTime,
+    stop: &AtomicBool,
+) -> io::Result<()> {
+    if depth > DEEPEST {
+        return Err(io::Error::other("the folder goes deeper than is removed"));
+    }
+    for (name, stat) in dir.entries_while(|| !stop.load(Ordering::Relaxed))? {
+        if stop.load(Ordering::Relaxed) {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        if stat.device != device {
+            return Err(io::Error::other("reaches onto another disk"));
+        }
+        let gone = if walk::is_folder(&stat) {
+            match dir.child_if_same(&name, &stat) {
+                Ok(Some(child)) => {
+                    emptied(&child, device, depth + 1, now, stop)?;
+                    dir.unlink(&name, true)
+                }
+                Ok(None) => return Err(io::Error::other("changed while being removed")),
+                Err(error) => Err(error),
+            }
+        } else {
+            dir.unlink_file_if(&name, &|own| old(own.touched, now))
+        };
+        match gone {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 /// The room `name` in `dir`, listed as `listed`, takes, and the latest it
@@ -171,4 +219,33 @@ fn aged(
         found = (found.0.saturating_add(bytes), found.1.max(touched));
     }
     Some(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::sync::atomic::AtomicBool;
+    use std::time::{Duration, SystemTime};
+
+    use super::emptied;
+    use crate::walk::{self, Dir};
+
+    #[test]
+    fn empties_nothing_that_is_young_by_its_own_account_when_removed() {
+        let place = tempfile::tempdir().unwrap();
+        let home = walk::canonical(place.path()).unwrap();
+        std::fs::create_dir_all(home.join("entry").join("inner")).unwrap();
+        std::fs::write(home.join("entry").join("inner").join("fresh.log"), b"x").unwrap();
+        let root = Dir::open(&home).unwrap();
+        let entry = root.child(OsStr::new("entry")).unwrap();
+        let device = entry.metadata().unwrap().device;
+        let stop = AtomicBool::new(false);
+
+        assert!(emptied(&entry, device, 1, SystemTime::now(), &stop).is_err());
+        assert!(home.join("entry").join("inner").join("fresh.log").exists());
+
+        let later = SystemTime::now() + Duration::from_secs(8 * 86_400);
+        emptied(&entry, device, 1, later, &stop).unwrap();
+        assert!(!home.join("entry").join("inner").exists());
+    }
 }

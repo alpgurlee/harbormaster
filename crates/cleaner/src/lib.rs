@@ -158,7 +158,8 @@ impl Identity {
 pub enum Outcome {
     /// Gone for good.
     Deleted,
-    /// Gone for good but for `left` items in it, which programs held.
+    /// Gone for good but for `left` of the items in it, which were in use
+    /// or changed meanwhile.
     Partly { left: u64 },
     /// In the Trash.
     Trashed,

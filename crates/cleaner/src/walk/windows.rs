@@ -40,7 +40,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
-use super::{FileType, Stat, is_file, plain_path};
+use super::{FileType, Stat, is_file, is_folder, plain_path};
 
 /// What a folder is opened with: enough to list it and to open names inside it.
 const FOLDER: u32 = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
@@ -181,28 +181,25 @@ impl Dir {
                 "a folder stands where a file was"
             }));
         }
-        let posix = FILE_DISPOSITION_INFO_EX {
-            Flags: FILE_DISPOSITION_FLAG_DELETE
-                | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
-                | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-        };
-        let error = match set(&target, FileDispositionInfoEx, &posix) {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
-        };
-        // A disk without POSIX deletion, such as FAT, takes the name away
-        // once the last handle closes; a read-only file stays there.
-        let unsupported = [ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED]
-            .map(|code| Some(code as i32))
-            .contains(&error.raw_os_error());
-        if !unsupported {
-            return Err(error);
+        dispose(&target)
+    }
+
+    /// Removes the file `name`, but only if `may` says so of it, as the
+    /// very handle that removes it reads it.
+    pub(crate) fn unlink_file_if(
+        &self,
+        name: &OsStr,
+        may: &dyn Fn(&Stat) -> bool,
+    ) -> io::Result<()> {
+        let target = open_at(&self.0, name, DELETE | LOOK, 0)?;
+        let stat = stat_of(&target)?;
+        if is_folder(&stat) {
+            return Err(io::Error::other("a folder stands where a file was"));
         }
-        set(
-            &target,
-            FileDispositionInfo,
-            &FILE_DISPOSITION_INFO { DeleteFile: true },
-        )
+        if !may(&stat) {
+            return Err(io::Error::other("changed since it was looked at"));
+        }
+        dispose(&target)
     }
 
     /// Down `relative`, a real folder at every step.
@@ -515,6 +512,32 @@ fn stat_of(handle: &OwnedHandle) -> io::Result<Stat> {
 /// in keeps the write time it had, but is made anew.
 fn latest(created: i64, written: i64, changed: i64) -> SystemTime {
     from_ticks(created.max(written).max(changed))
+}
+
+/// Has what `target` opened go, its name at once where the disk can.
+fn dispose(target: &OwnedHandle) -> io::Result<()> {
+    let posix = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    let error = match set(target, FileDispositionInfoEx, &posix) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    // A disk without POSIX deletion, such as FAT, takes the name away
+    // once the last handle closes; a read-only file stays there.
+    let unsupported = [ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED]
+        .map(|code| Some(code as i32))
+        .contains(&error.raw_os_error());
+    if !unsupported {
+        return Err(error);
+    }
+    set(
+        target,
+        FileDispositionInfo,
+        &FILE_DISPOSITION_INFO { DeleteFile: true },
+    )
 }
 
 /// Whether `attributes` keep a file out of File Explorer's sight.
