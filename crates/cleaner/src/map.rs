@@ -28,10 +28,10 @@ const OTHER_APPS: &[&str] = &["Library/Containers", "Library/Group Containers"];
 /// Windows asks nothing before any of the home folder is read.
 #[cfg(not(target_os = "macos"))]
 const OTHER_APPS: &[&str] = &[];
-/// The most records of an NTFS file table kept a bit for, a few times what
+/// The most records of an NTFS file table kept a byte for, many times what
 /// a large disk holds; a file past them is kept by its whole id.
 #[cfg(windows)]
-const RECORDS: u64 = 1 << 28;
+const RECORDS: u64 = 1 << 26;
 
 pub(crate) fn chart(
     chart: &Chart,
@@ -198,12 +198,15 @@ impl Walker<'_> {
 
 /// The files met so far that may have more names, by their ids on the one
 /// disk mapped. A listing on Windows doesn't say how many names a file
-/// has, so there every file is kept, each by a bit for its record in the
-/// NTFS file table, which its id numbers: a few bytes for a million files.
+/// has, so there every file is kept, each by a byte for its record in the
+/// NTFS file table, which its id numbers: about a megabyte for a million
+/// files.
 #[derive(Debug, Default)]
 struct Linked {
+    /// For each record, a mark of the file met in it, or none: one taking
+    /// the record over later is another file, and marked otherwise.
     #[cfg(windows)]
-    records: Vec<u64>,
+    records: Vec<u8>,
     others: HashSet<u128>,
 }
 
@@ -211,26 +214,29 @@ impl Linked {
     /// Whether the file `inode` is met for the first time.
     fn first(&mut self, inode: u128) -> bool {
         #[cfg(windows)]
-        if let Some(record) = record_of(inode) {
-            let (word, bit) = ((record / 64) as usize, record % 64);
-            if self.records.len() <= word {
-                self.records.resize(word + 1, 0);
+        if let Some((record, mark)) = record_of(inode) {
+            let at = record as usize;
+            if self.records.len() <= at {
+                self.records.resize(at + 1, 0);
             }
-            let met = self.records[word] & (1 << bit) != 0;
-            self.records[word] |= 1 << bit;
+            let met = self.records[at] == mark;
+            self.records[at] = mark;
             return !met;
         }
         self.others.insert(inode)
     }
 }
 
-/// The record in the NTFS file table that `inode` names: the low 48 bits
-/// of its id, the rest of which counts how often the record was used. An id
-/// of another kind, as ReFS's, has none.
+/// The record in the NTFS file table that `inode` names, the low 48 bits of
+/// its id, and a mark, never zero, of how often the record has been used,
+/// which the 16 bits above them count. An id of another kind, as ReFS's,
+/// has neither.
 #[cfg(windows)]
-fn record_of(inode: u128) -> Option<u64> {
-    let record = (inode as u64) & 0xFFFF_FFFF_FFFF;
-    (inode >> 64 == 0 && record < RECORDS).then_some(record)
+fn record_of(inode: u128) -> Option<(u64, u8)> {
+    let reference = inode as u64;
+    let record = reference & 0xFFFF_FFFF_FFFF;
+    let mark = ((reference >> 48) % 255) as u8 + 1;
+    (inode >> 64 == 0 && record < RECORDS).then_some((record, mark))
 }
 
 /// Why a folder listed a moment ago couldn't be opened: gone since, or made
@@ -511,6 +517,9 @@ mod linked {
         assert!(linked.first(42));
         assert!(!linked.first(42));
         assert!(linked.first(43));
+        // Record 42 taken over by another file, its use counted one higher.
+        assert!(linked.first(42 | 1 << 48));
+        assert!(!linked.first(42 | 1 << 48));
         // An id past an NTFS file table's numbers, as ReFS gives.
         let wide = 1u128 << 100;
         assert!(linked.first(wide));
