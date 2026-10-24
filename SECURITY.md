@@ -4,17 +4,19 @@
 
 Please report security problems privately through
 [Report a vulnerability](https://github.com/alpgurlee/harbormaster/security/advisories/new) on the
-Security tab, not in a public issue. Say which commit or release you ran, your macOS version, and the
-steps that show the problem.
+Security tab, not in a public issue. Say which commit or release you ran, your macOS or Windows version,
+and the steps that show the problem.
 
 ## What Harbormaster can do
 
 Harbormaster runs as you, with no administrator rights and no helper tool, and it won't run as root:
-its checks judge what is safe to stop or remove by your own user. It makes no network connections of
-its own: there is no telemetry and no update check. Opening a server in the browser hands its address
-to your browser.
+its checks judge what is safe to stop or remove by your own user. On Windows it may ask Windows to start
+an app's own uninstaller as an administrator, after you confirm and only once Windows' own prompt has
+your yes; Harbormaster itself stays as it was. It makes no network connections of its own: there is no
+telemetry and no update check. Opening a server in the browser hands its address to your browser.
 
-It can end processes and delete files, so both go through checks first:
+It can end processes, delete files and, on Windows, start an app's uninstaller, so each goes through
+checks first:
 
 - A stop lists the processes it will signal first. Right before each signal it checks again that the
   process is the one you approved: the same PID and start time, and no other program started since.
@@ -32,6 +34,18 @@ It can end processes and delete files, so both go through checks first:
   it before it deletes anything; either stays where it was. Should the shell delete an item for good
   all the same, the removal says so. The Recycle Bins are emptied by the shell too; their folders are
   never touched.
+- On Windows the cleaner removes no app itself. It starts the app's own uninstaller as the app's
+  uninstall entry in the registry names it, and only for an app it listed and you confirmed. Right
+  before, it reads the entry again and starts nothing if the entry changed. Windows reads the command,
+  and one whose program Windows can't be sure of, such as an unquoted path with spaces, isn't started.
+  The uninstaller starts as you. Only when it asks for an administrator is Windows asked to start it as
+  one, and only for an app installed for everyone whose uninstaller is kept in Program Files or the
+  Windows folder, where only administrators can change it, and checked to be so: neither the
+  uninstaller, the folders from it up to there, nor the files beside it may be changeable by your
+  programs that run without an administrator. It then starts from there, in its own folder. An app
+  installed for you alone is never started as an administrator, since any program of yours can change
+  its entry. Whether the app is then removed is the uninstaller's to say, and Harbormaster doesn't
+  check.
 - The cleaner never follows a link. Each folder is opened one name at a time from the one above it, and
   a link in its place is refused: on Windows that is any reparse point, so junctions, mount points and
   files kept in the cloud are never entered, and one inside a folder being removed goes by itself,
@@ -48,6 +62,10 @@ It can end processes and delete files, so both go through checks first:
   no other process can take its PID in between. Right before an app's window is asked to close, it is
   checked to still belong to the approved process; in the moment between, the window could close and
   its handle pass to another program's window.
+- Between reading an app's uninstall entry again and starting its uninstaller, the entry could change,
+  and what starts is what it says in that moment. What an uninstaller started as an administrator loads
+  or reads from elsewhere than its own folder isn't checked; Windows' prompt names the publisher of what
+  it is asked to run, the last check before anything runs as an administrator.
 - On Windows the cleaner can't read what files a program has open, as it can on macOS. It reads each of
   your programs' working folder and where it runs from, and takes a cache to be in use while the tool
   it belongs to runs: Cargo's while `cargo` or `rustc` does, Gradle's while a Gradle daemon does, a

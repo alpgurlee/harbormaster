@@ -69,7 +69,10 @@ your home folder outside the Library (on Windows, AppData), leaving out hidden f
 bundles and other packages, virtual machines and iTunes device backups, `node_modules`, folders tagged as
 caches, and files with more than one hard link. **Apps** lists the apps in `/Applications` and
 `~/Applications`, and one folder down in each, that belong to you and aren't locked, with the room each
-takes; one it can't measure in full is left out.
+takes; one it can't measure in full is left out. On Windows it lists the installed apps as Windows Settings
+does, with the room their installers say they take. An app there is removed only by its own uninstaller,
+which Harbormaster starts once you confirm; if the uninstaller asks for an administrator, Windows asks you
+first, and an app installed for you alone is never started as one.
 
 What gets chosen, and what happens to it:
 
@@ -144,14 +147,14 @@ to `lsof` or `ps`. The scanning is Rust, and the windows are [Tauri](https://tau
 ## Status
 
 Built and tested on macOS 27 with Apple silicon. Windows 11 has an early preview: the panel, stopping a
-server and closing apps from it, the cleaner's developer, leftovers and large files sections and its
+server and closing apps from it, the cleaner's developer, leftovers, large files and apps sections and its
 space map (build outputs, the caches developer tools and apps keep, temporary files untouched for a week,
 crash dumps, the Recycle Bin and your files over 50 MB, with what may be yours to keep going to the
-Recycle Bin), and the command line's `ls`, `why` and `clean` work there. The apps section isn't on
-Windows yet. Windows has no request to quit that every server heeds, so a stop there is a force quit:
-once you confirm, the server's processes are ended at once, without a chance to clean up. Closing an app
-asks its windows to close, as their close buttons do; whatever stays open is ended only if you ask again,
-after seeing exactly which processes that ends.
+Recycle Bin, and the installed apps, each removed by its own uninstaller), and the command line's `ls`,
+`why` and `clean` work there. Windows has no request to quit that every server heeds, so a stop there is
+a force quit: once you confirm, the server's processes are ended at once, without a chance to clean up.
+Closing an app asks its windows to close, as their close buttons do; whatever stays open is ended only if
+you ask again, after seeing exactly which processes that ends.
 Each change to the code on `main` leaves an unsigned Windows installer in the
 [Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs.
 
