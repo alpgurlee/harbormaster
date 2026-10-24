@@ -10,7 +10,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use harbormaster_platform::{canonical, trash};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, WIN32_ERROR};
-use windows_sys::Win32::Storage::FileSystem::GetVolumeNameForVolumeMountPointW;
+use windows_sys::Win32::Storage::FileSystem::{
+    GetDiskFreeSpaceExW, GetVolumeNameForVolumeMountPointW,
+};
 use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD, RegDeleteKeyValueW, RegGetValueW,
     RegSetKeyValueW,
@@ -144,4 +146,22 @@ pub fn left_where_it_was(path: &Path) {
     assert!(path.exists(), "{refused:?}");
     let error = refused.expect_err("nothing should go").to_string();
     assert!(error.contains("left where it was"), "{error}");
+}
+
+/// How many bytes the drive holding `path` has.
+pub fn whole_of(path: &Path) -> u64 {
+    let root: PathBuf = path.components().take(2).collect();
+    let root = wide(root.to_str().expect("a drive root is text"));
+    let mut total = 0u64;
+    // SAFETY: the root ends in a nul; what isn't asked for is null.
+    let read = unsafe {
+        GetDiskFreeSpaceExW(
+            root.as_ptr(),
+            std::ptr::null_mut(),
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    };
+    assert_ne!(read, 0, "{}", std::io::Error::last_os_error());
+    total
 }

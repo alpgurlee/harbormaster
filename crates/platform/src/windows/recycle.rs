@@ -26,23 +26,20 @@ use windows::Win32::UI::Shell::{
 use windows_core::{ComObject, HRESULT, PCWSTR, Ref, implement};
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, DISK_SPACE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetFileInformationByHandle, GetFinalPathNameByHandleW,
-    GetVolumeNameForVolumeMountPointW, OPEN_EXISTING, VOLUME_NAME_DOS,
+    FILE_SHARE_WRITE, GetDiskSpaceInformationW, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, GetVolumeNameForVolumeMountPointW, OPEN_EXISTING, VOLUME_NAME_DOS,
 };
-use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RegGetValueW,
-};
+use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 
 /// The folder at the root of each drive that holds its Recycle Bin.
 const BIN: &str = "$Recycle.Bin";
 /// Where this user's settings for each drive's Recycle Bin are, by volume,
 /// as Recycle Bin Properties writes them.
 const SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume";
-/// Where group policy may turn the Recycle Bin off or cap its size, for the
-/// machine or for this user.
+/// Where group policy may turn this user's Recycle Bin off or cap its size.
 const POLICIES: &str = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
 const MIB: u64 = 1024 * 1024;
 /// The least room each drive's Recycle Bin was found to have since this
@@ -137,30 +134,30 @@ fn left_out() -> io::Error {
 fn room(drive: u8) -> io::Result<u64> {
     let root = format!("{}:\\", char::from(drive));
     let key = format!(r"{SETTINGS}\{}", volume_of(&root)?);
-    let hives = [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER];
-    let mut off = setting(HKEY_CURRENT_USER, &key, "NukeOnDelete")? == Some(1);
-    for hive in hives {
-        off |= setting(hive, POLICIES, "NoRecycleFiles")? == Some(1);
-    }
-    if off {
+    if setting(&key, "NukeOnDelete")? == Some(1) || setting(POLICIES, "NoRecycleFiles")? == Some(1)
+    {
         return Ok(0);
     }
-    let total = total_of(&root)?;
-    let mut now = match setting(HKEY_CURRENT_USER, &key, "MaxCapacity")? {
+    let space = space_of(&root)?;
+    let mut now = match setting(&key, "MaxCapacity")? {
         Some(megabytes) => u64::from(megabytes) * MIB,
-        None => default_room(total),
+        None => default_room(space.yours),
     };
     // A share of the drive, which policy sets over what the user did.
-    for hive in hives {
-        if let Some(percent) = setting(hive, POLICIES, "RecycleBinSize")? {
-            now = now.min(total / 100 * u64::from(percent.min(100)) / MIB * MIB);
-        }
+    if let Some(percent) = setting(POLICIES, "RecycleBinSize")? {
+        now = now.min(share(space.whole, percent));
     }
     let mut rooms = ROOM.lock().unwrap_or_else(PoisonError::into_inner);
     let least = &mut rooms[usize::from(drive.to_ascii_uppercase() - b'A')];
     let room = least.map_or(now, |least| least.min(now));
     *least = Some(room);
     Ok(room)
+}
+
+/// `percent` of `total`, in whole megabytes.
+fn share(total: u64, percent: u32) -> u64 {
+    let bytes = u128::from(total) * u128::from(percent.min(100)) / 100;
+    u64::try_from(bytes).unwrap_or(u64::MAX) / MIB * MIB
 }
 
 /// How large the Recycle Bin of a drive with `total` bytes for this user is
@@ -190,27 +187,31 @@ fn volume_of(root: &str) -> io::Result<String> {
         .ok_or_else(|| io::Error::other("the drive's volume has no GUID"))
 }
 
-/// How many bytes the drive at `root` holds for this user, quotas counted.
-fn total_of(root: &str) -> io::Result<u64> {
-    let root: Vec<u16> = root.encode_utf16().chain([0]).collect();
-    let mut total = 0u64;
-    // SAFETY: the root ends in a nul; what isn't asked for is null.
-    if unsafe {
-        GetDiskFreeSpaceExW(
-            root.as_ptr(),
-            std::ptr::null_mut(),
-            &mut total,
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(total)
+/// How large a drive is.
+struct Space {
+    whole: u64,
+    /// As much of it as this user may have, quotas counted.
+    yours: u64,
 }
 
-/// The number `name` under `key` in `hive`, if it is there.
-fn setting(hive: HKEY, key: &str, name: &str) -> io::Result<Option<u32>> {
+fn space_of(root: &str) -> io::Result<Space> {
+    let root: Vec<u16> = root.encode_utf16().chain([0]).collect();
+    // SAFETY: an all-zero DISK_SPACE_INFORMATION is valid; the call fills it.
+    let mut space: DISK_SPACE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the root ends in a nul and `space` is ours to fill.
+    let done = unsafe { GetDiskSpaceInformationW(root.as_ptr(), &mut space) };
+    if done < 0 {
+        return Err(io::Error::from_raw_os_error(done));
+    }
+    let unit = u64::from(space.SectorsPerAllocationUnit) * u64::from(space.BytesPerSector);
+    Ok(Space {
+        whole: space.ActualTotalAllocationUnits.saturating_mul(unit),
+        yours: space.CallerTotalAllocationUnits.saturating_mul(unit),
+    })
+}
+
+/// The number `name` under `key` in this user's registry, if it is there.
+fn setting(key: &str, name: &str) -> io::Result<Option<u32>> {
     let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
     let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
     let mut value = 0u32;
@@ -218,7 +219,7 @@ fn setting(hive: HKEY, key: &str, name: &str) -> io::Result<Option<u32>> {
     // SAFETY: the key and name end in a nul; `value` has room for the DWORD asked for.
     let read = unsafe {
         RegGetValueW(
-            hive,
+            HKEY_CURRENT_USER,
             key.as_ptr(),
             name.as_ptr(),
             RRF_RT_REG_DWORD,
@@ -470,7 +471,7 @@ fn final_path(item: &OwnedHandle) -> io::Result<PathBuf> {
 mod tests {
     use std::path::Path;
 
-    use super::{MIB, default_room, drive_of, in_bin};
+    use super::{MIB, default_room, drive_of, in_bin, share};
 
     #[test]
     fn sizes_a_recycle_bin_never_given_a_size_as_windows_does() {
@@ -478,6 +479,14 @@ mod tests {
         assert_eq!(default_room(348_915_757_056), 18_685 * MIB);
         assert_eq!(default_room(10 * 1024 * MIB), 1024 * MIB);
         assert_eq!(default_room(0), 0);
+    }
+
+    #[test]
+    fn takes_a_share_of_a_drive_before_rounding_it_down() {
+        assert_eq!(share(100 * MIB + 99, 1), MIB);
+        assert_eq!(share(200 * MIB - 1, 1), MIB);
+        assert_eq!(share(500 * MIB, 150), 500 * MIB);
+        assert_eq!(share(u64::MAX, 100), u64::MAX / MIB * MIB);
     }
 
     #[test]
