@@ -11,15 +11,15 @@ use windows_sys::Win32::UI::Shell::{
     SHQueryRecycleBinW,
 };
 
-use crate::{Finding, Group, Identity, Kind, Outcome};
+use crate::{Finding, Group, Identity, Kind, Outcome, Why};
 
 /// The folder at a drive's root that holds its Recycle Bin.
 const BIN: &str = "$Recycle.Bin";
 
 /// What this user's Recycle Bins hold together, as one finding at the bin
-/// of the drive `home` is on, if they hold anything.
+/// of the drive `home` is on, if they hold anything and each could be asked.
 pub(crate) fn finding(home: &Path) -> Option<Finding> {
-    let (bytes, items) = held();
+    let (bytes, items) = held().ok()?;
     if items == 0 {
         return None;
     }
@@ -45,14 +45,35 @@ pub(crate) fn finding(home: &Path) -> Option<Finding> {
 
 /// Whether the bins still hold anything, so that a finding of them stands.
 pub(crate) fn holds_anything() -> bool {
-    held().1 > 0
+    held().is_ok_and(|(_, items)| items > 0)
 }
 
-/// Empties the Recycle Bin of each fixed drive that holds anything, for good.
-pub(crate) fn emptied() -> Outcome {
+/// Empties the Recycle Bin of each fixed drive that holds anything, for
+/// good, if all together they hold no more than the `scanned` bytes the
+/// user saw: what was thrown away since stays, for the user to look at.
+pub(crate) fn emptied(scanned: u64) -> Outcome {
+    let held = match held() {
+        Ok((bytes, _)) => bytes,
+        Err(error) => {
+            return Outcome::Refused {
+                why: Why::Unchecked {
+                    error: error.to_string(),
+                },
+            };
+        }
+    };
+    if held > scanned {
+        return Outcome::Refused { why: Why::Changed };
+    }
     for root in fixed_drives() {
-        if !held_at(&root).is_ok_and(|(_, items)| items > 0) {
-            continue;
+        match held_at(&root) {
+            Ok((_, 0)) => continue,
+            Ok(_) => {}
+            Err(error) => {
+                return Outcome::Failed {
+                    why: error.to_string(),
+                };
+            }
         }
         // SAFETY: no window; the root ends in a nul.
         let done = unsafe {
@@ -84,13 +105,14 @@ pub(crate) fn is(path: &Path) -> bool {
         && components.next().is_none()
 }
 
-/// The bytes and items the bins of all fixed drives hold.
-fn held() -> (u64, u64) {
+/// The bytes and items the bins of all fixed drives hold, if each could be
+/// asked.
+fn held() -> io::Result<(u64, u64)> {
     fixed_drives()
         .iter()
-        .filter_map(|root| held_at(root).ok())
-        .fold((0, 0), |(bytes, items), (more, others)| {
-            (bytes.saturating_add(more), items.saturating_add(others))
+        .try_fold((0u64, 0u64), |(bytes, items), root| {
+            let (more, others) = held_at(root)?;
+            Ok((bytes.saturating_add(more), items.saturating_add(others)))
         })
 }
 

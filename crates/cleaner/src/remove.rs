@@ -112,7 +112,7 @@ fn one(
 ) -> Outcome {
     #[cfg(windows)]
     if finding.group == Group::Trash {
-        return crate::bin::emptied();
+        return crate::bin::emptied(finding.bytes);
     }
     let Some((root, at)) = roots.of(finding) else {
         return refused(Why::OutsideHome);
