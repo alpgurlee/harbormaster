@@ -4,6 +4,7 @@ mod language;
 mod memory;
 mod parameters;
 mod process;
+mod recycle;
 mod socket;
 mod tcp;
 mod theme;
@@ -22,6 +23,7 @@ pub(crate) use process::{
     details, executable_of, presence, processes, runs_as_root, sets, signal, tracks_exec,
     whereabouts,
 };
+pub(crate) use recycle::trash;
 pub(crate) use socket::{alone, every};
 pub(crate) use tcp::listeners;
 pub(crate) use theme::light_taskbar;
@@ -30,12 +32,16 @@ pub(crate) use version::description;
 /// `path` with every link in it resolved, spelled as the disk spells it
 /// and as people write it: `C:\Users\dev`, not `\\?\C:\Users\dev`.
 pub(crate) fn canonical(path: &Path) -> io::Result<PathBuf> {
+    Ok(plain(std::fs::canonicalize(path)?))
+}
+
+/// `path` without the `\\?\` the kernel puts in front of what it names.
+fn plain(path: PathBuf) -> PathBuf {
     use std::path::{Component, Prefix};
 
-    let path = std::fs::canonicalize(path)?;
     let mut components = path.components();
     let Some(Component::Prefix(prefix)) = components.next() else {
-        return Ok(path);
+        return path;
     };
     let mut plain = match prefix.kind() {
         Prefix::VerbatimDisk(letter) => PathBuf::from(format!("{}:", char::from(letter))),
@@ -46,14 +52,10 @@ pub(crate) fn canonical(path: &Path) -> io::Result<PathBuf> {
             root.push(share);
             PathBuf::from(root)
         }
-        _ => return Ok(path),
+        _ => return path,
     };
     plain.extend(components);
-    Ok(plain)
-}
-
-pub(crate) fn trash(_path: &Path) -> io::Result<PathBuf> {
-    Err(io::ErrorKind::Unsupported.into())
+    plain
 }
 
 /// Windows has no limit like macOS's on open files to raise.

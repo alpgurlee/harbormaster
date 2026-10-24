@@ -388,11 +388,79 @@ fn sends_nothing_to_a_process_when_asked_to_stop_it() {
     assert_eq!(presence(key), Presence::Running);
 }
 
+/// Whether `path` is in a drive's Recycle Bin, which keeps each user's
+/// items in a folder of its own.
+fn in_the_bin(path: &Path) -> bool {
+    let names: Vec<_> = path.components().collect();
+    names.len() > 4
+        && names[2]
+            .as_os_str()
+            .eq_ignore_ascii_case(std::ffi::OsStr::new("$Recycle.Bin"))
+}
+
 #[test]
-fn refuses_what_it_cannot_do_yet_rather_than_answer_nothing() {
+fn moves_a_file_to_the_recycle_bin_and_says_where_it_went() {
     let folder = tempfile::tempdir().unwrap();
-    assert!(trash(folder.path()).is_err());
-    assert!(folder.path().exists());
+    let file = canonical(folder.path()).unwrap().join("clip.mov");
+    std::fs::write(&file, b"a film").unwrap();
+
+    let landed = trash(&file).unwrap();
+
+    assert!(!file.exists());
+    assert!(in_the_bin(&landed), "{}", landed.display());
+    assert_eq!(std::fs::read(&landed).unwrap(), b"a film");
+}
+
+#[test]
+fn moves_a_folder_to_the_recycle_bin_with_what_it_holds() {
+    let folder = tempfile::tempdir().unwrap();
+    let archive = canonical(folder.path()).unwrap().join("2026-09-20");
+    std::fs::create_dir_all(archive.join("App")).unwrap();
+    std::fs::write(archive.join("App").join("Info.plist"), b"x").unwrap();
+
+    let landed = trash(&archive).unwrap();
+
+    assert!(!archive.exists());
+    assert!(in_the_bin(&landed), "{}", landed.display());
+    assert!(landed.join("App").join("Info.plist").exists());
+}
+
+#[test]
+fn moves_neither_a_junction_nor_what_it_points_to() {
+    use std::os::windows::process::CommandExt;
+
+    let folder = tempfile::tempdir().unwrap();
+    let place = canonical(folder.path()).unwrap();
+    let target = place.join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("keep"), b"x").unwrap();
+    let link = place.join("link");
+    let made = Command::new("cmd")
+        .raw_arg(format!(
+            r#"/c mklink /J "{}" "{}""#,
+            link.display(),
+            target.display()
+        ))
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{made:?}");
+
+    assert!(trash(&link).is_err());
+
+    assert!(link.symlink_metadata().is_ok());
+    assert!(target.join("keep").exists());
+}
+
+#[test]
+fn moves_nothing_it_isnt_given_as_a_path_on_a_drive() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = canonical(folder.path()).unwrap().join("clip.mov");
+    std::fs::write(&file, b"x").unwrap();
+    let verbatim = PathBuf::from(format!(r"\\?\{}", file.display()));
+
+    assert!(trash(&verbatim).is_err());
+
+    assert!(file.exists());
 }
 
 #[test]

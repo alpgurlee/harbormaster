@@ -15,12 +15,12 @@ use macos as sys;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-use windows as sys;
+use self::windows as sys;
 /// Ending a process, which Windows does through a held handle.
 #[cfg(windows)]
-pub use windows::control::{Ended, Held, hold, watch};
+pub use self::windows::control::{Ended, Held, hold, watch};
 #[cfg(windows)]
-pub use windows::window::has_windows;
+pub use self::windows::window::has_windows;
 
 pub use bind::{BindProbe, probe_bind};
 pub use types::{
