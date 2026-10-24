@@ -1,6 +1,7 @@
 #![cfg(windows)]
 //! Uninstall entries of this user's, made for the test and taken away after.
 
+use std::path::PathBuf;
 use std::process::Command;
 
 use harbormaster_platform::{
@@ -82,6 +83,35 @@ fn lists_a_program_installed_for_this_user_but_not_a_part_of_windows() {
         entry(listed.registry, tool.name()).unwrap().as_ref(),
         Some(listed)
     );
+}
+
+#[test]
+fn reads_an_entry_written_with_variables_as_windows_fills_them_in() {
+    let system = std::env::var("SystemRoot").expect("Windows says where it lives");
+    let tool = Entry::made(
+        "HarbormasterVariables",
+        &[
+            ("DisplayName", "REG_SZ", "Harbormaster Variables"),
+            (
+                "UninstallString",
+                "REG_EXPAND_SZ",
+                r#""%SystemRoot%\System32\whoami.exe""#,
+            ),
+            ("InstallLocation", "REG_EXPAND_SZ", r"%SystemRoot%\System32"),
+        ],
+    );
+
+    let listed = entry(MINE, tool.name()).unwrap().expect("listed");
+
+    assert_eq!(
+        listed.uninstall,
+        format!(r#""{system}\System32\whoami.exe""#)
+    );
+    assert_eq!(
+        listed.location,
+        Some(PathBuf::from(format!(r"{system}\System32")))
+    );
+    assert!(uninstaller(&listed).is_some());
 }
 
 const MINE: Registry = Registry {

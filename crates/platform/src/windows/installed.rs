@@ -9,8 +9,7 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
-    RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegCloseKey,
-    RegEnumKeyExW, RegGetValueW, RegOpenKeyExW,
+    RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW,
 };
 
 /// Whose a program is: this user's alone, or the whole PC's.
@@ -42,7 +41,8 @@ pub struct Installed {
     pub location: Option<PathBuf>,
     /// How much room its installer says it takes, if it says.
     pub estimated: Option<u64>,
-    /// The command its installer left to uninstall it, as written.
+    /// The command its installer left to uninstall it, with the environment
+    /// variables it names filled in.
     pub uninstall: String,
 }
 
@@ -176,7 +176,8 @@ impl Key {
             match done {
                 ERROR_SUCCESS => names.push(String::from_utf16_lossy(&name[..length as usize])),
                 ERROR_NO_MORE_ITEMS => break,
-                // A key name is at most 255 units; a longer one isn't an entry.
+                // A key name is at most 255 units; one said to be longer
+                // isn't an entry, and the next is read.
                 ERROR_MORE_DATA => continue,
                 error => return Err(failure(error)),
             }
@@ -184,29 +185,32 @@ impl Key {
         Ok(names)
     }
 
-    /// The text `name` of the key `below` this one, as written, if it is there.
+    /// The text `name` of the key `below` this one, if it is there, with the
+    /// environment variables it names filled in when it is written to have
+    /// them, as `%ProgramFiles%`.
     fn text(&self, below: &str, name: &str) -> io::Result<Option<String>> {
         let (below, name) = (wide(below), wide(name));
-        let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+        // Text written with variables is filled in, and then counts as plain text.
+        let flags = RRF_RT_REG_SZ;
+        let mut size = 0u32;
+        // SAFETY: the key is open, the names end in a nul; no data is asked for.
+        let sized = unsafe {
+            RegGetValueW(
+                self.0,
+                below.as_ptr(),
+                name.as_ptr(),
+                flags,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        };
+        match sized {
+            ERROR_SUCCESS => {}
+            ERROR_FILE_NOT_FOUND => return Ok(None),
+            error => return Err(failure(error)),
+        }
         loop {
-            let mut size = 0u32;
-            // SAFETY: the key is open, the names end in a nul; no data is asked for.
-            let sized = unsafe {
-                RegGetValueW(
-                    self.0,
-                    below.as_ptr(),
-                    name.as_ptr(),
-                    flags,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    &mut size,
-                )
-            };
-            match sized {
-                ERROR_SUCCESS => {}
-                ERROR_FILE_NOT_FOUND => return Ok(None),
-                error => return Err(failure(error)),
-            }
             let mut text = vec![0u16; (size as usize).div_ceil(2)];
             let mut read = (text.len() * 2) as u32;
             // SAFETY: the buffer holds `read` bytes.
@@ -230,8 +234,8 @@ impl Key {
                         .unwrap_or(units);
                     return Ok(Some(String::from_utf16_lossy(&text[..end])));
                 }
-                // It grew between the two reads.
-                ERROR_MORE_DATA => continue,
+                // It grew since it was sized: `read` says how much room it takes now.
+                ERROR_MORE_DATA => size = read.max(size.saturating_mul(2)),
                 ERROR_FILE_NOT_FOUND => return Ok(None),
                 error => return Err(failure(error)),
             }
