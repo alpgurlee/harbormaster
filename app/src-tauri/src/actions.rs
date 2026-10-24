@@ -153,7 +153,8 @@ pub(crate) async fn clean_apps(
 }
 
 /// Maps this user's home folder, telling the window as it goes; the map
-/// comes last, under the token showing its places in Finder takes.
+/// comes last, under the token showing its places in Finder or File Explorer
+/// takes.
 #[tauri::command]
 pub(crate) async fn clean_map(
     others: bool,
@@ -227,7 +228,8 @@ pub(crate) fn clean_reveal(
     })
 }
 
-/// Shows a place of the last map in Finder, if it is still what the map found.
+/// Shows a place of the last map in Finder or File Explorer, if it is still
+/// what the map found.
 #[tauri::command]
 pub(crate) async fn clean_reveal_area(
     token: u64,

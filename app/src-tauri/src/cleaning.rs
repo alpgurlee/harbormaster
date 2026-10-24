@@ -102,7 +102,7 @@ pub(crate) enum RunEvent {
 )]
 pub(crate) enum MapEvent {
     Charting(Charting),
-    /// The map, under the token showing its places in Finder takes.
+    /// The map, under the token showing its places in Finder or File Explorer takes.
     Done {
         token: u64,
         area: Area,
@@ -142,7 +142,7 @@ pub(crate) struct Cleaning {
 struct Ledger {
     last: u64,
     shown: Option<Shown>,
-    /// The last map, kept whole so its places can be shown in Finder; none
+    /// The last map, kept whole so its places can be shown in Finder or File Explorer; none
     /// of them is ever taken to be removed.
     map: Option<Mapped>,
     working: bool,
@@ -364,7 +364,7 @@ impl Cleaning {
     }
 
     /// Keeps `root` as the map shown from now on, in place of the last,
-    /// and gives the token that showing its places in Finder takes.
+    /// and gives the token that showing its places in Finder or File Explorer takes.
     fn keep_map(&self, root: Area) -> u64 {
         let mut ledger = self.lock();
         ledger.last += 1;
@@ -392,6 +392,7 @@ impl Cleaning {
             (map.root.path.clone(), place.path.clone(), place.identity)
         };
         // Finder is told a path as text, so one that isn't would be told as another.
+        #[cfg(target_os = "macos")]
         if path.to_str().is_none() {
             return Err(failed("this path can't be shown in Finder"));
         }
