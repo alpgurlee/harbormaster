@@ -1,6 +1,6 @@
 //! What the cleaner window may do to this machine: find and remove what
-//! could go. Mapping the home folder, listing apps and stopping dev daemons
-//! are a Mac's alone for now.
+//! could go. Listing apps and stopping dev daemons are a Mac's alone for
+//! now.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,7 +13,6 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::cleaner;
-#[cfg(target_os = "macos")]
 use crate::cleaning::MapEvent;
 use crate::cleaning::{Cleaning, Refusal, RunEvent, ScanEvent};
 #[cfg(target_os = "macos")]
@@ -155,7 +154,6 @@ pub(crate) async fn clean_apps(
 
 /// Maps this user's home folder, telling the window as it goes; the map
 /// comes last, under the token showing its places in Finder takes.
-#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_map(
     others: bool,
@@ -230,7 +228,6 @@ pub(crate) fn clean_reveal(
 }
 
 /// Shows a place of the last map in Finder, if it is still what the map found.
-#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_reveal_area(
     token: u64,

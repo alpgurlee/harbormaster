@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-#[cfg(target_os = "macos")]
 use harbormaster_cleaner::{Area, Chart, Charting};
 use harbormaster_cleaner::{
     Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
@@ -95,7 +94,6 @@ pub(crate) enum RunEvent {
 }
 
 /// What a map tells the window as it goes.
-#[cfg(target_os = "macos")]
 #[derive(Debug, Serialize)]
 #[serde(
     tag = "kind",
@@ -126,7 +124,6 @@ pub(crate) enum Refusal {
     /// The window asked for something that scan didn't list.
     Unlisted,
     /// What the window names isn't what was found there any more.
-    #[cfg(target_os = "macos")]
     Changed,
     Failed {
         message: String,
@@ -147,13 +144,11 @@ struct Ledger {
     shown: Option<Shown>,
     /// The last map, kept whole so its places can be shown in Finder; none
     /// of them is ever taken to be removed.
-    #[cfg(target_os = "macos")]
     map: Option<Mapped>,
     working: bool,
 }
 
 /// A map shown to the window, under the token it holds.
-#[cfg(target_os = "macos")]
 #[derive(Debug)]
 struct Mapped {
     token: u64,
@@ -370,7 +365,6 @@ impl Cleaning {
 
     /// Keeps `root` as the map shown from now on, in place of the last,
     /// and gives the token that showing its places in Finder takes.
-    #[cfg(target_os = "macos")]
     fn keep_map(&self, root: Area) -> u64 {
         let mut ledger = self.lock();
         ledger.last += 1;
@@ -381,7 +375,6 @@ impl Cleaning {
 
     /// Where the place `id` of the map under `token` is, if it is still
     /// what the map found there. The home folder itself isn't one of them.
-    #[cfg(target_os = "macos")]
     pub(crate) fn mapped(&self, token: u64, id: u32) -> Result<PathBuf, Refusal> {
         let (home, path, identity) = {
             let ledger = self.lock();
@@ -476,7 +469,6 @@ impl Working {
 
     /// Maps this user's home folder, and other apps' data in it when
     /// `others` asks, telling `told` as it goes.
-    #[cfg(target_os = "macos")]
     pub(crate) fn map(&self, others: bool, told: &mut dyn FnMut(MapEvent)) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
@@ -579,7 +571,6 @@ fn stayed(chosen: Vec<Finding>, removals: &[Removal]) -> Vec<Finding> {
 }
 
 /// The place numbered `id`, `area` or one below it.
-#[cfg(target_os = "macos")]
 fn place(area: &Area, id: u32) -> Option<&Area> {
     if area.id == id {
         return Some(area);
