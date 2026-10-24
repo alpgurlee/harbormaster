@@ -29,6 +29,7 @@ fn surveyed(
         running,
         idle_after: 30 * DAY,
         now: SystemTime::now(),
+        temp: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

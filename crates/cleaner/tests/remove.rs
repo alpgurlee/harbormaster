@@ -21,6 +21,7 @@ fn survey<'a>(home: &'a Path, roots: &'a [PathBuf], busy: &'a [(PathBuf, String)
         running: &[],
         idle_after: 30 * DAY,
         now: SystemTime::now(),
+        temp: None,
     }
 }
 

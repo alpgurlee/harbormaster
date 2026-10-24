@@ -25,6 +25,7 @@ fn lists_what_the_recycle_bin_holds_and_empties_it_for_good() {
         running: &[],
         idle_after: 30 * DAY,
         now: SystemTime::now(),
+        temp: None,
     };
 
     let findings = scan(&survey, &AtomicBool::new(false)).expect("the scan should start");

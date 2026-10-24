@@ -22,6 +22,7 @@ pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
     let roots = harbormaster_cleaner::usual_roots(&home);
     let usage = in_use_now(&home)?;
     let now = SystemTime::now();
+    let temp = harbormaster_cleaner::temp_folder(&home);
     let survey = Survey {
         home: &home,
         roots: &roots,
@@ -29,6 +30,7 @@ pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
         running: &usage.running,
         idle_after: IDLE_AFTER,
         now,
+        temp: temp.as_deref(),
     };
     let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
         .with_context(|| format!("could not look through {}", home.display()))?;
@@ -198,6 +200,10 @@ pub(crate) fn removal(removal: &Removal, findings: &[Finding]) -> String {
         );
     let (done, why) = match &removal.outcome {
         Outcome::Deleted => ("deleted", None),
+        Outcome::Partly { left } => (
+            "deleted",
+            Some(format!("all but {left}, which programs hold")),
+        ),
         Outcome::Trashed => ("trashed", None),
         Outcome::Refused { why } => ("skipped", Some(why.to_string())),
         Outcome::Failed { why } => ("failed", Some(why.clone())),
@@ -235,6 +241,7 @@ fn title(group: Group) -> &'static str {
         Group::Packages => "Packages",
         Group::Xcode => "Xcode",
         Group::Apps => "App caches",
+        Group::Temp => "Temporary files",
         Group::Logs => "Logs",
         Group::Trash if cfg!(windows) => "Recycle Bin",
         Group::Trash => "Trash",

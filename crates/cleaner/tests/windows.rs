@@ -5,7 +5,7 @@ mod common;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
@@ -28,6 +28,7 @@ fn scanned_while(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> 
         running: &[],
         idle_after: 30 * DAY,
         now: SystemTime::now(),
+        temp: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }
@@ -448,4 +449,169 @@ fn lists_crash_dumps_as_the_users_own() {
         (dumps.group, dumps.kind, dumps.picked),
         (Group::Logs, Kind::Personal, false)
     );
+}
+
+/// Sets when what is at `path` was written back `written` ago, and when it
+/// was made and changed back `made` ago, unless `made` is none.
+fn set_times(path: &Path, made: Option<Duration>, written: Duration) {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES, FileBasicInfo,
+        SetFileInformationByHandle,
+    };
+
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .expect("open");
+    let ticks = |ago: Duration| {
+        let since = (SystemTime::now() - ago)
+            .duration_since(UNIX_EPOCH)
+            .expect("after 1970");
+        let ticks =
+            (since.as_secs() + 11_644_473_600) * 10_000_000 + u64::from(since.subsec_nanos() / 100);
+        i64::try_from(ticks).expect("a time Windows writes")
+    };
+    // A time of zero is left as it is.
+    let times = FILE_BASIC_INFO {
+        CreationTime: made.map_or(0, ticks),
+        LastAccessTime: 0,
+        LastWriteTime: ticks(written),
+        ChangeTime: made.map_or(0, ticks),
+        FileAttributes: 0,
+    };
+    // SAFETY: the handle is open for writing attributes and `times` is what it says.
+    let set = unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            (&raw const times).cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    assert_ne!(set, 0, "{}", io::Error::last_os_error());
+}
+
+/// What is at `path` and all it holds as if left there `ago`.
+fn left_long_ago(path: &Path, ago: Duration) {
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path).expect("the folder") {
+            left_long_ago(&entry.expect("an entry").path(), ago);
+        }
+    }
+    set_times(path, Some(ago), ago);
+}
+
+fn scanned_with_temp(home: &Path, temp: &Path, busy: &[(PathBuf, String)]) -> Vec<Finding> {
+    let survey = Survey {
+        home,
+        roots: &[],
+        busy,
+        running: &[],
+        idle_after: 30 * DAY,
+        now: SystemTime::now(),
+        temp: Some(temp),
+    };
+    scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
+}
+
+#[test]
+fn takes_only_what_nothing_touched_for_a_week_from_the_temporary_files() {
+    let machine = machine();
+    let temp = machine.home.join(r"AppData\Local\Temp");
+    let month = 30 * DAY;
+    write(&temp.join("old.log"), &vec![1; 2 * MIB]);
+    write(&temp.join(r"setup-old\a.bin"), &vec![1; 2 * MIB]);
+    write(&temp.join(r"mixed\old.bin"), &vec![1; 2 * MIB]);
+    write(&temp.join(r"NuGetScratch\lock"), &vec![1; 2 * MIB]);
+    write(&temp.join(r"running\tool.exe"), &vec![1; 2 * MIB]);
+    write(&temp.join("copied.bin"), &vec![1; 2 * MIB]);
+    for old in ["old.log", "setup-old", "mixed", "NuGetScratch", "running"] {
+        left_long_ago(&temp.join(old), month);
+    }
+    // Copied in now: written long ago by its own account, yet made just now.
+    set_times(&temp.join("copied.bin"), None, month);
+    write(&temp.join(r"mixed\fresh.bin"), &vec![1; 2 * MIB]);
+    write(&temp.join("new.log"), &vec![1; 2 * MIB]);
+    let busy = [(temp.join(r"running\tool.exe"), "tool".to_string())];
+
+    let findings = scanned_with_temp(&machine.home, &temp, &busy);
+
+    let files = named(&findings, "Temporary files").expect("the temporary files");
+    assert_eq!(
+        (
+            files.group,
+            files.picked,
+            files.emptied,
+            files.in_use.as_deref()
+        ),
+        (Group::Temp, true, true, None)
+    );
+    assert!(
+        (4 * MIB as u64..6 * MIB as u64).contains(&files.bytes),
+        "{files:?}"
+    );
+
+    let cleaned = remove(
+        &reach(&machine.home),
+        std::slice::from_ref(files),
+        &|| {
+            Ok(Usage {
+                busy: busy.to_vec(),
+                running: Vec::new(),
+            })
+        },
+        &|_| panic!("nothing goes to the Recycle Bin"),
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("removal should run");
+
+    assert_eq!(cleaned.removals[0].outcome, Outcome::Deleted, "{cleaned:?}");
+    assert!(!temp.join("old.log").exists() && !temp.join("setup-old").exists());
+    for stays in [
+        r"mixed\old.bin",
+        r"mixed\fresh.bin",
+        r"NuGetScratch\lock",
+        r"running\tool.exe",
+        "copied.bin",
+        "new.log",
+    ] {
+        assert!(temp.join(stays).exists(), "{stays}");
+    }
+}
+
+#[test]
+fn says_how_many_temporary_files_stayed_as_a_program_holds_them() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+    let machine = machine();
+    let temp = machine.home.join(r"AppData\Local\Temp");
+    write(&temp.join("held.log"), &vec![1; 2 * MIB]);
+    write(&temp.join("loose.log"), &vec![1; 2 * MIB]);
+    left_long_ago(&temp, 30 * DAY);
+    let findings = scanned_with_temp(&machine.home, &temp, &[]);
+    let files = named(&findings, "Temporary files").expect("the temporary files");
+    // Open as most programs open a file: others may read it, not delete it.
+    let _held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(temp.join("held.log"))
+        .expect("held");
+
+    let cleaned = removed(&machine.home, files, &|_| {
+        panic!("nothing goes to the Recycle Bin")
+    });
+
+    assert_eq!(
+        cleaned.removals[0].outcome,
+        Outcome::Partly { left: 1 },
+        "{cleaned:?}"
+    );
+    assert!(temp.join("held.log").exists() && !temp.join("loose.log").exists());
 }

@@ -428,7 +428,14 @@ impl Working {
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let roots = roots_or_usual(&home, roots);
         let usage = usage_now().map_err(failed)?;
-        let survey = survey(&home, &roots, idle_after(idle_days), &usage);
+        let temp = harbormaster_cleaner::temp_folder(&home);
+        let survey = survey(
+            &home,
+            &roots,
+            idle_after(idle_days),
+            &usage,
+            temp.as_deref(),
+        );
         let mut findings = harbormaster_cleaner::scan_with(&survey, &cleaning.stop, &|measured| {
             told(ScanEvent::Measured(measured));
         })
@@ -614,6 +621,7 @@ fn survey<'a>(
     roots: &'a [PathBuf],
     idle_after: Duration,
     usage: &'a Usage,
+    temp: Option<&'a Path>,
 ) -> Survey<'a> {
     Survey {
         home,
@@ -622,6 +630,7 @@ fn survey<'a>(
         running: &usage.running,
         idle_after,
         now: SystemTime::now(),
+        temp,
     }
 }
 

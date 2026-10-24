@@ -14,6 +14,7 @@ mod measure;
 mod projects;
 mod remove;
 mod space;
+mod temp;
 mod walk;
 
 use std::fmt;
@@ -54,6 +55,8 @@ pub enum Group {
     Xcode,
     /// Apps' own caches.
     Apps,
+    /// What apps put aside while they ran and left behind.
+    Temp,
     Logs,
     Trash,
     /// The user's large files, by kind: films and screen recordings.
@@ -155,6 +158,8 @@ impl Identity {
 pub enum Outcome {
     /// Gone for good.
     Deleted,
+    /// Gone for good but for `left` items in it, which programs held.
+    Partly { left: u64 },
     /// In the Trash.
     Trashed,
     /// Left alone: it was in use, or no longer what the scan saw.
@@ -289,6 +294,8 @@ pub struct Survey<'a> {
     /// How long a project goes untouched before its build outputs are picked.
     pub idle_after: Duration,
     pub now: SystemTime,
+    /// Where this user's temporary files are, which `temp_folder` gives.
+    pub temp: Option<&'a Path>,
 }
 
 /// What a hunt for large files looks through.
@@ -435,6 +442,9 @@ pub fn scan_with(
     });
     #[cfg(windows)]
     findings.extend(bin::finding(survey.home));
+    if let Some(temp) = survey.temp {
+        findings.extend(temp::finding(&root, survey, temp, stop));
+    }
     findings.retain(|finding| finding.bytes >= SMALLEST);
     findings.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
     Ok(findings)
@@ -516,13 +526,18 @@ pub fn recheck(reach: &Reach, findings: &[Finding], usage: &Usage) -> io::Result
         .iter()
         .filter(|finding| roots.still_there(finding))
         .map(|finding| Finding {
-            in_use: using(
-                reach.home,
-                &finding.path,
-                finding.project.as_deref(),
-                &usage.busy,
-                &usage.running,
-            ),
+            // What of the temporary files is in use is left out on its own.
+            in_use: (finding.group != Group::Temp)
+                .then(|| {
+                    using(
+                        reach.home,
+                        &finding.path,
+                        finding.project.as_deref(),
+                        &usage.busy,
+                        &usage.running,
+                    )
+                })
+                .flatten(),
             ..finding.clone()
         })
         .collect())
@@ -593,6 +608,23 @@ pub fn within(path: &Path, folder: &Path) -> bool {
 #[cfg(windows)]
 pub fn is_recycle_bin(path: &Path) -> bool {
     bin::is(path)
+}
+
+/// Where this user's temporary files are, if Windows keeps them in `home`,
+/// the account's home folder as `account_home` gives it: the folder %TEMP%
+/// names, with any link in it resolved. A Mac cleans its own.
+pub fn temp_folder(home: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let temp = walk::canonical(&std::env::temp_dir()).ok()?;
+        (within(&temp, home) && temp.components().count() > home.components().count())
+            .then_some(temp)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+        None
+    }
 }
 
 /// The usual project folders that exist under `home`.

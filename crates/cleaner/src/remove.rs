@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir, Item};
 use crate::{
-    Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, using, within,
+    Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, temp, using,
+    within,
 };
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
@@ -121,19 +122,28 @@ fn one(
         Ok(reached) => reached,
         Err(why) => return refused(why),
     };
-    if let Some(who) = using(
-        at,
-        &finding.path,
-        finding.project.as_deref(),
-        &usage.busy,
-        &usage.running,
-    ) {
+    // What of the temporary files is in use is left out on its own.
+    let using = (finding.group != Group::Temp)
+        .then(|| {
+            using(
+                at,
+                &finding.path,
+                finding.project.as_deref(),
+                &usage.busy,
+                &usage.running,
+            )
+        })
+        .flatten();
+    if let Some(who) = using {
         return refused(Why::InUse { by: who });
     }
     if stop.load(Ordering::Relaxed) {
         return Outcome::Stopped;
     }
     let done = match (&opened, finding.kind) {
+        (Opened::Folder(dir), _) if finding.group == Group::Temp => {
+            return temp::removed(dir, &finding.path, &usage.busy, stop);
+        }
         (Opened::Folder(dir), Kind::Personal) => trashed(&|| dir.path(), &finding.path, at, trash),
         (Opened::Folder(dir), Kind::Rebuildable | Kind::Discarded) => {
             deleted(&parent, dir, name, finding.emptied, stop)
@@ -221,7 +231,7 @@ fn deleted(
 /// Removes everything inside `dir`, staying on `device` and never following
 /// a link: a link goes, what it points to stays. A folder goes once it is
 /// empty. Anything out of the ordinary stops this finding.
-fn empty(dir: &Dir, device: u64, depth: usize, stop: &AtomicBool) -> io::Result<()> {
+pub(crate) fn empty(dir: &Dir, device: u64, depth: usize, stop: &AtomicBool) -> io::Result<()> {
     if depth >= DEEPEST {
         return Err(io::Error::other("the folder goes deeper than is removed"));
     }
@@ -359,6 +369,7 @@ mod tests {
             running: &[],
             idle_after: Duration::ZERO,
             now: SystemTime::now(),
+            temp: None,
         };
         let findings = scan(&survey, &AtomicBool::new(false)).unwrap();
 

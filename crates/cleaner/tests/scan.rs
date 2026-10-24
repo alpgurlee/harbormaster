@@ -34,6 +34,7 @@ fn survey(home: &Path) -> Survey<'_> {
         running: &[],
         idle_after: Duration::ZERO,
         now: SystemTime::now(),
+        temp: None,
     }
 }
 
