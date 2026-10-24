@@ -18,6 +18,21 @@
   border-color: var(--brass);
 }
 
+/* Opens Windows Settings, in a line of text. */
+.settings {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.settings:hover {
+  color: var(--brass);
+}
+
 /* Who made it, under the question. */
 .made {
   margin: -4px 0 10px;

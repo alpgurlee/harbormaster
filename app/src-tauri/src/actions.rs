@@ -190,6 +190,18 @@ pub(crate) async fn clean_uninstall(
     })?
 }
 
+/// Opens Windows Settings at the installed apps, where an app Harbormaster
+/// won't start the uninstaller of, or one it doesn't list, is uninstalled.
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) fn clean_open_installed_apps(app: AppHandle) -> Result<(), Refusal> {
+    app.opener()
+        .open_url("ms-settings:appsfeatures", None::<&str>)
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })
+}
+
 /// Maps this user's home folder, telling the window as it goes; the map
 /// comes last, under the token showing its places in Finder or File Explorer
 /// takes.

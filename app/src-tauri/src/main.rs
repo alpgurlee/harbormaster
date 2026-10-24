@@ -86,6 +86,7 @@ fn main() {
         actions::clean_hunt,
         actions::clean_programs,
         actions::clean_uninstall,
+        actions::clean_open_installed_apps,
         actions::clean_map,
         actions::clean_run,
         actions::clean_recheck,

@@ -258,6 +258,8 @@ export interface Messages {
   programsLooking: string;
   noPrograms: string;
   aboutPrograms: string;
+  programsStore: string;
+  openInstalledApps: string;
   programsEveryone: string;
   programsSize: string;
   programsUninstall: string;
@@ -589,6 +591,8 @@ export const en: Messages = {
   programsLooking: "Reading the list of installed apps…",
   noPrograms: "No installed apps were found.",
   aboutPrograms: "The apps installed on this PC, with the room their installers say they take. Each is removed by its own uninstaller, started only once you confirm.",
+  programsStore: "Most apps from the Microsoft Store aren't listed here; they are uninstalled from Windows Settings.",
+  openInstalledApps: "Open Windows Settings",
   programsEveryone: "for everyone on this PC",
   programsSize: "about {bytes}",
   programsUninstall: "Uninstall…",
@@ -920,6 +924,8 @@ export const tr: Messages = {
   programsLooking: "Yüklü uygulamaların listesi okunuyor…",
   noPrograms: "Yüklü bir uygulama bulunamadı.",
   aboutPrograms: "Bu bilgisayarda yüklü uygulamalar ve yükleyicilerine göre kapladıkları alan. Her biri kendi kaldırma aracıyla kaldırılır; araç yalnızca sen onaylayınca başlatılır.",
+  programsStore: "Microsoft Store'dan yüklenen uygulamaların çoğu burada listelenmez; onlar Windows Ayarları'ndan kaldırılır.",
+  openInstalledApps: "Windows Ayarları'nı aç",
   programsEveryone: "bu bilgisayardaki herkes için",
   programsSize: "yaklaşık {bytes}",
   programsUninstall: "Kaldır…",

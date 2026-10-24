@@ -8,6 +8,7 @@ import {
   cleanDisk,
   cleanHunt,
   cleanMap,
+  cleanOpenInstalledApps,
   cleanPrograms,
   cleanRecheck,
   cleanReveal,
@@ -62,6 +63,7 @@ const BACKEND: CleanerBackend = {
   daemonStop: cleanDaemonStop,
   programs: cleanPrograms,
   uninstall: cleanUninstall,
+  openInstalledApps: cleanOpenInstalledApps,
 };
 
 /** Coming back to the window more often than this doesn't look at the list again. */
@@ -498,6 +500,7 @@ export function Cleaner({
                 keepFocus();
                 setUninstalling(program);
               },
+              onOpenInstalledApps: () => backend.openInstalledApps().catch(console.error),
             })
           ) : view === "map" ? (
             mapPage(mapping, {
@@ -732,9 +735,10 @@ interface ProgramsPage {
   i18n: Translator;
   onList: () => void;
   onUninstall: (program: Program) => void;
+  onOpenInstalledApps: () => void;
 }
 
-function programsPage(listing: Listing, { disk, i18n, onList, onUninstall }: ProgramsPage) {
+function programsPage(listing: Listing, { disk, i18n, onList, onUninstall, onOpenInstalledApps }: ProgramsPage) {
   switch (listing.kind) {
     case "ready":
       return (
@@ -756,7 +760,7 @@ function programsPage(listing: Listing, { disk, i18n, onList, onUninstall }: Pro
       return listing.programs.length === 0 ? (
         <p className={styles.empty}>{i18n.t("noPrograms")}</p>
       ) : (
-        <Programs programs={listing.programs} onUninstall={onUninstall} />
+        <Programs programs={listing.programs} onUninstall={onUninstall} onOpenInstalledApps={onOpenInstalledApps} />
       );
   }
 }

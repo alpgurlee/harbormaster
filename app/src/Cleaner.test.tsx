@@ -120,6 +120,7 @@ function fake() {
     // A Mac lists its own apps; it never lists programs to uninstall.
     programs: () => new Promise(() => {}),
     uninstall: () => new Promise(() => {}),
+    openInstalledApps: () => new Promise(() => {}),
   };
   return {
     backend,

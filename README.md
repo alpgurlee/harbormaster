@@ -70,8 +70,9 @@ bundles and other packages, virtual machines and iTunes device backups, `node_mo
 caches, and files with more than one hard link. **Apps** lists the apps in `/Applications` and
 `~/Applications`, and one folder down in each, that belong to you and aren't locked, with the room each
 takes; one it can't measure in full is left out. On Windows it lists the installed apps as Windows Settings
-does, with the room their installers say they take. An app there is removed only by its own uninstaller,
-which Harbormaster starts once you confirm; if the uninstaller asks for an administrator, Windows asks you
+does, with the room their installers say they take, and leaves most Microsoft Store apps to Windows
+Settings, which it can open for you. An app there is removed only by its own uninstaller, which
+Harbormaster starts once you confirm; if the uninstaller asks for an administrator, Windows asks you
 first, and an app installed for you alone is never started as one.
 
 What gets chosen, and what happens to it:

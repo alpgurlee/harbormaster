@@ -21,6 +21,7 @@ fn main() {
         "clean_apps",
         "clean_programs",
         "clean_uninstall",
+        "clean_open_installed_apps",
         "clean_map",
         "clean_run",
         "clean_recheck",

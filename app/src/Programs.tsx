@@ -12,6 +12,8 @@ import sheet from "./Sheet.module.css";
 export interface Uninstaller {
   programs: () => Promise<ProgramList>;
   uninstall: (token: number, id: number) => Promise<void>;
+  /** Opens Windows Settings at the installed apps. */
+  openInstalledApps: () => Promise<void>;
 }
 
 type Order = "name" | "size";
@@ -24,10 +26,11 @@ const ORDERS: { order: Order; label: "orderName" | "orderSize" }[] = [
 export interface ProgramsProps {
   programs: Program[];
   onUninstall: (program: Program) => void;
+  onOpenInstalledApps: () => void;
 }
 
 /** The programs installed on this PC, each removed only by its own uninstaller. */
-export function Programs({ programs, onUninstall }: ProgramsProps) {
+export function Programs({ programs, onUninstall, onOpenInstalledApps }: ProgramsProps) {
   const i18n = useI18n();
   const [query, setQuery] = useState("");
   const [order, setOrder] = useState<Order>("name");
@@ -36,6 +39,12 @@ export function Programs({ programs, onUninstall }: ProgramsProps) {
     <section className={`${list.detail} ${styles.programs}`} aria-label={i18n.t("moduleApps")}>
       <div className={list.intro}>
         <p className={list.about}>{i18n.t("aboutPrograms")}</p>
+        <p className={list.about}>
+          {i18n.t("programsStore")}{" "}
+          <button type="button" className={styles.settings} onClick={onOpenInstalledApps}>
+            {i18n.t("openInstalledApps")}
+          </button>
+        </p>
       </div>
       <div className={list.toolbar}>
         <input
@@ -206,6 +215,23 @@ export function UninstallSheet({ token, program, uninstaller, onClose, onListAga
                 {busy ? i18n.t("uninstallStarting") : i18n.t("uninstallStart")}
               </button>
             </>
+          ) : step.kind === "refused" && elsewhere(step.refusal) ? (
+            <>
+              <button type="button" className={sheet.quiet} onClick={onClose}>
+                {i18n.t("close")}
+              </button>
+              <button
+                type="button"
+                data-main
+                className={sheet.quiet}
+                onClick={() => {
+                  uninstaller.openInstalledApps().catch(console.error);
+                  onClose();
+                }}
+              >
+                {i18n.t("openInstalledApps")}
+              </button>
+            </>
           ) : step.kind === "refused" && stale(step.refusal) ? (
             <>
               <button type="button" className={sheet.quiet} onClick={onClose}>
@@ -224,6 +250,11 @@ export function UninstallSheet({ token, program, uninstaller, onClose, onListAga
       </div>
     </div>
   );
+}
+
+/** Whether the app is for Windows Settings to uninstall, if the user trusts it. */
+function elsewhere(refusal: UninstallRefusal): boolean {
+  return refusal.code === "unsure" || refusal.code === "wantsAdministrator" || refusal.code === "unprotected";
 }
 
 /** Whether the list was out of date, which listing again puts right. */

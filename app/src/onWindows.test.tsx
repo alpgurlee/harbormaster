@@ -292,6 +292,7 @@ describe("the cleaner on Windows", () => {
     const revealed: string[] = [];
     const listings: ((list: ProgramList) => void)[] = [];
     const uninstalls: { token: number; id: number; answer: (refusal?: UninstallRefusal) => void }[] = [];
+    const settings: "opened"[] = [];
     const nothing = () => Promise.resolve();
     const backend: CleanerBackend = {
       scan: (onEvent) => {
@@ -324,13 +325,17 @@ describe("the cleaner on Windows", () => {
         new Promise((started, refused) =>
           uninstalls.push({ token, id, answer: (refusal) => (refusal === undefined ? started() : refused(refusal)) }),
         ),
+      openInstalledApps: () => {
+        settings.push("opened");
+        return Promise.resolve();
+      },
     };
     render(
       <I18nProvider locale={locale}>
         <Cleaner backend={backend} now={NOW} />
       </I18nProvider>,
     );
-    return { scans, runs, hunts, revealed, listings, uninstalls };
+    return { scans, runs, hunts, revealed, listings, uninstalls, settings };
   }
 
   /** Ends the scan with `findings`, as the app sends them. */
@@ -615,6 +620,10 @@ describe("the cleaner on Windows", () => {
       ),
     ).toBeTruthy();
     expect(sheet.queryByRole("button", { name: "Refresh list" })).toBeNull();
+    fireEvent.click(sheet.getByRole("button", { name: "Open Windows Settings" }));
+
+    expect(driver.settings).toEqual(["opened"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("lists again when the app changed since the list was made", async () => {
@@ -646,10 +655,26 @@ describe("the cleaner on Windows", () => {
       ),
     ).toBeTruthy();
     expect(sheet.queryByRole("button", { name: "Start uninstaller" })).toBeNull();
+    expect(sheet.getByRole("button", { name: "Open Windows Settings" })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(driver.uninstalls).toEqual([]);
+    expect(driver.settings).toEqual([]);
+  });
+
+  it("leaves the apps it doesn't list to Windows Settings, and opens it there", async () => {
+    const driver = cleaner();
+    await listed(driver, [cursor]);
+
+    expect(
+      screen.getByText("Most apps from the Microsoft Store aren't listed here; they are uninstalled from Windows Settings.", {
+        exact: false,
+      }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Windows Settings" }));
+
+    expect(driver.settings).toEqual(["opened"]);
   });
 
   it("finds an app by its publisher, and orders by the room installers say", async () => {

@@ -249,4 +249,5 @@ export const demo: CleanerBackend = {
   async uninstall() {
     await wait(600);
   },
+  openInstalledApps: () => Promise.resolve(),
 };
