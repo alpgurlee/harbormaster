@@ -5,6 +5,8 @@
 mod account;
 #[cfg(target_os = "macos")]
 mod apps;
+#[cfg(windows)]
+mod bin;
 mod catalog;
 mod large;
 mod map;
@@ -431,6 +433,8 @@ pub fn scan_with(
             ..progress
         });
     });
+    #[cfg(windows)]
+    findings.extend(bin::finding(survey.home));
     findings.retain(|finding| finding.bytes >= SMALLEST);
     findings.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
     Ok(findings)
@@ -582,6 +586,13 @@ pub fn within(path: &Path, folder: &Path) -> bool {
             (own, name) => own == name,
         })
     })
+}
+
+/// Whether `path` is where a drive keeps its Recycle Bin, as the finding of
+/// what the bins hold names it.
+#[cfg(windows)]
+pub fn is_recycle_bin(path: &Path) -> bool {
+    bin::is(path)
 }
 
 /// The usual project folders that exist under `home`.

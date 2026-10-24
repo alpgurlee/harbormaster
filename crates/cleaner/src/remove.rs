@@ -49,6 +49,10 @@ impl<'a> Roots<'a> {
     /// Whether `finding` is still the folder or file that was measured,
     /// reached through real folders from its root.
     pub(crate) fn still_there(&self, finding: &Finding) -> bool {
+        #[cfg(windows)]
+        if finding.group == Group::Trash {
+            return crate::bin::holds_anything();
+        }
         self.of(finding)
             .is_some_and(|(root, at)| still_there(root, at, &finding.path, finding.identity))
     }
@@ -97,7 +101,8 @@ pub(crate) fn all(
     })
 }
 
-/// One finding: looked at again, then deleted or moved to the Trash.
+/// One finding: looked at again, then deleted or moved to the Trash. The
+/// Recycle Bins on Windows are the shell's to empty.
 fn one(
     roots: &Roots,
     finding: &Finding,
@@ -105,6 +110,10 @@ fn one(
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
     stop: &AtomicBool,
 ) -> Outcome {
+    #[cfg(windows)]
+    if finding.group == Group::Trash {
+        return crate::bin::emptied();
+    }
     let Some((root, at)) = roots.of(finding) else {
         return refused(Why::OutsideHome);
     };
