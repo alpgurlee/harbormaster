@@ -32,13 +32,18 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetFileInformationByHandle, GetFinalPathNameByHandleW,
     GetVolumeNameForVolumeMountPointW, OPEN_EXISTING, VOLUME_NAME_DOS,
 };
-use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+use windows_sys::Win32::System::Registry::{
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RegGetValueW,
+};
 
 /// The folder at the root of each drive that holds its Recycle Bin.
 const BIN: &str = "$Recycle.Bin";
 /// Where this user's settings for each drive's Recycle Bin are, by volume,
 /// as Recycle Bin Properties writes them.
 const SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume";
+/// Where group policy may turn the Recycle Bin off or cap its size, for the
+/// machine or for this user.
+const POLICIES: &str = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
 const MIB: u64 = 1024 * 1024;
 /// The least room each drive's Recycle Bin was found to have since this
 /// program started, by drive letter: the shell reads its settings once, so
@@ -127,18 +132,30 @@ fn left_out() -> io::Error {
 }
 
 /// The largest file the Recycle Bin of `drive` takes, by this user's
-/// settings for it, or by the least it was found to take before.
+/// settings for it and group policy, or by the least it was found to take
+/// before.
 fn room(drive: u8) -> io::Result<u64> {
     let root = format!("{}:\\", char::from(drive));
     let key = format!(r"{SETTINGS}\{}", volume_of(&root)?);
-    // The shell says it won't recycle anything here, which `Recycling` stops.
-    if setting(&key, "NukeOnDelete")? == Some(1) {
+    let hives = [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER];
+    let mut off = setting(HKEY_CURRENT_USER, &key, "NukeOnDelete")? == Some(1);
+    for hive in hives {
+        off |= setting(hive, POLICIES, "NoRecycleFiles")? == Some(1);
+    }
+    if off {
         return Ok(0);
     }
-    let now = match setting(&key, "MaxCapacity")? {
+    let total = total_of(&root)?;
+    let mut now = match setting(HKEY_CURRENT_USER, &key, "MaxCapacity")? {
         Some(megabytes) => u64::from(megabytes) * MIB,
-        None => default_room(total_of(&root)?),
+        None => default_room(total),
     };
+    // A share of the drive, which policy sets over what the user did.
+    for hive in hives {
+        if let Some(percent) = setting(hive, POLICIES, "RecycleBinSize")? {
+            now = now.min(total / 100 * u64::from(percent.min(100)) / MIB * MIB);
+        }
+    }
     let mut rooms = ROOM.lock().unwrap_or_else(PoisonError::into_inner);
     let least = &mut rooms[usize::from(drive.to_ascii_uppercase() - b'A')];
     let room = least.map_or(now, |least| least.min(now));
@@ -192,8 +209,8 @@ fn total_of(root: &str) -> io::Result<u64> {
     Ok(total)
 }
 
-/// The number `name` under `key` in this user's settings, if it is there.
-fn setting(key: &str, name: &str) -> io::Result<Option<u32>> {
+/// The number `name` under `key` in `hive`, if it is there.
+fn setting(hive: HKEY, key: &str, name: &str) -> io::Result<Option<u32>> {
     let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
     let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
     let mut value = 0u32;
@@ -201,7 +218,7 @@ fn setting(key: &str, name: &str) -> io::Result<Option<u32>> {
     // SAFETY: the key and name end in a nul; `value` has room for the DWORD asked for.
     let read = unsafe {
         RegGetValueW(
-            HKEY_CURRENT_USER,
+            hive,
             key.as_ptr(),
             name.as_ptr(),
             RRF_RT_REG_DWORD,

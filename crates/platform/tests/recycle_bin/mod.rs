@@ -33,8 +33,11 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain([0]).collect()
 }
 
+/// Where group policy turns the Recycle Bin off or caps its size for this user.
+pub const POLICIES: &str = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+
 /// Where this user's Recycle Bin settings for the drive holding `path` are.
-fn settings_of(path: &Path) -> Vec<u16> {
+pub fn settings_of(path: &Path) -> String {
     let root: PathBuf = path.components().take(2).collect();
     let root = wide(root.to_str().expect("a drive root is text"));
     let mut volume = [0u16; 64];
@@ -49,12 +52,10 @@ fn settings_of(path: &Path) -> Vec<u16> {
         .zip(volume.find('}'))
         .map(|(start, end)| &volume[start..=end])
         .expect("a volume name holds its GUID");
-    wide(&format!(
-        r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}"
-    ))
+    format!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}")
 }
 
-/// One Recycle Bin setting of a drive, changed until dropped.
+/// One of this user's settings, changed until dropped.
 pub struct Setting {
     key: Vec<u16>,
     name: Vec<u16>,
@@ -62,8 +63,13 @@ pub struct Setting {
 }
 
 impl Setting {
-    pub fn changed(path: &Path, name: &str, value: u32) -> Self {
-        let key = settings_of(path);
+    /// `name` of the Recycle Bin of the drive holding `path` set to `value`.
+    pub fn of_bin_for(path: &Path, name: &str, value: u32) -> Self {
+        Self::changed(&settings_of(path), name, value)
+    }
+
+    pub fn changed(key: &str, name: &str, value: u32) -> Self {
+        let key = wide(key);
         let name = wide(name);
         let mut was = 0u32;
         let mut size = 4u32;

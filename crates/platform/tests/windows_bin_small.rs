@@ -13,7 +13,7 @@ fn leaves_a_file_larger_than_the_recycle_bin_where_it_was() {
     let (_folder, place) = place();
     let file = place.join("clip.mov");
     std::fs::write(&file, vec![1; 2 * MIB]).unwrap();
-    let _small = Setting::changed(&file, LARGEST, 1);
+    let _small = Setting::of_bin_for(&file, LARGEST, 1);
 
     left_where_it_was(&file);
 }
@@ -24,7 +24,7 @@ fn leaves_a_file_a_byte_larger_than_the_recycle_bin_where_it_was() {
     let (_folder, place) = place();
     let file = place.join("clip.mov");
     std::fs::write(&file, vec![1; MIB + 1]).unwrap();
-    let _small = Setting::changed(&file, LARGEST, 1);
+    let _small = Setting::of_bin_for(&file, LARGEST, 1);
 
     left_where_it_was(&file);
 }
@@ -35,7 +35,7 @@ fn moves_a_file_as_large_as_the_recycle_bin_there() {
     let (_folder, place) = place();
     let file = place.join("clip.mov");
     std::fs::write(&file, vec![1; MIB]).unwrap();
-    let _small = Setting::changed(&file, LARGEST, 1);
+    let _small = Setting::of_bin_for(&file, LARGEST, 1);
 
     let landed = trash(&file).unwrap();
 
@@ -51,7 +51,7 @@ fn leaves_a_folder_larger_than_the_recycle_bin_whole() {
     std::fs::create_dir(&archive).unwrap();
     std::fs::write(archive.join("a"), vec![1; 2 * MIB]).unwrap();
     std::fs::write(archive.join("b"), vec![1; 2 * MIB]).unwrap();
-    let _small = Setting::changed(&archive, LARGEST, 1);
+    let _small = Setting::of_bin_for(&archive, LARGEST, 1);
 
     left_where_it_was(&archive);
 
