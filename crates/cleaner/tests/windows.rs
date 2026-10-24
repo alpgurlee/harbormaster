@@ -363,3 +363,89 @@ fn moves_a_large_file_to_the_recycle_bin_and_nothing_beside_it() {
     assert!(!film.exists());
     assert!(machine.home.join(r"Videos\notes.txt").exists());
 }
+
+#[test]
+fn finds_each_browser_profiles_cache_and_nothing_else_of_the_profile() {
+    let machine = machine();
+    let home = &machine.home;
+    let chrome = home.join(r"AppData\Local\Google\Chrome\User Data");
+    write(
+        &chrome.join(r"Default\Cache\Cache_Data\data_1"),
+        &vec![1; 2 * MIB],
+    );
+    write(
+        &chrome.join(r"Profile 1\Cache\Cache_Data\data_1"),
+        &vec![1; 2 * MIB],
+    );
+    write(&chrome.join(r"Default\History"), &vec![1; 2 * MIB]);
+    write(&chrome.join(r"Default\Login Data"), &vec![1; 2 * MIB]);
+    let firefox = home.join(r"AppData\Local\Mozilla\Firefox\Profiles");
+    write(
+        &firefox.join(r"k3x9abcd.default-release\cache2\entries\A1"),
+        &vec![1; 2 * MIB],
+    );
+
+    let findings = scanned(home, &[]);
+
+    let default = named(&findings, "Google Chrome").expect("Chrome's cache");
+    assert_eq!(default.path, chrome.join(r"Default\Cache"));
+    assert_eq!(
+        (default.group, default.picked, default.emptied),
+        (Group::Apps, true, true)
+    );
+    let other = named(&findings, "Google Chrome · Profile 1").expect("the other profile's");
+    assert_eq!(other.path, chrome.join(r"Profile 1\Cache"));
+    let firefox_cache = named(&findings, "Firefox · default-release").expect("Firefox's cache");
+    assert_eq!(
+        firefox_cache.path,
+        firefox.join(r"k3x9abcd.default-release\cache2")
+    );
+    assert_eq!(findings.len(), 3, "{findings:?}");
+}
+
+#[test]
+fn takes_an_apps_cache_to_be_in_use_while_the_app_runs() {
+    let machine = machine();
+    let home = &machine.home;
+    write(
+        &home.join(r"AppData\Local\Google\Chrome\User Data\Default\Cache\a"),
+        &vec![1; 2 * MIB],
+    );
+    write(
+        &home.join(r"AppData\Roaming\Code\Cache\Cache_Data\a"),
+        &vec![1; 2 * MIB],
+    );
+    let chrome = [(
+        PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        "chrome".to_string(),
+    )];
+
+    let findings = scanned_while(home, &[], &chrome);
+
+    let browser = named(&findings, "Google Chrome").expect("Chrome's cache");
+    assert_eq!(
+        (browser.picked, browser.in_use.as_deref()),
+        (false, Some("chrome"))
+    );
+    let editor = named(&findings, "Visual Studio Code").expect("VS Code's cache");
+    assert_eq!((editor.picked, editor.in_use.as_deref()), (true, None));
+}
+
+#[test]
+fn lists_crash_dumps_as_the_users_own() {
+    let machine = machine();
+    write(
+        &machine
+            .home
+            .join(r"AppData\Local\CrashDumps\app.exe.1234.dmp"),
+        &vec![1; 2 * MIB],
+    );
+
+    let findings = scanned(&machine.home, &[]);
+
+    let dumps = named(&findings, "Crash dumps").expect("the crash dumps");
+    assert_eq!(
+        (dumps.group, dumps.kind, dumps.picked),
+        (Group::Logs, Kind::Personal, false)
+    );
+}

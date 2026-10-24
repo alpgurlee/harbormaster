@@ -1,6 +1,7 @@
 //! The places a developer's machine fills with things its tools rebuild,
 //! written from each tool's own documentation.
 
+use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
@@ -23,6 +24,9 @@ struct Place {
     /// Windows doesn't tell what a program has open, as macOS does, so
     /// there a tool's running is taken as its using its cache.
     used_by: &'static [&'static str],
+    /// The place holds an app's profiles, each keeping a cache of its own
+    /// at this name, which is all that is listed of it: a browser's.
+    in_each: Option<&'static str>,
 }
 
 const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
@@ -34,6 +38,7 @@ const fn whole(group: Group, name: &'static str, path: &'static str) -> Place {
         each: false,
         keep_latest: false,
         used_by: &[],
+        in_each: None,
     }
 }
 
@@ -42,6 +47,14 @@ impl Place {
     const fn used_by(self, programs: &'static [&'static str]) -> Self {
         Self {
             used_by: programs,
+            ..self
+        }
+    }
+
+    #[cfg(windows)]
+    const fn in_each(self, cache: &'static str) -> Self {
+        Self {
+            in_each: Some(cache),
             ..self
         }
     }
@@ -165,9 +178,9 @@ const PLACES: &[Place] = &[
 ];
 
 /// What each tool downloads or builds for itself, and what Maven and NuGet
-/// keep that may not be had again, which goes to the Recycle Bin. Apps'
-/// caches wait for a way to tell the app is closed, as Windows won't remove
-/// what an app has open.
+/// keep that may not be had again, which goes to the Recycle Bin; apps'
+/// caches, taken to be in use while the app runs, as Windows won't remove
+/// what an app has open; and the dumps apps leave when they crash.
 #[cfg(windows)]
 const PLACES: &[Place] = &[
     // npm, npx, Yarn and node-gyp run as node, which says nothing of what it runs.
@@ -265,10 +278,60 @@ const PLACES: &[Place] = &[
         "Playwright browsers",
         r"AppData\Local\ms-playwright",
     ),
+    // Only what each profile caches of the web; its pages, logins and history stay.
+    whole(
+        Group::Apps,
+        "Google Chrome",
+        r"AppData\Local\Google\Chrome\User Data",
+    )
+    .in_each("Cache")
+    .used_by(&["chrome"]),
+    whole(
+        Group::Apps,
+        "Microsoft Edge",
+        r"AppData\Local\Microsoft\Edge\User Data",
+    )
+    .in_each("Cache")
+    .used_by(&["msedge"]),
+    whole(
+        Group::Apps,
+        "Brave",
+        r"AppData\Local\BraveSoftware\Brave-Browser\User Data",
+    )
+    .in_each("Cache")
+    .used_by(&["brave"]),
+    whole(
+        Group::Apps,
+        "Firefox",
+        r"AppData\Local\Mozilla\Firefox\Profiles",
+    )
+    .in_each("cache2")
+    .used_by(&["firefox"]),
+    whole(
+        Group::Apps,
+        "Visual Studio Code",
+        r"AppData\Roaming\Code\Cache",
+    )
+    .used_by(CODE),
+    whole(
+        Group::Apps,
+        "Visual Studio Code compiled code",
+        r"AppData\Roaming\Code\CachedData",
+    )
+    .used_by(CODE),
+    whole(Group::Apps, "Discord", r"AppData\Roaming\discord\Cache").used_by(&["Discord"]),
+    whole(Group::Apps, "Slack", r"AppData\Roaming\Slack\Cache").used_by(&["slack"]),
+    // Kept by Windows Error Reporting when it is set to, for finding out why an app crashed.
+    Place {
+        kind: Kind::Personal,
+        ..whole(Group::Logs, "Crash dumps", r"AppData\Local\CrashDumps")
+    },
 ];
 
 #[cfg(windows)]
 const CARGO: &[&str] = &["cargo", "rustc"];
+#[cfg(windows)]
+const CODE: &[&str] = &["Code"];
 #[cfg(windows)]
 const DART: &[&str] = &["dart"];
 #[cfg(windows)]
@@ -308,6 +371,23 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
             continue;
         };
         let rebuildable = place.kind == Kind::Rebuildable;
+        if let Some(cache) = place.in_each {
+            for (profile, _) in folders(&dir, stop) {
+                let relative = relative.join(&profile).join(cache);
+                if home.descend(&relative).is_ok() {
+                    let name = profile_name(place.name, &profile);
+                    found.push(at(
+                        &relative,
+                        place.group,
+                        place.kind,
+                        name,
+                        rebuildable,
+                        true,
+                    ));
+                }
+            }
+            continue;
+        }
         if !place.each {
             found.push(at(
                 relative,
@@ -362,9 +442,24 @@ pub(crate) fn used_by(relative: &Path) -> &'static [&'static str] {
         .iter()
         .find(|place| {
             let at = Path::new(place.path);
-            relative == at || (place.each && relative.parent() == Some(at))
+            let profiles = place.in_each.is_some_and(|cache| {
+                relative.file_name() == Some(OsStr::new(cache))
+                    && relative.parent().and_then(Path::parent) == Some(at)
+            });
+            relative == at || (place.each && relative.parent() == Some(at)) || profiles
         })
         .map_or(&[], |place| place.used_by)
+}
+
+/// What the cache of an app's profile in `folder` is called: by the app's
+/// name alone for its first profile, and with the profile's otherwise.
+/// Firefox's profile folders start with letters of their own, left out.
+fn profile_name(app: &str, folder: &str) -> String {
+    if folder == "Default" {
+        return app.to_owned();
+    }
+    let profile = folder.split_once('.').map_or(folder, |(_, name)| name);
+    format!("{app} · {profile}")
 }
 
 /// The real folders inside `dir`, with when each last changed; links and
