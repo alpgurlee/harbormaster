@@ -254,6 +254,31 @@ export interface Messages {
   noApps: string;
   appsStart: string;
   appsAgain: string;
+  programsHint: string;
+  programsLooking: string;
+  noPrograms: string;
+  aboutPrograms: string;
+  programsEveryone: string;
+  programsSize: string;
+  programsUninstall: string;
+  programsUninstallNamed: string;
+  uninstallTitle: string;
+  uninstallRuns: string;
+  uninstallEveryone: string;
+  uninstallYours: string;
+  uninstallFollow: string;
+  uninstallStart: string;
+  uninstallStarting: string;
+  uninstallStartedTitle: string;
+  uninstallStarted: string;
+  uninstallExpired: string;
+  uninstallGone: string;
+  uninstallChanged: string;
+  uninstallUnsure: string;
+  uninstallWantsAdministrator: string;
+  uninstallUnprotected: string;
+  uninstallDeclined: string;
+  uninstallFailed: string;
   mapWithOthers: string;
   settingsGeneral: string;
   settingsServers: string;
@@ -560,6 +585,31 @@ export const en: Messages = {
   noApps: "No apps of yours were found in Applications.",
   appsStart: "List apps",
   appsAgain: "Refresh list",
+  programsHint: "Lists the apps installed on this PC, as Windows Settings does. Each is removed by its own uninstaller, which Harbormaster starts once you confirm; it never deletes an app's folder itself.",
+  programsLooking: "Reading the list of installed apps…",
+  noPrograms: "No installed apps were found.",
+  aboutPrograms: "The apps installed on this PC, with the room their installers say they take. Each is removed by its own uninstaller, started only once you confirm.",
+  programsEveryone: "for everyone on this PC",
+  programsSize: "about {bytes}",
+  programsUninstall: "Uninstall…",
+  programsUninstallNamed: "Uninstall {name}…",
+  uninstallTitle: "Uninstall {name}?",
+  uninstallRuns: "Harbormaster starts the uninstaller it came with:",
+  uninstallEveryone: "It's installed for everyone on this PC, so Windows may ask for an administrator. Allow it only if you trust the publisher Windows names.",
+  uninstallYours: "It's installed for you alone, so Harbormaster starts its uninstaller as you and never as an administrator.",
+  uninstallFollow: "The uninstaller decides what goes; follow its prompts. Harbormaster removes nothing itself.",
+  uninstallStart: "Start uninstaller",
+  uninstallStarting: "Starting…",
+  uninstallStartedTitle: "{name}'s uninstaller was started",
+  uninstallStarted: "Follow its prompts; Harbormaster hasn't checked that the app was removed. Once it is done, refresh the list.",
+  uninstallExpired: "The list has changed since. Refresh it and try again.",
+  uninstallGone: "{name} is no longer installed.",
+  uninstallChanged: "How {name} is uninstalled changed since the list was made. Refresh it and try again.",
+  uninstallUnsure: "Windows can't tell for sure which program uninstalls {name}, so Harbormaster won't start one. Remove it from Windows Settings.",
+  uninstallWantsAdministrator: "Its uninstaller asks for an administrator, which an app installed for you alone shouldn't. If you trust it, remove it from Windows Settings.",
+  uninstallUnprotected: "Its uninstaller asks for an administrator, yet isn't kept where only administrators can change it. If you trust it, remove it from Windows Settings.",
+  uninstallDeclined: "Windows wasn't allowed to start the uninstaller as an administrator.",
+  uninstallFailed: "The uninstaller couldn't be started: {message}",
   mapWithOthers: "Map with other apps' data",
   settingsGeneral: "General",
   settingsServers: "Servers",
@@ -866,6 +916,31 @@ export const tr: Messages = {
   noApps: "Uygulamalar klasöründe sana ait bir uygulama bulunamadı.",
   appsStart: "Uygulamaları listele",
   appsAgain: "Listeyi yenile",
+  programsHint: "Bu bilgisayarda yüklü uygulamaları Windows Ayarları gibi listeler. Her biri kendi kaldırıcısıyla kaldırılır; Harbormaster onu sen onaylayınca başlatır ve bir uygulamanın klasörünü asla kendisi silmez.",
+  programsLooking: "Yüklü uygulamaların listesi okunuyor…",
+  noPrograms: "Yüklü bir uygulama bulunamadı.",
+  aboutPrograms: "Bu bilgisayarda yüklü uygulamalar ve yükleyicilerine göre kapladıkları alan. Her biri kendi kaldırıcısıyla kaldırılır; kaldırıcı yalnızca sen onaylayınca başlatılır.",
+  programsEveryone: "bu bilgisayardaki herkes için",
+  programsSize: "yaklaşık {bytes}",
+  programsUninstall: "Kaldır…",
+  programsUninstallNamed: "{name} uygulamasını kaldır…",
+  uninstallTitle: "{name} kaldırılsın mı?",
+  uninstallRuns: "Harbormaster, uygulamayla gelen kaldırıcıyı başlatır:",
+  uninstallEveryone: "Bilgisayardaki herkes için yüklü, bu yüzden Windows yönetici izni isteyebilir. Yalnızca Windows'un gösterdiği yayıncıya güveniyorsan izin ver.",
+  uninstallYours: "Yalnızca senin için yüklü; bu yüzden Harbormaster kaldırıcısını senin adına başlatır, asla yönetici olarak başlatmaz.",
+  uninstallFollow: "Neyin kaldırılacağına kaldırıcı karar verir; onun adımlarını izle. Harbormaster kendisi hiçbir şey silmez.",
+  uninstallStart: "Kaldırıcıyı başlat",
+  uninstallStarting: "Başlatılıyor…",
+  uninstallStartedTitle: "{name} kaldırıcısı başlatıldı",
+  uninstallStarted: "Adımlarını izle; Harbormaster uygulamanın kaldırıldığını denetlemedi. Bitince listeyi yenile.",
+  uninstallExpired: "Liste o zamandan beri değişti. Yenileyip yeniden dene.",
+  uninstallGone: "{name} artık yüklü değil.",
+  uninstallChanged: "{name} uygulamasının nasıl kaldırılacağı liste çıkarıldıktan sonra değişti. Listeyi yenileyip yeniden dene.",
+  uninstallUnsure: "Windows, {name} uygulamasını hangi programın kaldırdığını kesin bilemiyor; bu yüzden Harbormaster bir program başlatmaz. Windows Ayarları'ndan kaldır.",
+  uninstallWantsAdministrator: "Kaldırıcısı yönetici izni istiyor; yalnızca senin için yüklü bir uygulama bunu istememeli. Güveniyorsan Windows Ayarları'ndan kaldır.",
+  uninstallUnprotected: "Kaldırıcısı yönetici izni istiyor, ama yalnızca yöneticilerin değiştirebileceği bir yerde durmuyor. Güveniyorsan Windows Ayarları'ndan kaldır.",
+  uninstallDeclined: "Windows'un kaldırıcıyı yönetici olarak başlatmasına izin verilmedi.",
+  uninstallFailed: "Kaldırıcı başlatılamadı: {message}",
   mapWithOthers: "Uygulama verileriyle haritala",
   settingsGeneral: "Genel",
   settingsServers: "Sunucular",

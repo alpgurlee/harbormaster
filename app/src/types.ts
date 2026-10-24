@@ -186,6 +186,31 @@ export interface Disk {
 /** Why the app turned the cleaner down. */
 export type CleanRefusal = { code: "busy" | "expired" | "unlisted" | "changed" } | { code: "failed"; message: string };
 
+/** A program installed on Windows, as the cleaner lists it; the window names it by `id` alone. */
+export interface Program {
+  id: number;
+  name: string;
+  publisher: string | null;
+  version: string | null;
+  /** How much room its installer says it takes, if it says. */
+  estimated: number | null;
+  /** Installed for everyone on this PC rather than for this user alone, so its uninstaller may ask for an administrator. */
+  everyone: boolean;
+  /** The program its uninstaller is, as Windows reads its entry; none when Windows can't be sure, and then it isn't started. */
+  uninstaller: string | null;
+}
+
+/** The programs installed on this PC, under the token starting one's uninstaller takes. */
+export interface ProgramList {
+  token: number;
+  programs: Program[];
+}
+
+/** Why an uninstaller wasn't started. */
+export type UninstallRefusal =
+  | { code: "expired" | "unlisted" | "gone" | "changed" | "unsure" | "wantsAdministrator" | "unprotected" | "declined" }
+  | { code: "failed"; message: string };
+
 /** Why a place in the map may hold more than it says, the weightiest last. */
 export type Short = "deep" | "changed" | "denied" | "skipped" | "stopped";
 

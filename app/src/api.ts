@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Disk, Finding, Holder, MapEvent, Protection, RunEvent, ScanEvent, Settings, Update } from "./types";
+import type { Disk, Finding, Holder, MapEvent, ProgramList, Protection, RunEvent, ScanEvent, Settings, Update } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -94,6 +94,12 @@ export function cleanApps(onEvent: (event: ScanEvent) => void): Promise<void> {
   channel.onmessage = onEvent;
   return invoke("clean_apps", { channel });
 }
+
+/** The programs installed on this PC; Windows only. Rejects with a `CleanRefusal`. */
+export const cleanPrograms = () => invoke<ProgramList>("clean_programs");
+
+/** Starts the uninstaller of the program `id` of the listing under `token`; Windows only. Rejects with an `UninstallRefusal`. */
+export const cleanUninstall = (token: number, id: number) => invoke<void>("clean_uninstall", { token, id });
 
 /** Removes the findings at `paths`, which the scan under `token` listed. */
 export function cleanRun(token: number, paths: string[], onEvent: (event: RunEvent) => void): Promise<void> {

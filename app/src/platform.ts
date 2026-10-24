@@ -13,9 +13,13 @@ export const stopsAtOnce = platform === "windows";
  * forces it. */
 export const closesWindows = platform === "windows";
 
-/** The cleaner's sections: on Windows all but the user's apps, which wait for
- * a way to uninstall them there. */
-export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer", "system", "large"] : ["developer", "system", "large", "apps"];
+/** The cleaner's sections. */
+export const cleanerSections: CleanModule[] = ["developer", "system", "large", "apps"];
+
+/** Whether the apps section lists the programs installed, each removed by
+ * its own uninstaller, as on Windows, rather than the user's own apps, each
+ * moved to the Trash. */
+export const listsPrograms = platform === "windows";
 
 /** Whether the cleaner maps where the room in the home folder goes. */
 export const mapsHome = true;

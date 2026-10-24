@@ -1,5 +1,5 @@
 import type { CleanerBackend } from "./Cleaner";
-import type { Area, Finding, MapEvent, RunEvent, ScanEvent } from "./types";
+import type { Area, Finding, MapEvent, Program, RunEvent, ScanEvent } from "./types";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -146,6 +146,18 @@ const APPS: Finding[] = [
   app("Slack", "/Applications/Slack.app", 0.5, "Slack"),
 ];
 
+/** The programs a Windows PC lists as installed. */
+const PROGRAMS: Program[] = [
+  program(0, "Docker Desktop", "Docker Inc.", "4.38.0", 2.1, true, "C:\\Program Files\\Docker\\Docker\\Docker Desktop Installer.exe"),
+  program(1, "Blender", "Blender Foundation", "4.3.2", 1.4, true, "C:\\Windows\\System32\\MsiExec.exe"),
+  program(2, "Cursor", "Anysphere", "0.45.11", 0.6, false, "C:\\Users\\you\\AppData\\Local\\Programs\\cursor\\Uninstall Cursor.exe"),
+  program(3, "Slack", "Slack Technologies Inc.", "4.41.105", 0.3, false, "C:\\Users\\you\\AppData\\Local\\slack\\Update.exe"),
+];
+
+function program(id: number, name: string, publisher: string, version: string, gib: number, everyone: boolean, uninstaller: string): Program {
+  return { id, name, publisher, version, estimated: Math.round(gib * GIB), everyone, uninstaller };
+}
+
 /** What the pretend app shows: the last scan's, hunt's and listing's findings, less what it removed. */
 let scanned = false;
 let hunted = false;
@@ -229,4 +241,12 @@ export const demo: CleanerBackend = {
     onEvent({ kind: "done", token: 9, area: MAP });
   },
   revealArea: () => Promise.resolve(),
+  async programs() {
+    await wait(400);
+    return { token: 5, programs: PROGRAMS };
+  },
+  // The pretend uninstaller starts, and nothing goes.
+  async uninstall() {
+    await wait(600);
+  },
 };

@@ -8,14 +8,15 @@ import { I18nProvider } from "./i18n";
 import { Panel } from "./Panel";
 import { QuitSheet, type Quitter } from "./QuitSheet";
 import { StopSheet, type Stopper } from "./StopSheet";
-import type { AppUsage, Finding, RunEvent, ScanEvent, Service, Update } from "./types";
+import type { AppUsage, Finding, Program, ProgramList, RunEvent, ScanEvent, Service, UninstallRefusal, Update } from "./types";
 
 // Where a stop is the forced one, the panel says so.
 vi.mock("./platform", () => ({
   platform: "windows",
   stopsAtOnce: true,
   closesWindows: true,
-  cleanerSections: ["developer", "system", "large"],
+  cleanerSections: ["developer", "system", "large", "apps"],
+  listsPrograms: true,
   mapsHome: true,
   revealsIn: "revealInExplorer",
   bin: {
@@ -284,11 +285,13 @@ describe("the cleaner on Windows", () => {
     emptied: true,
   };
 
-  function cleaner() {
+  function cleaner(locale: "en" | "tr" = "en") {
     const scans: ((event: ScanEvent) => void)[] = [];
     const runs: ((event: RunEvent) => void)[] = [];
     const hunts: ((event: ScanEvent) => void)[] = [];
     const revealed: string[] = [];
+    const listings: ((list: ProgramList) => void)[] = [];
+    const uninstalls: { token: number; id: number; answer: (refusal?: UninstallRefusal) => void }[] = [];
     const nothing = () => Promise.resolve();
     const backend: CleanerBackend = {
       scan: (onEvent) => {
@@ -316,13 +319,18 @@ describe("the cleaner on Windows", () => {
       daemons: () => Promise.resolve([]),
       daemonPreview: () => new Promise(() => {}),
       daemonStop: () => new Promise(() => {}),
+      programs: () => new Promise((answer) => listings.push(answer)),
+      uninstall: (token, id) =>
+        new Promise((started, refused) =>
+          uninstalls.push({ token, id, answer: (refusal) => (refusal === undefined ? started() : refused(refusal)) }),
+        ),
     };
     render(
-      <I18nProvider locale="en">
+      <I18nProvider locale={locale}>
         <Cleaner backend={backend} now={NOW} />
       </I18nProvider>,
     );
-    return { scans, runs, hunts, revealed };
+    return { scans, runs, hunts, revealed, listings, uninstalls };
   }
 
   /** Ends the scan with `findings`, as the app sends them. */
@@ -352,6 +360,7 @@ describe("the cleaner on Windows", () => {
       "Developer",
       "Leftovers",
       "Large files",
+      "Apps",
       "Space map",
     ]);
     expect(
@@ -509,5 +518,168 @@ describe("the cleaner on Windows", () => {
       screen.getByText("Shows where the room in your home folder goes, AppData and hidden folders too. Nothing is moved or deleted."),
     ).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Also look in other apps' data" })).toBeNull();
+  });
+
+  const docker: Program = {
+    id: 0,
+    name: "Docker Desktop",
+    publisher: "Docker Inc.",
+    version: "4.38.0",
+    estimated: 2 * 1024 ** 3,
+    everyone: true,
+    uninstaller: "C:\\Program Files\\Docker\\Docker\\Docker Desktop Installer.exe",
+  };
+  const cursor: Program = {
+    id: 1,
+    name: "Cursor",
+    publisher: "Anysphere",
+    version: null,
+    estimated: null,
+    everyone: false,
+    uninstaller: "C:\\Users\\dev\\AppData\\Local\\Programs\\cursor\\Uninstall Cursor.exe",
+  };
+
+  /** Opens the apps section and lists `programs` under `token`, as the app sends them. */
+  async function listed(driver: ReturnType<typeof cleaner>, programs: Program[], token = 8) {
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Apps/ }));
+    fireEvent.click(screen.getByRole("button", { name: "List apps" }));
+    await act(async () => driver.listings[driver.listings.length - 1]({ token, programs }));
+  }
+
+  it("lists the programs installed and starts one's own uninstaller only once asked", async () => {
+    const driver = cleaner();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Apps/ }));
+    expect(
+      screen.getByText(
+        "Lists the apps installed on this PC, as Windows Settings does. Each is removed by its own uninstaller, which Harbormaster starts once you confirm; it never deletes an app's folder itself.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "List apps" }));
+    expect(screen.getByText("Reading the list of installed apps…")).toBeTruthy();
+    await act(async () => driver.listings[0]({ token: 8, programs: [docker, cursor] }));
+
+    const rows = within(screen.getByRole("list", { name: "Apps" })).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "CursorAnysphereUninstall…",
+      "Docker DesktopDocker Inc. · 4.38.0 · for everyone on this PCabout 2.0 GBUninstall…",
+    ]);
+    // Nothing here is chosen, so nothing is offered to clean up.
+    expect(screen.queryByRole("button", { name: "Clean up…" })).toBeNull();
+
+    const button = screen.getByRole("button", { name: "Uninstall Docker Desktop…" });
+    button.focus();
+    fireEvent.click(button);
+    const sheet = within(screen.getByRole("dialog", { name: "Uninstall Docker Desktop?" }));
+    expect(sheet.getByText("C:\\Program Files\\Docker\\Docker\\Docker Desktop Installer.exe")).toBeTruthy();
+    expect(
+      sheet.getByText(
+        "It's installed for everyone on this PC, so Windows may ask for an administrator. Allow it only if you trust the publisher Windows names.",
+      ),
+    ).toBeTruthy();
+    expect(driver.uninstalls).toEqual([]);
+
+    fireEvent.click(sheet.getByRole("button", { name: "Start uninstaller" }));
+    expect(driver.uninstalls.map(({ token, id }) => ({ token, id }))).toEqual([{ token: 8, id: 0 }]);
+    // Windows may be asking for an administrator meanwhile.
+    expect((sheet.getByRole("button", { name: "Starting…" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    await act(async () => driver.uninstalls[0].answer());
+    const started = within(screen.getByRole("dialog", { name: "Docker Desktop's uninstaller was started" }));
+    expect(
+      started.getByText("Follow its prompts; Harbormaster hasn't checked that the app was removed. Once it is done, refresh the list."),
+    ).toBeTruthy();
+    fireEvent.click(started.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Uninstall Docker Desktop…" }));
+  });
+
+  it("says an app of yours runs its uninstaller as you, and why one wasn't started", async () => {
+    const driver = cleaner();
+    await listed(driver, [cursor]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall Cursor…" }));
+    const sheet = within(screen.getByRole("dialog", { name: "Uninstall Cursor?" }));
+    expect(
+      sheet.getByText("It's installed for you alone, so Harbormaster starts its uninstaller as you and never as an administrator."),
+    ).toBeTruthy();
+    fireEvent.click(sheet.getByRole("button", { name: "Start uninstaller" }));
+    await act(async () => driver.uninstalls[0].answer({ code: "wantsAdministrator" }));
+
+    expect(
+      sheet.getByText(
+        "Its uninstaller asks for an administrator, which an app installed for you alone shouldn't. If you trust it, remove it from Windows Settings.",
+      ),
+    ).toBeTruthy();
+    expect(sheet.queryByRole("button", { name: "Refresh list" })).toBeNull();
+  });
+
+  it("lists again when the app changed since the list was made", async () => {
+    const driver = cleaner();
+    await listed(driver, [cursor]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall Cursor…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start uninstaller" }));
+    await act(async () => driver.uninstalls[0].answer({ code: "gone" }));
+    const sheet = within(screen.getByRole("dialog", { name: "Uninstall Cursor?" }));
+    expect(sheet.getByText("Cursor is no longer installed.")).toBeTruthy();
+    fireEvent.click(sheet.getByRole("button", { name: "Refresh list" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(driver.listings).toHaveLength(2);
+    await act(async () => driver.listings[1]({ token: 9, programs: [] }));
+    expect(screen.getByText("No installed apps were found.")).toBeTruthy();
+  });
+
+  it("starts nothing when Windows can't tell which program uninstalls an app", async () => {
+    const driver = cleaner();
+    await listed(driver, [{ ...cursor, uninstaller: null }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall Cursor…" }));
+    const sheet = within(screen.getByRole("dialog", { name: "Uninstall Cursor?" }));
+    expect(
+      sheet.getByText(
+        "Windows can't tell for sure which program uninstalls Cursor, so Harbormaster won't start one. Remove it from Windows Settings.",
+      ),
+    ).toBeTruthy();
+    expect(sheet.queryByRole("button", { name: "Start uninstaller" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(driver.uninstalls).toEqual([]);
+  });
+
+  it("finds an app by its publisher, and orders by the room installers say", async () => {
+    const driver = cleaner();
+    await listed(driver, [cursor, docker]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Order" }), { target: { value: "size" } });
+    const names = () =>
+      within(screen.getByRole("list", { name: "Apps" }))
+        .getAllByRole("listitem")
+        .map((row) => row.firstElementChild?.firstElementChild?.textContent);
+    expect(names()).toEqual(["Docker Desktop", "Cursor"]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "anysph" } });
+    expect(names()).toEqual(["Cursor"]);
+  });
+
+  it("asks in Turkish too", async () => {
+    const driver = cleaner("tr");
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Uygulamalar/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Uygulamaları listele" }));
+    await act(async () => driver.listings[0]({ token: 8, programs: [docker] }));
+    fireEvent.click(screen.getByRole("button", { name: "Docker Desktop uygulamasını kaldır…" }));
+
+    const sheet = within(screen.getByRole("dialog", { name: "Docker Desktop kaldırılsın mı?" }));
+    expect(sheet.getByRole("button", { name: "Kaldırıcıyı başlat" })).toBeTruthy();
+    expect(
+      sheet.getByText(
+        "Bilgisayardaki herkes için yüklü, bu yüzden Windows yönetici izni isteyebilir. Yalnızca Windows'un gösterdiği yayıncıya güveniyorsan izin ver.",
+      ),
+    ).toBeTruthy();
   });
 });

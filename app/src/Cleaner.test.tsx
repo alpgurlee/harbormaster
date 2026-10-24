@@ -117,6 +117,9 @@ function fake() {
       daemonStops.push(approval);
       return Promise.resolve({ outcomes: [{ pid: 4242, name: "Gradle daemon", outcome: "stopped" }], stillRunning: false });
     },
+    // A Mac lists its own apps; it never lists programs to uninstall.
+    programs: () => new Promise(() => {}),
+    uninstall: () => new Promise(() => {}),
   };
   return {
     backend,

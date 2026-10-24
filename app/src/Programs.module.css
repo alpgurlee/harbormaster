@@ -1,0 +1,34 @@
+.programs {
+  height: 100%;
+}
+
+.uninstall {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--field-edge);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.uninstall:hover {
+  border-color: var(--brass);
+}
+
+/* Who made it, under the question. */
+.made {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.program {
+  display: block;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}

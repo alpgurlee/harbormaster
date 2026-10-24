@@ -8,27 +8,30 @@ import {
   cleanDisk,
   cleanHunt,
   cleanMap,
+  cleanPrograms,
   cleanRecheck,
   cleanReveal,
   cleanRevealArea,
   cleanRun,
   cleanScan,
   cleanStop,
+  cleanUninstall,
 } from "./api";
 import { MODULES, SEARCHES, groupsOf, plan, rechosen, stillChosen, type CleanModule, type Plan, type Search } from "./cleanup";
 import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { DaemonSheet, type DaemonStopper } from "./DaemonSheet";
 import { useI18n, type TextKey, type Translator } from "./i18n";
+import { Programs, UninstallSheet, type Uninstaller } from "./Programs";
 import { Review } from "./Review";
-import { bin, cleanerSections, mapsHome, platform } from "./platform";
+import { bin, cleanerSections, listsPrograms, mapsHome, platform } from "./platform";
 import { keepFocusInside } from "./sheet";
 import { SpaceMap } from "./SpaceMap";
-import type { Area, CleanRefusal, Cleaned, Disk, Finding, MapEvent, Removal, RunEvent, ScanEvent } from "./types";
+import type { Area, CleanRefusal, Cleaned, Disk, Finding, MapEvent, Program, Removal, RunEvent, ScanEvent } from "./types";
 import styles from "./Cleaner.module.css";
 import sheet from "./Sheet.module.css";
 
 /** The backend's cleaner calls, which tests hand in themselves. */
-export interface CleanerBackend extends DaemonStopper {
+export interface CleanerBackend extends DaemonStopper, Uninstaller {
   scan: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   hunt: (onEvent: (event: ScanEvent) => void) => Promise<void>;
   apps: (onEvent: (event: ScanEvent) => void) => Promise<void>;
@@ -57,6 +60,8 @@ const BACKEND: CleanerBackend = {
   daemons: cleanDaemons,
   daemonPreview: cleanDaemonPreview,
   daemonStop: cleanDaemonStop,
+  programs: cleanPrograms,
+  uninstall: cleanUninstall,
 };
 
 /** Coming back to the window more often than this doesn't look at the list again. */
@@ -122,6 +127,9 @@ type Mapping =
   | { kind: "mapping"; bytes: number; items: number; folder: string }
   | { kind: "mapped"; token: number; root: Area };
 
+/** Where the list of the programs installed stands, on Windows. */
+type Listing = { kind: "ready"; refusal?: CleanRefusal } | { kind: "listing" } | { kind: "listed"; token: number; programs: Program[] };
+
 export interface CleanerProps {
   backend?: CleanerBackend;
   /** Milliseconds since the Unix epoch, for how long projects have sat. */
@@ -130,10 +138,18 @@ export interface CleanerProps {
   sections?: CleanModule[];
   /** Whether the window maps the home folder. */
   maps?: boolean;
+  /** Whether the apps section lists the programs installed, each removed by its own uninstaller. */
+  uninstalls?: boolean;
 }
 
 /** Finds what this Mac can do without, says what removing it would do, and removes only what the user chose. */
-export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleanerSections, maps = mapsHome }: CleanerProps) {
+export function Cleaner({
+  backend = BACKEND,
+  now = Date.now(),
+  sections = cleanerSections,
+  maps = mapsHome,
+  uninstalls = listsPrograms,
+}: CleanerProps) {
   const i18n = useI18n();
   const [step, setStep] = useState<Step>({ kind: "ready" });
   const [view, setView] = useState<View>("overview");
@@ -145,15 +161,23 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
   const [mapping, setMapping] = useState<Mapping>({ kind: "ready" });
   // Whether the map looks in other apps' data too, which macOS asks about.
   const [others, setOthers] = useState(false);
+  const [listing, setListing] = useState<Listing>({ kind: "ready" });
+  const [uninstalling, setUninstalling] = useState<Program | null>(null);
+  // A program of the listing shown is asked about; a new listing ends the question.
+  const asked = listing.kind === "listed" ? uninstalling : null;
+  const sheetShown = confirming || asked !== null;
   // What had the focus before the sheet, to give it back when the sheet goes.
   const returnFocus = useRef<HTMLElement | null>(null);
   // Where a clean-up began, to go back to once it is done.
   const cleanedFrom = useRef<View>("overview");
   useEffect(() => {
-    if (confirming) return;
+    if (sheetShown) return;
     returnFocus.current?.focus();
     returnFocus.current = null;
-  }, [confirming]);
+  }, [sheetShown]);
+  const keepFocus = () => {
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
 
   const measureDisk = useCallback(() => {
     backend
@@ -271,6 +295,15 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
   }, [backend, token, listedNow]);
   const stoppable = told !== null && told.listed === listedNow ? told.paths : NONE;
 
+  const listPrograms = () => {
+    setUninstalling(null);
+    setListing({ kind: "listing" });
+    backend
+      .programs()
+      .then(({ token: listed, programs }) => setListing({ kind: "listed", token: listed, programs }))
+      .catch((error: unknown) => setListing({ kind: "ready", refusal: asRefusal(error) }));
+  };
+
   const chart = (withOthers: boolean) => {
     setMapping({ kind: "mapping", bytes: 0, items: 0, folder: "" });
     backend
@@ -342,6 +375,8 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
   };
 
   const working = step.kind === "scanning" || step.kind === "removing";
+  // On Windows the apps section lists the programs installed instead of findings.
+  const programsShown = view === "apps" && uninstalls;
   // A map takes the same turn as a scan or a removal, so neither starts while the other runs.
   const charting = mapping.kind === "mapping";
   const found = step.kind === "found" ? step : null;
@@ -376,7 +411,7 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
 
   return (
     <div className={styles.window}>
-      <nav className={styles.side} aria-label={i18n.t("clean")} inert={confirming}>
+      <nav className={styles.side} aria-label={i18n.t("clean")} inert={sheetShown}>
         <div className={styles.sideTop} data-tauri-drag-region />
         <button
           type="button"
@@ -419,10 +454,16 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
           </p>
         )}
       </nav>
-      <div className={styles.main} inert={confirming}>
+      <div className={styles.main} inert={sheetShown}>
         <header className={styles.bar} data-tauri-drag-region>
           <h1 className={styles.title}>{title}</h1>
-          {view === "map" ? (
+          {programsShown ? (
+            listing.kind === "listed" ? (
+              <button type="button" className={styles.action} onClick={listPrograms}>
+                {i18n.t("appsAgain")}
+              </button>
+            ) : null
+          ) : view === "map" ? (
             charting ? (
               <button type="button" className={styles.action} onClick={() => backend.stop().catch(console.error)}>
                 {i18n.t("stop")}
@@ -448,7 +489,17 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
           )}
         </header>
         <div className={styles.page}>
-          {view === "map" ? (
+          {programsShown ? (
+            programsPage(listing, {
+              disk,
+              i18n,
+              onList: listPrograms,
+              onUninstall: (program) => {
+                keepFocus();
+                setUninstalling(program);
+              },
+            })
+          ) : view === "map" ? (
             mapPage(mapping, {
               disk,
               others,
@@ -489,13 +540,13 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
             overview(step, { disk, chosen, charting, sections, i18n, onScan: () => search("scan"), onReview: setView, onBack: back })
           )}
         </div>
-        {view !== "map" && found !== null && found.findings.length > 0 ? (
+        {view !== "map" && !programsShown && found !== null && found.findings.length > 0 ? (
           <Footer
             plan={plan(found.findings, chosen)}
             muted={confirming}
             disabled={charting}
             onClean={() => {
-              returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              keepFocus();
               setConfirming(true);
             }}
           />
@@ -503,6 +554,15 @@ export function Cleaner({ backend = BACKEND, now = Date.now(), sections = cleane
       </div>
       {confirming && found !== null ? (
         <Confirm plan={plan(found.findings, chosen)} onCancel={() => setConfirming(false)} onConfirm={() => run(found)} />
+      ) : null}
+      {asked !== null && listing.kind === "listed" ? (
+        <UninstallSheet
+          token={listing.token}
+          program={asked}
+          uninstaller={backend}
+          onClose={() => setUninstalling(null)}
+          onListAgain={listPrograms}
+        />
       ) : null}
       {stopping !== null && token !== null ? (
         <DaemonSheet
@@ -663,6 +723,40 @@ function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMa
           onReveal={(id) => onReveal(mapping.token, id)}
           onMapOthers={others || working ? undefined : onMapOthers}
         />
+      );
+  }
+}
+
+interface ProgramsPage {
+  disk: Disk | null;
+  i18n: Translator;
+  onList: () => void;
+  onUninstall: (program: Program) => void;
+}
+
+function programsPage(listing: Listing, { disk, i18n, onList, onUninstall }: ProgramsPage) {
+  switch (listing.kind) {
+    case "ready":
+      return (
+        <>
+          {listing.refusal === undefined ? null : <p className={styles.refused}>{refusalText(listing.refusal, i18n)}</p>}
+          <Start disk={disk} hint={i18n.t("programsHint")} start={i18n.t("appsStart")} onStart={onList} />
+        </>
+      );
+    case "listing":
+      return (
+        <div className={styles.start} role="status">
+          <Ring fraction={0} waiting>
+            {null}
+          </Ring>
+          <p className={styles.phase}>{i18n.t("programsLooking")}</p>
+        </div>
+      );
+    case "listed":
+      return listing.programs.length === 0 ? (
+        <p className={styles.empty}>{i18n.t("noPrograms")}</p>
+      ) : (
+        <Programs programs={listing.programs} onUninstall={onUninstall} />
       );
   }
 }
