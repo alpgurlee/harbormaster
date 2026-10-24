@@ -9,6 +9,7 @@ mod recycle;
 mod socket;
 mod tcp;
 mod theme;
+pub mod uninstall;
 mod version;
 pub mod window;
 

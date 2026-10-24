@@ -3,7 +3,7 @@
 
 use std::process::Command;
 
-use harbormaster_platform::{Registry, Scope, entry, installed};
+use harbormaster_platform::{Registry, Scope, entry, installed, start_uninstaller};
 
 const ENTRIES: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall";
 
@@ -80,4 +80,44 @@ fn lists_a_program_installed_for_this_user_but_not_a_part_of_windows() {
         entry(listed.registry, tool.name()).unwrap().as_ref(),
         Some(listed)
     );
+}
+
+const MINE: Registry = Registry {
+    scope: Scope::User,
+    wide: true,
+};
+
+#[test]
+fn starts_only_an_uninstaller_its_entry_still_names_and_windows_is_sure_of() {
+    let system = std::env::var("SystemRoot").expect("Windows says where it lives");
+    let harmless = format!(r#""{system}\System32\whoami.exe""#);
+    let tool = Entry::made(
+        "HarbormasterStart",
+        &[
+            ("DisplayName", "REG_SZ", "Harbormaster Start"),
+            ("UninstallString", "REG_SZ", &harmless),
+        ],
+    );
+    let listed = entry(MINE, tool.name()).unwrap().expect("listed");
+
+    start_uninstaller(&listed).unwrap();
+
+    let mut changed = listed.clone();
+    changed.uninstall = format!("{harmless} /other");
+    assert!(start_uninstaller(&changed).is_err());
+
+    // Unquoted, with spaces: which program it names can't be told.
+    let vague = Entry::made(
+        "HarbormasterVague",
+        &[
+            ("DisplayName", "REG_SZ", "Harbormaster Vague"),
+            (
+                "UninstallString",
+                "REG_SZ",
+                r"C:\Program Files\Harbormaster Vague Tool\uninstall.exe /x",
+            ),
+        ],
+    );
+    let listed = entry(MINE, vague.name()).unwrap().expect("listed");
+    assert!(start_uninstaller(&listed).is_err());
 }
