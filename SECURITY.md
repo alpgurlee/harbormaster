@@ -41,11 +41,13 @@ It can end processes and delete files, so both go through checks first:
 
 - A check and the action it guards are separate steps. Between the last check and a signal, a process
   could start another program, or exit and have its PID reused, and the signal would reach a program
-  you didn't approve; between the check and a removal, something could start using the item. The
-  checks narrow these windows but don't close them. On Windows, a stop holds each process open from
-  the check of who it is until it has ended, so no other process can take its PID in between. Right
-  before an app's window is asked to close, it is checked to still belong to the approved process; in
-  the moment between, the window could close and its handle pass to another program's window.
+  you didn't approve; between the check and a removal, something could start using the item. Right
+  before the Recycle Bins are emptied they are checked to hold no more than the scan showed; something
+  thrown away in the moment between would go with them. The checks narrow these windows but don't close
+  them. On Windows, a stop holds each process open from the check of who it is until it has ended, so
+  no other process can take its PID in between. Right before an app's window is asked to close, it is
+  checked to still belong to the approved process; in the moment between, the window could close and
+  its handle pass to another program's window.
 - On Windows the cleaner can't read what files a program has open, as it can on macOS. It reads each of
   your programs' working folder and where it runs from, and takes a cache to be in use while the tool
   it belongs to runs: Cargo's while `cargo` or `rustc` does, Gradle's while a Gradle daemon does, a

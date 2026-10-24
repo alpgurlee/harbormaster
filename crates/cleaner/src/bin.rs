@@ -51,6 +51,8 @@ pub(crate) fn holds_anything() -> bool {
 /// Empties the Recycle Bin of each fixed drive that holds anything, for
 /// good, if all together they hold no more than the `scanned` bytes the
 /// user saw: what was thrown away since stays, for the user to look at.
+/// The shell empties what a bin holds when asked, so something thrown away
+/// in the moment between goes too.
 pub(crate) fn emptied(scanned: u64) -> Outcome {
     let held = match held() {
         Ok((bytes, _)) => bytes,
