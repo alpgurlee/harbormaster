@@ -29,9 +29,9 @@ pub fn start_uninstaller(listed: &Installed) -> io::Result<()> {
             "its uninstall entry changed since it was listed",
         ));
     }
-    let (program, command, parameters) = evaluated(&listed.uninstall)?;
+    let (program, command, parameters) = evaluated(&now.uninstall)?;
     // Some uninstallers count on starting in their own folder.
-    let folder = listed
+    let folder = now
         .location
         .clone()
         .filter(|location| location.is_dir())
@@ -39,7 +39,7 @@ pub fn start_uninstaller(listed: &Installed) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("its uninstaller has no folder to start in"))?;
     match created(&program, &command, &folder) {
         Err(error) if error.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED as i32) => {
-            if listed.registry.scope == Scope::User {
+            if now.registry.scope == Scope::User {
                 return Err(io::Error::other(
                     "it asks for an administrator, which an app of yours shouldn't; start it from Windows Settings if you trust it",
                 ));
@@ -49,7 +49,12 @@ pub fn start_uninstaller(listed: &Installed) -> io::Result<()> {
                     "it asks for an administrator, yet isn't kept where only administrators can change it; start it from Windows Settings if you trust it",
                 ));
             }
-            elevated(&program, &parameters, &folder)
+            // As an administrator it starts only in its own protected folder,
+            // where no one else can leave a library for it to load.
+            let own = program
+                .parent()
+                .ok_or_else(|| io::Error::other("its uninstaller has no folder to start in"))?;
+            elevated(&program, &parameters, own)
         }
         started => started,
     }
