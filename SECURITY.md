@@ -48,10 +48,11 @@ It can end processes and delete files, so both go through checks first:
 - On Windows the cleaner can't read what files a program has open, as it can on macOS. It reads each of
   your programs' working folder and where it runs from, and takes a cache to be in use while the tool
   it belongs to runs: Cargo's while `cargo` or `rustc` does, Gradle's while a Gradle daemon does.
-  Programs run by Node, such as npm, can't be told apart by name. Windows itself won't delete a file
-  a program opened without letting others delete it, so removing a folder stops there and reports the
-  folder as failed, with whatever was removed before it gone. A working folder is read only on x64
-  Windows; elsewhere only where a program runs from is known.
+  Programs run by Node, such as npm, can't be told apart by name. Windows itself won't delete a file a
+  program opened without letting others delete it, so removing a folder stops there and reports the
+  folder as failed, with whatever was removed before it gone. A large file a program has open can't be
+  told to be in use either; moving it to the Recycle Bin then fails, or the program reads on from the
+  bin. A working folder is read only on x64 Windows; elsewhere only where a program runs from is known.
 - Command lines are shown with likely secrets hidden: the value of every `NAME=value` word; the value
   of a flag or header whose name mentions a credential, such as a token, secret, password, auth, cookie,
   or API or access key; a URL's user info, and query or fragment values under such names or named
