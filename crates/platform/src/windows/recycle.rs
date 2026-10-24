@@ -1,7 +1,9 @@
 //! The Recycle Bin, through the shell, so that File Explorer can put an
 //! item back. The shell deletes for good what the bin can't take, for its
-//! size or because the drive keeps no bin; it is stopped before it does,
-//! and the item stays where it was.
+//! size or because the drive keeps no bin. What it says it won't recycle is
+//! stopped before anything goes, and a file larger than the bin isn't
+//! handed to it, as for one of those it says it will recycle the file and
+//! then deletes it; either stays where it was.
 
 use std::cell::Cell;
 use std::ffi::OsStr;
@@ -9,6 +11,7 @@ use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Component, Path, PathBuf, Prefix};
+use std::sync::{Mutex, PoisonError};
 
 use windows::Win32::Foundation::E_ABORT;
 use windows::Win32::System::Com::{
@@ -21,16 +24,26 @@ use windows::Win32::UI::Shell::{
     SHCreateItemFromParsingName, TSF_DELETE_RECYCLE_IF_POSSIBLE,
 };
 use windows_core::{ComObject, HRESULT, PCWSTR, Ref, implement};
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, OPEN_EXISTING, VOLUME_NAME_DOS,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetFileInformationByHandle, GetFinalPathNameByHandleW,
+    GetVolumeNameForVolumeMountPointW, OPEN_EXISTING, VOLUME_NAME_DOS,
 };
+use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 
 /// The folder at the root of each drive that holds its Recycle Bin.
 const BIN: &str = "$Recycle.Bin";
+/// Where this user's settings for each drive's Recycle Bin are, by volume,
+/// as Recycle Bin Properties writes them.
+const SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume";
+const MIB: u64 = 1024 * 1024;
+/// The least room each drive's Recycle Bin was found to have since this
+/// program started, by drive letter: the shell reads its settings once, so
+/// a bin made larger since may still be the smaller one to it.
+static ROOM: Mutex<[Option<u64>; 26]> = Mutex::new([None; 26]);
 
 /// Moves the file or folder at `path`, on a drive, to that drive's Recycle
 /// Bin, and says where it is there. A link is refused rather than moved.
@@ -45,11 +58,17 @@ pub(crate) fn trash(path: &Path) -> io::Result<PathBuf> {
     // Held throughout, so that afterwards the kernel can say where this very
     // item went, whatever the shell made of the path.
     let item = open(&wide)?;
-    if attributes(&item)? & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+    let information = information(&item)?;
+    if information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "a link isn't moved to the Recycle Bin",
         ));
+    }
+    let folder = information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    let bytes = u64::from(information.nFileSizeHigh) << 32 | u64::from(information.nFileSizeLow);
+    if !folder && bytes > room(drive)? {
+        return Err(left_out());
     }
     // The shell needs COM set up its way on the thread it runs on, and the
     // thread calling may be one that is lent out with COM set up otherwise.
@@ -85,9 +104,7 @@ fn recycle(path: &[u16]) -> io::Result<()> {
             .and_then(|()| operation.GetAnyOperationsAborted())
     };
     if sink.refused.get() {
-        return Err(io::Error::other(
-            "it is too large for the Recycle Bin, or the drive keeps none, so it was left where it was",
-        ));
+        return Err(left_out());
     }
     if sink.destroyed.get() {
         return Err(io::Error::other(
@@ -100,6 +117,103 @@ fn recycle(path: &[u16]) -> io::Result<()> {
         )),
         Ok(_) => Ok(()),
         Err(error) => Err(error.into()),
+    }
+}
+
+fn left_out() -> io::Error {
+    io::Error::other(
+        "it is too large for the Recycle Bin, or the drive keeps none, so it was left where it was",
+    )
+}
+
+/// The largest file the Recycle Bin of `drive` takes, by this user's
+/// settings for it, or by the least it was found to take before.
+fn room(drive: u8) -> io::Result<u64> {
+    let root = format!("{}:\\", char::from(drive));
+    let key = format!(r"{SETTINGS}\{}", volume_of(&root)?);
+    // The shell says it won't recycle anything here, which `Recycling` stops.
+    if setting(&key, "NukeOnDelete")? == Some(1) {
+        return Ok(0);
+    }
+    let now = match setting(&key, "MaxCapacity")? {
+        Some(megabytes) => u64::from(megabytes) * MIB,
+        None => default_room(total_of(&root)?),
+    };
+    let mut rooms = ROOM.lock().unwrap_or_else(PoisonError::into_inner);
+    let least = &mut rooms[usize::from(drive.to_ascii_uppercase() - b'A')];
+    let room = least.map_or(now, |least| least.min(now));
+    *least = Some(room);
+    Ok(room)
+}
+
+/// How large the Recycle Bin of a drive with `total` bytes for this user is
+/// where the user never set its size: a tenth of the first 40 GB and a
+/// twentieth of the rest, in whole megabytes.
+fn default_room(total: u64) -> u64 {
+    const FIRST: u64 = 40 * 1024 * MIB;
+    let bytes = total.min(FIRST) / 10 + total.saturating_sub(FIRST) / 20;
+    bytes / MIB * MIB
+}
+
+/// The `{GUID}` naming the volume at `root`, `X:\`.
+fn volume_of(root: &str) -> io::Result<String> {
+    let root: Vec<u16> = root.encode_utf16().chain([0]).collect();
+    let mut name = [0u16; 64];
+    // SAFETY: the root ends in a nul and the buffer holds as many units as said.
+    if unsafe {
+        GetVolumeNameForVolumeMountPointW(root.as_ptr(), name.as_mut_ptr(), name.len() as u32)
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let name = String::from_utf16_lossy(&name);
+    name.find('{')
+        .zip(name.find('}'))
+        .map(|(start, end)| name[start..=end].to_owned())
+        .ok_or_else(|| io::Error::other("the drive's volume has no GUID"))
+}
+
+/// How many bytes the drive at `root` holds for this user, quotas counted.
+fn total_of(root: &str) -> io::Result<u64> {
+    let root: Vec<u16> = root.encode_utf16().chain([0]).collect();
+    let mut total = 0u64;
+    // SAFETY: the root ends in a nul; what isn't asked for is null.
+    if unsafe {
+        GetDiskFreeSpaceExW(
+            root.as_ptr(),
+            std::ptr::null_mut(),
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(total)
+}
+
+/// The number `name` under `key` in this user's settings, if it is there.
+fn setting(key: &str, name: &str) -> io::Result<Option<u32>> {
+    let key: Vec<u16> = key.encode_utf16().chain([0]).collect();
+    let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
+    let mut value = 0u32;
+    let mut size = 4u32;
+    // SAFETY: the key and name end in a nul; `value` has room for the DWORD asked for.
+    let read = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &mut size,
+        )
+    };
+    match read {
+        ERROR_SUCCESS => Ok(Some(value)),
+        ERROR_FILE_NOT_FOUND => Ok(None),
+        error => Err(io::Error::from_raw_os_error(error as i32)),
     }
 }
 
@@ -302,13 +416,13 @@ fn open(path: &[u16]) -> io::Result<OwnedHandle> {
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
-fn attributes(item: &OwnedHandle) -> io::Result<u32> {
+fn information(item: &OwnedHandle) -> io::Result<BY_HANDLE_FILE_INFORMATION> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is open and `information` is ours to fill.
     if unsafe { GetFileInformationByHandle(item.as_raw_handle(), &mut information) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(information.dwFileAttributes)
+    Ok(information)
 }
 
 /// Where the item is now, as the kernel names it, with `\\?\` in front.
@@ -339,7 +453,15 @@ fn final_path(item: &OwnedHandle) -> io::Result<PathBuf> {
 mod tests {
     use std::path::Path;
 
-    use super::{drive_of, in_bin};
+    use super::{MIB, default_room, drive_of, in_bin};
+
+    #[test]
+    fn sizes_a_recycle_bin_never_given_a_size_as_windows_does() {
+        // As a 325 GB drive's bin was found to be, with no size set.
+        assert_eq!(default_room(348_915_757_056), 18_685 * MIB);
+        assert_eq!(default_room(10 * 1024 * MIB), 1024 * MIB);
+        assert_eq!(default_room(0), 0);
+    }
 
     #[test]
     fn takes_only_a_path_on_a_drive() {
