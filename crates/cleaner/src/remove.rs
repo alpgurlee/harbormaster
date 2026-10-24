@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::walk::{self, Dir, Item};
-use crate::{Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, using};
+use crate::{
+    Cleaned, Finding, Group, Identity, Kind, Outcome, Reach, Removal, Usage, Why, using, within,
+};
 
 /// Folders deeper than this aren't emptied; nothing measured goes deeper.
 const DEEPEST: usize = 64;
@@ -254,14 +256,14 @@ fn trashed(
     trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
 ) -> io::Result<Outcome> {
     let before = now()?;
-    if !before.starts_with(at) {
+    if !within(&before, at) {
         return Ok(refused(Why::OutsideHome));
     }
-    if before != chosen {
+    if !same(&before, chosen) {
         return Ok(refused(Why::Changed));
     }
     let landed = trash(&before)?;
-    if now()? != landed {
+    if !same(&now()?, &landed) {
         return Ok(Outcome::Failed {
             why: format!(
                 "the Trash took {} instead, which the scan never saw",
@@ -270,6 +272,13 @@ fn trashed(
         });
     }
     Ok(Outcome::Trashed)
+}
+
+/// Whether `a` and `b` name the same place, with names compared as the
+/// disk compares them: on Windows, a tool may spell a folder in another
+/// case than its documentation does.
+fn same(a: &Path, b: &Path) -> bool {
+    within(a, b) && within(b, a)
 }
 
 #[cfg(test)]

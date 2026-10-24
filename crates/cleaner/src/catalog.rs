@@ -164,8 +164,8 @@ const PLACES: &[Place] = &[
     },
 ];
 
-/// Only what each tool downloads or builds for itself. What can't be had
-/// again, such as Maven's installed jars, waits for the Recycle Bin; apps'
+/// What each tool downloads or builds for itself, and what Maven and NuGet
+/// keep that may not be had again, which goes to the Recycle Bin. Apps'
 /// caches wait for a way to tell the app is closed, as Windows won't remove
 /// what an app has open.
 #[cfg(windows)]
@@ -227,7 +227,18 @@ const PLACES: &[Place] = &[
         r"AppData\Local\deno\gen",
     )
     .used_by(DENO),
-    // What NuGet fetched over HTTP; the packages builds use stay.
+    // Jars `mvn install` put here can't be downloaded again; never .m2 itself, which holds settings.
+    Place {
+        kind: Kind::Personal,
+        ..whole(Group::Packages, "Maven", r".m2\repository")
+    },
+    // Local .NET tools live here too, and builds that skip restoring need what it holds.
+    Place {
+        kind: Kind::Personal,
+        ..whole(Group::Packages, "NuGet", r".nuget\packages")
+    }
+    .used_by(NUGET),
+    // What NuGet fetched over HTTP.
     whole(
         Group::Packages,
         "NuGet downloads",

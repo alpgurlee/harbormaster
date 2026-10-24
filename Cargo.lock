@@ -1577,6 +1577,7 @@ dependencies = [
 name = "harbormaster-cleaner"
 version = "0.1.0"
 dependencies = [
+ "harbormaster-platform",
  "libc",
  "serde",
  "tempfile",

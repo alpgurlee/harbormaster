@@ -2,13 +2,14 @@
 
 mod common;
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::SystemTime;
 
 use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
-    Finding, Group, Outcome, Survey, Usage, Why, remove, scan, usual_roots,
+    Cleaned, Finding, Group, Kind, Outcome, Survey, Usage, Why, remove, scan, usual_roots,
 };
 
 fn scanned(home: &Path, roots: &[PathBuf]) -> Vec<Finding> {
@@ -149,4 +150,70 @@ fn takes_a_cache_to_be_in_use_while_its_tool_runs() {
             .join(r".cargo\registry\cache\index\a.crate")
             .exists()
     );
+}
+
+/// Removes `finding` from `home` with nothing in use, `trash` standing in
+/// for the Recycle Bin.
+fn removed(
+    home: &Path,
+    finding: &Finding,
+    trash: &dyn Fn(&Path) -> io::Result<PathBuf>,
+) -> Cleaned {
+    remove(
+        &reach(home),
+        std::slice::from_ref(finding),
+        &|| Ok(Usage::default()),
+        trash,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .expect("removal should run")
+}
+
+#[test]
+fn moves_what_maven_installed_to_the_recycle_bin_and_leaves_its_settings() {
+    let machine = machine();
+    let repository = machine.home.join(r".m2\repository");
+    write(
+        &repository.join(r"com\shop\core\1.0\core-1.0.jar"),
+        &vec![1; 2 * MIB],
+    );
+    write(&machine.home.join(r".m2\settings.xml"), b"<settings/>");
+
+    let findings = scanned(&machine.home, &[]);
+    let maven = named(&findings, "Maven").expect("Maven's repository");
+    assert_eq!(
+        (maven.kind, maven.picked, maven.emptied),
+        (Kind::Personal, false, false)
+    );
+    let cleaned = removed(&machine.home, maven, &|path| {
+        harbormaster_platform::trash(path).map_err(io::Error::other)
+    });
+
+    assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
+    assert!(!repository.exists());
+    assert!(machine.home.join(r".m2\settings.xml").exists());
+}
+
+#[test]
+fn moves_a_personal_place_the_disk_spells_in_other_case_than_the_catalog() {
+    let machine = machine();
+    let packages = machine.home.join(r".NuGet\Packages");
+    write(
+        &packages.join(r"newtonsoft.json\13.0.3\a.nupkg"),
+        &vec![1; 2 * MIB],
+    );
+    let bin = machine.home.join("bin");
+    std::fs::create_dir(&bin).expect("a stand-in for the Recycle Bin");
+
+    let findings = scanned(&machine.home, &[]);
+    let nuget = named(&findings, "NuGet").expect("NuGet's packages");
+    let cleaned = removed(&machine.home, nuget, &|path| {
+        let to = bin.join("$R0001");
+        std::fs::rename(path, &to)?;
+        Ok(to)
+    });
+
+    assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
+    assert!(bin.join(r"$R0001\newtonsoft.json\13.0.3\a.nupkg").exists());
 }
