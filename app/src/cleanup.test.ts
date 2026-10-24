@@ -86,8 +86,19 @@ describe("the cleaner's choices", () => {
       deleted: { count: 2, bytes: 2 * GB },
       trashed: { count: 1, bytes: GB },
       emptied: true,
+      temporary: false,
     });
     expect(plan(findings, new Set()).emptied).toBe(false);
+  });
+
+  it("tells what goes of the temporary files apart from what tools make again", () => {
+    const temp = finding("C:\\Users\\dev\\AppData\\Local\\Temp", { group: "temp" });
+
+    const chosen = plan([npm, temp], new Set([npm.path, temp.path]));
+
+    expect(chosen.deleted).toEqual({ count: 1, bytes: GB });
+    expect(chosen.temporary).toBe(true);
+    expect(chosen.count).toBe(2);
   });
 });
 

@@ -821,6 +821,7 @@ function Confirm({ plan, onCancel, onConfirm }: { plan: Plan; onCancel: () => vo
           {plan.deleted.count > 0 ? <li>{i18n.plural("confirmDeleted", plan.deleted.count)}</li> : null}
           {plan.trashed.count > 0 ? <li>{i18n.plural(bin.confirm, plan.trashed.count)}</li> : null}
           {plan.emptied ? <li>{i18n.t(bin.emptied)}</li> : null}
+          {plan.temporary ? <li>{i18n.t("confirmTemporary")}</li> : null}
         </ul>
         <p className={sheet.note}>{i18n.t("confirmChecked")}</p>
         <div className={sheet.buttons}>

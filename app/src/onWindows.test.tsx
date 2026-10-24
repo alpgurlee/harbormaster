@@ -486,13 +486,16 @@ describe("the cleaner on Windows", () => {
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clean up" }));
+    const sheet = within(screen.getByRole("dialog"));
+    expect(sheet.getByText("What apps left in the temporary files a week or more ago is deleted for good.")).toBeTruthy();
+    expect(sheet.queryByText(/its tool makes it again/)).toBeNull();
+    fireEvent.click(sheet.getByRole("button", { name: "Clean up" }));
     act(() => driver.runs[0]({ kind: "removed", path: temp.path, outcome: "partly", left: 3 }));
     act(() =>
       driver.runs[0]({ kind: "done", removals: [], freedBytes: 900 * 1024 ** 2, token: 9, findings: [], scanned: true, hunted: false, appsListed: false }),
     );
 
-    expect(screen.getByText("deleted, all but 3 items, which programs hold")).toBeTruthy();
+    expect(screen.getByText("deleted, all but 3 of its items, which were in use or changed meanwhile")).toBeTruthy();
     expect(screen.getByTestId("hero").textContent).toBe("900 MB freed1 item cleaned up");
   });
 });

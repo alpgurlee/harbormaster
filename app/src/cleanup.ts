@@ -60,6 +60,8 @@ export interface Plan {
   trashed: { count: number; bytes: number };
   /** The Trash itself is emptied, which is for good. */
   emptied: boolean;
+  /** What apps left in the temporary files goes, for good and not to be made again. */
+  temporary: boolean;
 }
 
 /** Something in use can't be chosen; the window says by what. */
@@ -137,7 +139,7 @@ export function stillChosen(chosen: Set<string>, findings: Finding[]): Set<strin
 
 export function plan(findings: Finding[], chosen: Set<string>): Plan {
   const picks = findings.filter((finding) => chosen.has(finding.path));
-  const deleted = picks.filter((finding) => finding.kind === "rebuildable");
+  const deleted = picks.filter((finding) => finding.kind === "rebuildable" && finding.group !== "temp");
   const trashed = picks.filter((finding) => finding.kind === "personal");
   return {
     count: picks.length,
@@ -145,6 +147,7 @@ export function plan(findings: Finding[], chosen: Set<string>): Plan {
     deleted: { count: deleted.length, bytes: sum(deleted) },
     trashed: { count: trashed.length, bytes: sum(trashed) },
     emptied: picks.some((finding) => finding.kind === "discarded"),
+    temporary: picks.some((finding) => finding.group === "temp"),
   };
 }
 

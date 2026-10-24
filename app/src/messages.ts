@@ -171,6 +171,7 @@ export interface Messages {
   confirmTrashed: Plural;
   confirmRecycled: Plural;
   confirmEmptied: string;
+  confirmTemporary: string;
   confirmEmptiedRecycleBin: string;
   confirmChecked: string;
   removing: string;
@@ -467,6 +468,7 @@ export const en: Messages = {
     other: "{count} items go to the Recycle Bin, where you can restore them.",
   },
   confirmEmptied: "The Trash is emptied for good.",
+  confirmTemporary: "What apps left in the temporary files a week or more ago is deleted for good.",
   confirmEmptiedRecycleBin: "The Recycle Bin is emptied for good.",
   confirmChecked: "Each item is checked again right before it goes; anything in use by then is left alone.",
   removing: "Cleaning up… {done} of {total}",
@@ -481,7 +483,10 @@ export const en: Messages = {
   leftItems: { one: "{count} not cleaned up", other: "{count} not cleaned up" },
   outcomeDeleted: "deleted",
   outcomeTrashed: "moved to the Trash",
-  outcomePartly: { one: "deleted, all but 1 item, which a program holds", other: "deleted, all but {count} items, which programs hold" },
+  outcomePartly: {
+    one: "deleted, all but 1 of its items, which was in use or changed meanwhile",
+    other: "deleted, all but {count} of its items, which were in use or changed meanwhile",
+  },
   outcomeRecycled: "moved to the Recycle Bin",
   outcomeLeft: "left alone: {why}",
   outcomeFailedWith: "failed: {why}",
@@ -768,6 +773,7 @@ export const tr: Messages = {
     other: "{count} öğe Geri Dönüşüm Kutusu'na gider; oradan geri yüklenebilir.",
   },
   confirmEmptied: "Çöp Sepeti kalıcı olarak boşaltılır.",
+  confirmTemporary: "Geçici dosyalarda bir haftadan uzun süredir duranlar kalıcı olarak silinir.",
   confirmEmptiedRecycleBin: "Geri Dönüşüm Kutusu kalıcı olarak boşaltılır.",
   confirmChecked: "Her öğe gitmeden hemen önce yeniden denetlenir; o an kullanımda olan bırakılır.",
   removing: "Temizleniyor… {done}/{total}",
@@ -782,7 +788,10 @@ export const tr: Messages = {
   leftItems: { one: "{count} öğe temizlenmedi", other: "{count} öğe temizlenmedi" },
   outcomeDeleted: "silindi",
   outcomeTrashed: "Çöp Sepeti'ne taşındı",
-  outcomePartly: { one: "silindi; bir programın tuttuğu 1 öğe kaldı", other: "silindi; programların tuttuğu {count} öğe kaldı" },
+  outcomePartly: {
+    one: "silindi; kullanımda olan ya da bu arada değişen 1 öğesi kaldı",
+    other: "silindi; kullanımda olan ya da bu arada değişen {count} öğesi kaldı",
+  },
   outcomeRecycled: "Geri Dönüşüm Kutusu'na taşındı",
   outcomeLeft: "bırakıldı: {why}",
   outcomeFailedWith: "başarısız: {why}",
