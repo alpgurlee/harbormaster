@@ -18,7 +18,7 @@ export const closesWindows = platform === "windows";
 export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer", "system", "large"] : ["developer", "system", "large", "apps"];
 
 /** Whether the cleaner maps where the room in the home folder goes. */
-export const mapsHome = platform === "mac";
+export const mapsHome = true;
 
 /** What shows a file where it is. */
 export const revealsIn = platform === "windows" ? "revealInExplorer" : "revealInFinder";

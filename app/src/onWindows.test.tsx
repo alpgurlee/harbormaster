@@ -16,7 +16,7 @@ vi.mock("./platform", () => ({
   stopsAtOnce: true,
   closesWindows: true,
   cleanerSections: ["developer", "system", "large"],
-  mapsHome: false,
+  mapsHome: true,
   revealsIn: "revealInExplorer",
   bin: {
     goes: "goesToRecycleBin",
@@ -342,7 +342,7 @@ describe("the cleaner on Windows", () => {
     );
   }
 
-  it("offers what developer tools and apps leave and large files, and no map", async () => {
+  it("offers what developer tools and apps leave, large files and the space map", async () => {
     const driver = cleaner();
     await act(async () => {});
 
@@ -352,6 +352,7 @@ describe("the cleaner on Windows", () => {
       "Developer",
       "Leftovers",
       "Large files",
+      "Space map",
     ]);
     expect(
       screen.getByText(
@@ -497,5 +498,16 @@ describe("the cleaner on Windows", () => {
 
     expect(screen.getByText("deleted, all but 3 of its items, which were in use or changed meanwhile")).toBeTruthy();
     expect(screen.getByTestId("hero").textContent).toBe("900 MB freed1 item cleaned up");
+  });
+
+  it("maps the whole home folder, as Windows asks nothing before it is read", async () => {
+    cleaner();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Space map/ }));
+
+    expect(
+      screen.getByText("Shows where the room in your home folder goes, AppData and hidden folders too. Nothing is moved or deleted."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Also look in other apps' data" })).toBeNull();
   });
 });

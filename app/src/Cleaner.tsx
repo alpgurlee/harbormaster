@@ -622,16 +622,21 @@ function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMa
           {mapping.refusal === undefined ? null : <p className={styles.refused}>{refusalText(mapping.refusal, i18n)}</p>}
           <Start
             disk={disk}
-            hint={i18n.t(working ? "waitForCleaning" : "mapHint")}
+            hint={i18n.t(working ? "waitForCleaning" : platform === "windows" ? "mapHintWindows" : "mapHint")}
             start={i18n.t("mapStart")}
             disabled={working}
             onStart={onMap}
           >
-            <label className={styles.others}>
-              <input type="checkbox" checked={others} onChange={(event) => onOthers(event.target.checked)} />
-              {i18n.t("mapOthers")}
-            </label>
-            {others ? <p className={styles.hint}>{i18n.t("mapOthersHint")}</p> : null}
+            {/* Only macOS asks before other apps' data is read; Windows maps it all. */}
+            {platform === "windows" ? null : (
+              <>
+                <label className={styles.others}>
+                  <input type="checkbox" checked={others} onChange={(event) => onOthers(event.target.checked)} />
+                  {i18n.t("mapOthers")}
+                </label>
+                {others ? <p className={styles.hint}>{i18n.t("mapOthersHint")}</p> : null}
+              </>
+            )}
           </Start>
         </>
       );

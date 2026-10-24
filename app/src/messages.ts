@@ -229,6 +229,7 @@ export interface Messages {
   moduleMap: string;
   mapStart: string;
   mapHint: string;
+  mapHintWindows: string;
   mapOthers: string;
   mapOthersHint: string;
   mapLooking: string;
@@ -533,6 +534,7 @@ export const en: Messages = {
   mapStart: "Map",
   mapHint:
     "Shows where the room in your home folder goes, the Library and hidden folders too. Nothing is moved or deleted. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
+  mapHintWindows: "Shows where the room in your home folder goes, AppData and hidden folders too. Nothing is moved or deleted.",
   mapOthers: "Also look in other apps' data",
   mapOthersHint: "macOS asks before Harbormaster can look there.",
   mapLooking: "Mapping your home folder…",
@@ -838,6 +840,7 @@ export const tr: Messages = {
   mapStart: "Haritala",
   mapHint:
     "Ana klasöründeki alanın nereye gittiğini, Library ve gizli klasörler dahil gösterir. Hiçbir şey taşınmaz ya da silinmez. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
+  mapHintWindows: "Ana klasöründeki alanın nereye gittiğini, AppData ve gizli klasörler dahil gösterir. Hiçbir şey taşınmaz ya da silinmez.",
   mapOthers: "Diğer uygulamaların verilerine de bak",
   mapOthersHint: "macOS oraya bakılmadan önce izin ister.",
   mapLooking: "Ana klasörün haritalanıyor…",
