@@ -144,11 +144,12 @@ to `lsof` or `ps`. The scanning is Rust, and the windows are [Tauri](https://tau
 
 Built and tested on macOS 27 with Apple silicon. Windows 11 has an early preview: the panel, stopping a
 server and closing apps from it, the cleaner's developer section (build outputs and the caches developer
-tools keep), and the command line's `ls`, `why` and `clean` work there. Large files, apps, the space map
-and the Recycle Bin are macOS's alone for now. Windows has no request to quit that every server heeds,
-so a stop there is a force quit: once you confirm, the server's processes are ended at once, without a
-chance to clean up. Closing an app asks its windows to close, as their close buttons do; whatever stays
-open is ended only if you ask again, after seeing exactly which processes that ends.
+tools keep, with what may be yours to keep going to the Recycle Bin), and the command line's `ls`, `why`
+and `clean` work there. Large files, apps, app caches, the space map and emptying the Recycle Bin aren't
+on Windows yet. Windows has no request to quit that every server heeds, so a stop there is a force quit:
+once you confirm, the server's processes are ended at once, without a chance to clean up. Closing an app
+asks its windows to close, as their close buttons do; whatever stays open is ended only if you ask again,
+after seeing exactly which processes that ends.
 Each change to the code on `main` leaves an unsigned Windows installer in the
 [Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs.
 
