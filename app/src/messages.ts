@@ -144,8 +144,10 @@ export interface Messages {
   aboutLogs: string;
   aboutTrash: string;
   aboutVideos: string;
+  aboutVideosWindows: string;
   aboutArchives: string;
   aboutInstallers: string;
+  aboutInstallersWindows: string;
   aboutAudio: string;
   aboutImages: string;
   aboutDocuments: string;
@@ -201,6 +203,7 @@ export interface Messages {
   scanHint: string;
   scanHintWindows: string;
   huntHint: string;
+  huntHintWindows: string;
   huntLooking: string;
   huntMeasured: string;
   noLargeFiles: string;
@@ -428,8 +431,10 @@ export const en: Messages = {
   aboutLogs: "What apps wrote down about their past runs.",
   aboutTrash: "What you threw away. Emptying it is for good.",
   aboutVideos: "Films and screen recordings. What you choose goes to the Trash, where you can put it back.",
+  aboutVideosWindows: "Films and screen recordings. What you choose goes to the Recycle Bin, where you can restore it.",
   aboutArchives: "Archives and disk images, often left behind once something was unpacked or installed.",
   aboutInstallers: "Installers and app packages, for this Mac or for phones and other systems.",
+  aboutInstallersWindows: "Installers and app packages, for this PC or for phones and other systems.",
   aboutAudio: "Recordings and music files.",
   aboutImages: "Large pictures, such as camera raw files and layered designs.",
   aboutDocuments: "Large documents, presentations and spreadsheets.",
@@ -489,6 +494,8 @@ export const en: Messages = {
   scanHintWindows: "Looks for build outputs and the caches developer tools keep. Nothing goes without your say.",
   huntHint:
     "Looks through your folders outside the Library for files over 50 MB. None is chosen for you, and what you choose goes to the Trash. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
+  huntHintWindows:
+    "Looks through your folders outside AppData for files over 50 MB. None is chosen for you, and what you choose goes to the Recycle Bin. Files OneDrive keeps in the cloud, and those File Explorer hides, are left out.",
   huntLooking: "Looking through your folders…",
   huntMeasured: "Looked through {done} of {total} folders",
   noLargeFiles: "No files over 50 MB were found in the folders looked in.",
@@ -718,8 +725,10 @@ export const tr: Messages = {
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
   aboutTrash: "Attıkların. Boşaltmak kalıcıdır.",
   aboutVideos: "Filmler ve ekran kayıtları. Seçtiklerin Çöp Sepeti'ne gider; oradan geri alabilirsin.",
+  aboutVideosWindows: "Filmler ve ekran kayıtları. Seçtiklerin Geri Dönüşüm Kutusu'na gider; oradan geri yükleyebilirsin.",
   aboutArchives: "Arşivler ve disk görüntüleri; çoğu bir şey açıldıktan ya da kurulduktan sonra geride kalır.",
   aboutInstallers: "Bu Mac ya da telefonlar ve başka sistemler için yükleyiciler ve uygulama paketleri.",
+  aboutInstallersWindows: "Bu bilgisayar ya da telefonlar ve başka sistemler için yükleyiciler ve uygulama paketleri.",
   aboutAudio: "Kayıtlar ve müzik dosyaları.",
   aboutImages: "Kamera RAW dosyaları ve katmanlı tasarımlar gibi büyük görseller.",
   aboutDocuments: "Büyük belgeler, sunumlar ve tablolar.",
@@ -779,6 +788,8 @@ export const tr: Messages = {
   scanHintWindows: "Derleme çıktıları ve geliştirici araçlarının önbellekleri aranır. Sen onaylamadan hiçbir şey silinmez.",
   huntHint:
     "Library dışındaki klasörlerinde 50 MB'tan büyük dosyaları arar. Hiçbirini senin yerine seçmez; seçtiklerin Çöp Sepeti'ne gider. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
+  huntHintWindows:
+    "AppData dışındaki klasörlerinde 50 MB'tan büyük dosyaları arar. Hiçbirini senin yerine seçmez; seçtiklerin Geri Dönüşüm Kutusu'na gider. OneDrive'ın bulutta tuttuğu dosyalar ve Dosya Gezgini'nin gizledikleri aranmaz.",
   huntLooking: "Klasörlerin taranıyor…",
   huntMeasured: "{total} klasörden {done} tanesine bakıldı",
   noLargeFiles: "Bakılan klasörlerde 50 MB'tan büyük dosya bulunamadı.",

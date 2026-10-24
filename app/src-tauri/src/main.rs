@@ -81,6 +81,7 @@ fn main() {
         commands::settings_subscribe,
         commands::settings_set,
         actions::clean_scan,
+        actions::clean_hunt,
         actions::clean_run,
         actions::clean_recheck,
         actions::clean_stop,

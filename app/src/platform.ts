@@ -13,10 +13,10 @@ export const stopsAtOnce = platform === "windows";
  * forces it. */
 export const closesWindows = platform === "windows";
 
-/** The cleaner's sections: on Windows only what developer tools leave, for
- * now; large files, apps and the rest wait for the Recycle Bin and for a
- * way to tell that an app is closed. */
-export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer"] : ["developer", "system", "large", "apps"];
+/** The cleaner's sections: on Windows what developer tools leave and large
+ * files, for now; apps and the rest wait for a way to tell that an app is
+ * closed. */
+export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer", "large"] : ["developer", "system", "large", "apps"];
 
 /** Whether the cleaner maps where the room in the home folder goes. */
 export const mapsHome = platform === "mac";

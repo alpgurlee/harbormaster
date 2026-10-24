@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 #[cfg(target_os = "macos")]
-use harbormaster_cleaner::{Area, Chart, Charting, Hunt};
+use harbormaster_cleaner::{Area, Chart, Charting};
 use harbormaster_cleaner::{
-    Cleaned, Finding, Group, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
+    Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
 };
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
@@ -20,7 +20,6 @@ use serde::Serialize;
 use crate::scanning;
 
 /// The least room a file takes to be listed as large: 50 MB, as the window says.
-#[cfg(target_os = "macos")]
 const LARGE_FROM: u64 = 50 * 1024 * 1024;
 
 /// What a scan tells the window as it goes.
@@ -445,7 +444,6 @@ impl Working {
     }
 
     /// Hunts for this user's large files, telling `told` as it goes.
-    #[cfg(target_os = "macos")]
     pub(crate) fn hunt(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
         let cleaning = &self.0;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;

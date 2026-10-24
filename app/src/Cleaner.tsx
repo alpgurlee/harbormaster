@@ -80,7 +80,7 @@ const SECTION_NAMES = {
 /** What each search says before it starts, its buttons, what it says while it looks, and once it has measured some. */
 const HINTS: Record<Search, TextKey> = {
   scan: platform === "windows" ? "scanHintWindows" : "scanHint",
-  hunt: "huntHint",
+  hunt: platform === "windows" ? "huntHintWindows" : "huntHint",
   apps: "appsHint",
 };
 const STARTS: Record<Search, TextKey> = { scan: "scan", hunt: "scan", apps: "appsStart" };

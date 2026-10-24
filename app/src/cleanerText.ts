@@ -1,6 +1,6 @@
 import { largeFile } from "./cleanup";
 import type { TextKey, Translator } from "./i18n";
-import { bin } from "./platform";
+import { bin, platform } from "./platform";
 import type { CleanGroup, CleanRefusal, Finding, Removal, Why } from "./types";
 
 export const NAMES: Record<CleanGroup, TextKey> = {
@@ -27,9 +27,9 @@ export const ABOUT: Record<CleanGroup, TextKey> = {
   apps: "aboutApps",
   logs: "aboutLogs",
   trash: "aboutTrash",
-  videos: "aboutVideos",
+  videos: platform === "windows" ? "aboutVideosWindows" : "aboutVideos",
   archives: "aboutArchives",
-  installers: "aboutInstallers",
+  installers: platform === "windows" ? "aboutInstallersWindows" : "aboutInstallers",
   audio: "aboutAudio",
   images: "aboutImages",
   documents: "aboutDocuments",

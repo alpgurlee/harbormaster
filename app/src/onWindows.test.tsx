@@ -15,7 +15,7 @@ vi.mock("./platform", () => ({
   platform: "windows",
   stopsAtOnce: true,
   closesWindows: true,
-  cleanerSections: ["developer"],
+  cleanerSections: ["developer", "large"],
   mapsHome: false,
   revealsIn: "revealInExplorer",
   bin: {
@@ -286,6 +286,7 @@ describe("the cleaner on Windows", () => {
   function cleaner() {
     const scans: ((event: ScanEvent) => void)[] = [];
     const runs: ((event: RunEvent) => void)[] = [];
+    const hunts: ((event: ScanEvent) => void)[] = [];
     const revealed: string[] = [];
     const nothing = () => Promise.resolve();
     const backend: CleanerBackend = {
@@ -293,7 +294,10 @@ describe("the cleaner on Windows", () => {
         scans.push(onEvent);
         return Promise.resolve();
       },
-      hunt: nothing,
+      hunt: (onEvent) => {
+        hunts.push(onEvent);
+        return Promise.resolve();
+      },
       apps: nothing,
       run: (_token, _paths, onEvent) => {
         runs.push(onEvent);
@@ -317,7 +321,7 @@ describe("the cleaner on Windows", () => {
         <Cleaner backend={backend} now={NOW} />
       </I18nProvider>,
     );
-    return { scans, runs, revealed };
+    return { scans, runs, hunts, revealed };
   }
 
   /** Ends the scan with `findings`, as the app sends them. */
@@ -337,12 +341,12 @@ describe("the cleaner on Windows", () => {
     );
   }
 
-  it("offers only what developer tools leave, and no map", async () => {
+  it("offers what developer tools leave and large files, and no map", async () => {
     const driver = cleaner();
     await act(async () => {});
 
     const sections = within(screen.getByRole("navigation", { name: "Clean up" })).getAllByRole("button");
-    expect(sections.map((button) => button.textContent?.replace(/[\d.]+ GB$/, ""))).toEqual(["Overview", "Developer"]);
+    expect(sections.map((button) => button.textContent?.replace(/[\d.]+ GB$/, ""))).toEqual(["Overview", "Developer", "Large files"]);
     expect(screen.getByText("Looks for build outputs and the caches developer tools keep. Nothing goes without your say.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Scan" }));
@@ -393,5 +397,43 @@ describe("the cleaner on Windows", () => {
     expect(screen.getByTestId("hero").textContent).toBe("1.0 GB moved to the Recycle Bin1 item cleaned up · 0 MB freed so far");
     expect(screen.getByText("The room comes back once the Recycle Bin is emptied.")).toBeTruthy();
     expect(screen.getByText("moved to the Recycle Bin")).toBeTruthy();
+  });
+
+  it("hunts large files outside AppData, for the Recycle Bin", async () => {
+    const film: Finding = {
+      ...npm,
+      group: "videos",
+      kind: "personal",
+      name: "trip.mp4",
+      path: "C:\\Users\\dev\\Videos\\trip.mp4",
+      picked: false,
+      emptied: false,
+      touched: NOW / 1000 - 3 * 86_400,
+    };
+    const driver = cleaner();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Large files/ }));
+    expect(
+      screen.getByText(
+        "Looks through your folders outside AppData for files over 50 MB. None is chosen for you, and what you choose goes to the Recycle Bin. Files OneDrive keeps in the cloud, and those File Explorer hides, are left out.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    act(() =>
+      driver.hunts[0]({
+        kind: "done",
+        token: 4,
+        home: "C:\\Users\\dev",
+        findings: [film],
+        scanned: false,
+        hunted: true,
+        appsListed: false,
+        idleDays: null,
+      }),
+    );
+
+    expect(screen.getByText("Films and screen recordings. What you choose goes to the Recycle Bin, where you can restore it.")).toBeTruthy();
+    expect(screen.getByText("~\\Videos · changed 3 days ago")).toBeTruthy();
   });
 });

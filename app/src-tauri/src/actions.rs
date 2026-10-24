@@ -1,6 +1,6 @@
 //! What the cleaner window may do to this machine: find and remove what
-//! could go. Hunting for large files, mapping the home folder, listing apps
-//! and stopping dev daemons are a Mac's alone for now.
+//! could go. Mapping the home folder, listing apps and stopping dev daemons
+//! are a Mac's alone for now.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -95,7 +95,6 @@ pub(crate) async fn clean_scan(
 }
 
 /// Hunts for this user's large files, telling the window as it goes.
-#[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn clean_hunt(
     channel: Channel<ScanEvent>,
