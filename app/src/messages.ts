@@ -129,6 +129,7 @@ export interface Messages {
   groupApps: string;
   groupLogs: string;
   groupTrash: string;
+  groupTrashWindows: string;
   groupVideos: string;
   groupArchives: string;
   groupInstallers: string;
@@ -142,6 +143,7 @@ export interface Messages {
   aboutXcode: string;
   aboutApps: string;
   aboutLogs: string;
+  aboutLogsWindows: string;
   aboutTrash: string;
   aboutVideos: string;
   aboutVideosWindows: string;
@@ -167,6 +169,7 @@ export interface Messages {
   confirmTrashed: Plural;
   confirmRecycled: Plural;
   confirmEmptied: string;
+  confirmEmptiedRecycleBin: string;
   confirmChecked: string;
   removing: string;
   freed: string;
@@ -413,6 +416,7 @@ export const en: Messages = {
   groupApps: "App caches",
   groupLogs: "Logs",
   groupTrash: "Trash",
+  groupTrashWindows: "Recycle Bin",
   groupVideos: "Videos",
   groupArchives: "Archives",
   groupInstallers: "Installers",
@@ -429,6 +433,7 @@ export const en: Messages = {
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
   aboutLogs: "What apps wrote down about their past runs.",
+  aboutLogsWindows: "What apps left behind when they crashed, kept to find out why. It goes to the Recycle Bin.",
   aboutTrash: "What you threw away. Emptying it is for good.",
   aboutVideos: "Films and screen recordings. What you choose goes to the Trash, where you can put it back.",
   aboutVideosWindows: "Films and screen recordings. What you choose goes to the Recycle Bin, where you can restore it.",
@@ -457,6 +462,7 @@ export const en: Messages = {
     other: "{count} items go to the Recycle Bin, where you can restore them.",
   },
   confirmEmptied: "The Trash is emptied for good.",
+  confirmEmptiedRecycleBin: "The Recycle Bin is emptied for good.",
   confirmChecked: "Each item is checked again right before it goes; anything in use by then is left alone.",
   removing: "Cleaning up… {done} of {total}",
   freed: "{bytes} freed",
@@ -491,7 +497,8 @@ export const en: Messages = {
   diskOf: "free of {total}",
   scan: "Scan",
   scanHint: "Looks for build outputs, package caches, Xcode data, app caches, logs and the Trash. Nothing goes without your say.",
-  scanHintWindows: "Looks for build outputs and the caches developer tools keep. Nothing goes without your say.",
+  scanHintWindows:
+    "Looks for build outputs, the caches developer tools and apps keep, crash dumps and the Recycle Bin. Nothing goes without your say.",
   huntHint:
     "Looks through your folders outside the Library for files over 50 MB. None is chosen for you, and what you choose goes to the Trash. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
   huntHintWindows:
@@ -707,6 +714,7 @@ export const tr: Messages = {
   groupApps: "Uygulama önbellekleri",
   groupLogs: "Kayıtlar",
   groupTrash: "Çöp Sepeti",
+  groupTrashWindows: "Geri Dönüşüm Kutusu",
   groupVideos: "Videolar",
   groupArchives: "Arşivler",
   groupInstallers: "Yükleyiciler",
@@ -723,6 +731,7 @@ export const tr: Messages = {
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
+  aboutLogsWindows: "Uygulamaların çöktüklerinde geride bıraktıkları, nedenini bulmak için tutulan dökümler. Geri Dönüşüm Kutusu'na gider.",
   aboutTrash: "Attıkların. Boşaltmak kalıcıdır.",
   aboutVideos: "Filmler ve ekran kayıtları. Seçtiklerin Çöp Sepeti'ne gider; oradan geri alabilirsin.",
   aboutVideosWindows: "Filmler ve ekran kayıtları. Seçtiklerin Geri Dönüşüm Kutusu'na gider; oradan geri yükleyebilirsin.",
@@ -751,6 +760,7 @@ export const tr: Messages = {
     other: "{count} öğe Geri Dönüşüm Kutusu'na gider; oradan geri yüklenebilir.",
   },
   confirmEmptied: "Çöp Sepeti kalıcı olarak boşaltılır.",
+  confirmEmptiedRecycleBin: "Geri Dönüşüm Kutusu kalıcı olarak boşaltılır.",
   confirmChecked: "Her öğe gitmeden hemen önce yeniden denetlenir; o an kullanımda olan bırakılır.",
   removing: "Temizleniyor… {done}/{total}",
   freed: "{bytes} boşaldı",
@@ -785,7 +795,8 @@ export const tr: Messages = {
   diskOf: "boş · toplam {total}",
   scan: "Tara",
   scanHint: "Derleme çıktıları, paket önbellekleri, Xcode verileri, uygulama önbellekleri, kayıtlar ve Çöp Sepeti aranır. Sen onaylamadan hiçbir şey silinmez.",
-  scanHintWindows: "Derleme çıktıları ve geliştirici araçlarının önbellekleri aranır. Sen onaylamadan hiçbir şey silinmez.",
+  scanHintWindows:
+    "Derleme çıktıları, geliştirici araçlarının ve uygulamaların önbellekleri, çökme dökümleri ve Geri Dönüşüm Kutusu aranır. Sen onaylamadan hiçbir şey silinmez.",
   huntHint:
     "Library dışındaki klasörlerinde 50 MB'tan büyük dosyaları arar. Hiçbirini senin yerine seçmez; seçtiklerin Çöp Sepeti'ne gider. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
   huntHintWindows:

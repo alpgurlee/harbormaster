@@ -15,7 +15,7 @@ vi.mock("./platform", () => ({
   platform: "windows",
   stopsAtOnce: true,
   closesWindows: true,
-  cleanerSections: ["developer", "large"],
+  cleanerSections: ["developer", "system", "large"],
   mapsHome: false,
   revealsIn: "revealInExplorer",
   bin: {
@@ -24,6 +24,7 @@ vi.mock("./platform", () => ({
     moved: "movedToRecycleBin",
     hint: "recycleBinHint",
     outcome: "outcomeRecycled",
+    emptied: "confirmEmptiedRecycleBin",
   },
 }));
 
@@ -341,13 +342,22 @@ describe("the cleaner on Windows", () => {
     );
   }
 
-  it("offers what developer tools leave and large files, and no map", async () => {
+  it("offers what developer tools and apps leave and large files, and no map", async () => {
     const driver = cleaner();
     await act(async () => {});
 
     const sections = within(screen.getByRole("navigation", { name: "Clean up" })).getAllByRole("button");
-    expect(sections.map((button) => button.textContent?.replace(/[\d.]+ GB$/, ""))).toEqual(["Overview", "Developer", "Large files"]);
-    expect(screen.getByText("Looks for build outputs and the caches developer tools keep. Nothing goes without your say.")).toBeTruthy();
+    expect(sections.map((button) => button.textContent?.replace(/[\d.]+ GB$/, ""))).toEqual([
+      "Overview",
+      "Developer",
+      "Leftovers",
+      "Large files",
+    ]);
+    expect(
+      screen.getByText(
+        "Looks for build outputs, the caches developer tools and apps keep, crash dumps and the Recycle Bin. Nothing goes without your say.",
+      ),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Scan" }));
     act(() =>
@@ -435,5 +445,28 @@ describe("the cleaner on Windows", () => {
 
     expect(screen.getByText("Films and screen recordings. What you choose goes to the Recycle Bin, where you can restore it.")).toBeTruthy();
     expect(screen.getByText("~\\Videos · changed 3 days ago")).toBeTruthy();
+  });
+
+  it("empties the Recycle Bin for good, and shows it in File Explorer", async () => {
+    const bin: Finding = {
+      ...npm,
+      group: "trash",
+      kind: "discarded",
+      name: "Recycle Bin",
+      path: "C:\\$Recycle.Bin",
+      picked: false,
+    };
+    const driver = cleaner();
+    await act(async () => {});
+    scanned(driver, [bin]);
+    fireEvent.click(screen.getByRole("button", { name: /^Leftovers/ }));
+
+    expect(screen.getAllByText("Recycle Bin").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Show in File Explorer: Recycle Bin" }));
+    expect(driver.revealed).toEqual([bin.path]);
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Recycle Bin" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+
+    expect(within(screen.getByRole("dialog")).getByText("The Recycle Bin is emptied for good.")).toBeTruthy();
   });
 });

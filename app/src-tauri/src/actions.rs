@@ -205,6 +205,7 @@ pub(crate) fn clean_disk() -> Result<harbormaster_cleaner::Disk, Refusal> {
 }
 
 /// Shows a finding in Finder or File Explorer; only one the scan listed.
+/// The Recycle Bin is opened as File Explorer shows it, not as a folder.
 #[tauri::command]
 pub(crate) fn clean_reveal(
     path: PathBuf,
@@ -214,11 +215,18 @@ pub(crate) fn clean_reveal(
     if !cleaning.lists(&path) {
         return Err(Refusal::Unlisted);
     }
-    app.opener()
-        .reveal_item_in_dir(path)
-        .map_err(|error| Refusal::Failed {
-            message: error.to_string(),
-        })
+    #[cfg(windows)]
+    let shown = if harbormaster_cleaner::is_recycle_bin(&path) {
+        app.opener()
+            .open_path("shell:RecycleBinFolder", None::<&str>)
+    } else {
+        app.opener().reveal_item_in_dir(path)
+    };
+    #[cfg(not(windows))]
+    let shown = app.opener().reveal_item_in_dir(path);
+    shown.map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })
 }
 
 /// Shows a place of the last map in Finder, if it is still what the map found.

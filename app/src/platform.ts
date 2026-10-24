@@ -13,10 +13,9 @@ export const stopsAtOnce = platform === "windows";
  * forces it. */
 export const closesWindows = platform === "windows";
 
-/** The cleaner's sections: on Windows what developer tools leave and large
- * files, for now; apps and the rest wait for a way to tell that an app is
- * closed. */
-export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer", "large"] : ["developer", "system", "large", "apps"];
+/** The cleaner's sections: on Windows all but the user's apps, which wait for
+ * a way to uninstall them there. */
+export const cleanerSections: CleanModule[] = platform === "windows" ? ["developer", "system", "large"] : ["developer", "system", "large", "apps"];
 
 /** Whether the cleaner maps where the room in the home folder goes. */
 export const mapsHome = platform === "mac";
@@ -34,6 +33,7 @@ export const bin =
         moved: "movedToRecycleBin",
         hint: "recycleBinHint",
         outcome: "outcomeRecycled",
+        emptied: "confirmEmptiedRecycleBin",
       } as const)
     : ({
         goes: "goesToTrash",
@@ -41,4 +41,5 @@ export const bin =
         moved: "movedToTrash",
         hint: "trashHint",
         outcome: "outcomeTrashed",
+        emptied: "confirmEmptied",
       } as const);
