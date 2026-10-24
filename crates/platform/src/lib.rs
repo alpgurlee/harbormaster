@@ -24,7 +24,7 @@ pub use self::windows::control::{Ended, Held, hold, watch};
 pub use self::windows::installed::{Installed, Registry, Scope, entry, installed};
 /// Starting an installed program's own uninstaller on Windows.
 #[cfg(windows)]
-pub use self::windows::uninstall::start_uninstaller;
+pub use self::windows::uninstall::{NotStarted, start_uninstaller, uninstaller};
 #[cfg(windows)]
 pub use self::windows::window::has_windows;
 

@@ -3,7 +3,9 @@
 
 use std::process::Command;
 
-use harbormaster_platform::{Registry, Scope, entry, installed, start_uninstaller};
+use harbormaster_platform::{
+    NotStarted, Registry, Scope, entry, installed, start_uninstaller, uninstaller,
+};
 
 const ENTRIES: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall";
 
@@ -90,7 +92,8 @@ const MINE: Registry = Registry {
 #[test]
 fn starts_only_an_uninstaller_its_entry_still_names_and_windows_is_sure_of() {
     let system = std::env::var("SystemRoot").expect("Windows says where it lives");
-    let harmless = format!(r#""{system}\System32\whoami.exe""#);
+    let whoami = format!(r"{system}\System32\whoami.exe");
+    let harmless = format!(r#""{whoami}""#);
     let tool = Entry::made(
         "HarbormasterStart",
         &[
@@ -99,12 +102,24 @@ fn starts_only_an_uninstaller_its_entry_still_names_and_windows_is_sure_of() {
         ],
     );
     let listed = entry(MINE, tool.name()).unwrap().expect("listed");
+    assert_eq!(
+        uninstaller(&listed).map(|program| program.to_string_lossy().to_lowercase()),
+        Some(whoami.to_lowercase())
+    );
 
-    start_uninstaller(&listed).unwrap();
+    start_uninstaller(&listed, None).unwrap();
 
     let mut changed = listed.clone();
     changed.uninstall = format!("{harmless} /other");
-    assert!(start_uninstaller(&changed).is_err());
+    assert!(matches!(
+        start_uninstaller(&changed, None),
+        Err(NotStarted::Changed)
+    ));
+    drop(tool);
+    assert!(matches!(
+        start_uninstaller(&listed, None),
+        Err(NotStarted::Gone)
+    ));
 
     // Unquoted, with spaces: which program it names can't be told.
     let vague = Entry::made(
@@ -119,5 +134,9 @@ fn starts_only_an_uninstaller_its_entry_still_names_and_windows_is_sure_of() {
         ],
     );
     let listed = entry(MINE, vague.name()).unwrap().expect("listed");
-    assert!(start_uninstaller(&listed).is_err());
+    assert_eq!(uninstaller(&listed), None);
+    assert!(matches!(
+        start_uninstaller(&listed, None),
+        Err(NotStarted::Unsure)
+    ));
 }

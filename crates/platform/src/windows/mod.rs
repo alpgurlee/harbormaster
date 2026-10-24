@@ -60,6 +60,28 @@ fn plain(path: PathBuf) -> PathBuf {
     plain
 }
 
+/// COM set up for the shell on this thread, and taken down again.
+pub(crate) struct Apartment;
+
+impl Apartment {
+    pub(crate) fn enter() -> io::Result<Self> {
+        use windows::Win32::System::Com::{
+            COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
+        };
+
+        // SAFETY: no reserved pointer; each success is balanced in `drop`.
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.ok()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        // SAFETY: `enter` succeeded on this thread.
+        unsafe { windows::Win32::System::Com::CoUninitialize() };
+    }
+}
+
 /// Windows has no limit like macOS's on open files to raise.
 pub(crate) fn allow_more_open_files() -> io::Result<u64> {
     Err(io::ErrorKind::Unsupported.into())

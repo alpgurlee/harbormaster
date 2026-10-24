@@ -14,10 +14,7 @@ use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::{Mutex, PoisonError};
 
 use windows::Win32::Foundation::E_ABORT;
-use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
-    CoUninitialize,
-};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
 use windows::Win32::UI::Shell::{
     FOF_ALLOWUNDO, FOF_NO_UI, FOFX_EARLYFAILURE, FOFX_RECYCLEONDELETE, FileOperation,
     IFileOperation, IFileOperationProgressSink, IFileOperationProgressSink_Impl, IShellItem,
@@ -90,7 +87,7 @@ pub(crate) fn trash(path: &Path) -> io::Result<PathBuf> {
 /// Asks the shell to recycle `path`, which ends in a nul, on a thread of
 /// its own.
 fn recycle(path: &[u16]) -> io::Result<()> {
-    let _com = Apartment::enter()?;
+    let _com = super::Apartment::enter()?;
     let sink = ComObject::new(Recycling::default());
     // SAFETY: COM is set up on this thread while `_com` lives, and `path`
     // ends in a nul.
@@ -232,24 +229,6 @@ fn setting(key: &str, name: &str) -> io::Result<Option<u32>> {
         ERROR_SUCCESS => Ok(Some(value)),
         ERROR_FILE_NOT_FOUND => Ok(None),
         error => Err(io::Error::from_raw_os_error(error as i32)),
-    }
-}
-
-/// COM set up for the shell on this thread, and taken down again.
-struct Apartment;
-
-impl Apartment {
-    fn enter() -> io::Result<Self> {
-        // SAFETY: no reserved pointer; each success is balanced in `drop`.
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.ok()?;
-        Ok(Self)
-    }
-}
-
-impl Drop for Apartment {
-    fn drop(&mut self) {
-        // SAFETY: `enter` succeeded on this thread.
-        unsafe { CoUninitialize() };
     }
 }
 
