@@ -1,4 +1,5 @@
 pub mod control;
+pub mod installed;
 mod jobs;
 mod language;
 mod memory;

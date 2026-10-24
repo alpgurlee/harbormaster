@@ -19,6 +19,9 @@ use self::windows as sys;
 /// Ending a process, which Windows does through a held handle.
 #[cfg(windows)]
 pub use self::windows::control::{Ended, Held, hold, watch};
+/// The programs installed on Windows, as their uninstall entries list them.
+#[cfg(windows)]
+pub use self::windows::installed::{Installed, Registry, Scope, entry, installed};
 #[cfg(windows)]
 pub use self::windows::window::has_windows;
 
