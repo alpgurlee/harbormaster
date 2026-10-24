@@ -55,8 +55,11 @@ It can end processes and delete files, so both go through checks first:
   Windows itself won't delete a file a program opened without letting others delete it, so removing a
   folder stops there and reports the folder as failed, with whatever was removed before it gone. A
   large file a program has open can't be told to be in use either; moving it to the Recycle Bin then
-  fails, or the program reads on from the bin. A working folder is read only on x64 Windows; elsewhere
-  only where a program runs from is known.
+  fails, or the program reads on from the bin. Of the temporary files, only entries that nothing in has
+  been made, written or changed in for a week go, each looked at through its own handle, and none a
+  process works in or runs from, nor NuGet's lock folder; one Windows won't let go stays, and the
+  removal says how many did. A working folder is read only on x64 Windows; elsewhere only where a
+  program runs from is known.
 - Command lines are shown with likely secrets hidden: the value of every `NAME=value` word; the value
   of a flag or header whose name mentions a credential, such as a token, secret, password, auth, cookie,
   or API or access key; a URL's user info, and query or fragment values under such names or named
