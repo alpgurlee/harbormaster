@@ -115,6 +115,8 @@ fn never_looks_in_the_library_hidden_folders_packages_machines_or_caches() {
         &home.join("VirtualBox VMs/Ubuntu/Ubuntu.vdi"),
         &vec![1; 2 * MIB],
     );
+    write(&home.join("Fedora.vmx"), b"config");
+    write(&home.join("Fedora.vmdk"), &vec![1; 2 * MIB]);
 
     assert_eq!(names(&hunted(home, &[])), []);
 }

@@ -301,11 +301,25 @@ fn never_hunts_inside_a_virtual_machine_or_a_device_backup() {
         &vec![1; 2 * MIB],
     );
     write(
-        &home.join(r"Apple\MobileSync\Backup\00008030\ab\ab12cd"),
+        &home.join(r"Apple\mobilesync\Backup\00008030\ab\ab12cd"),
         &vec![1; 2 * MIB],
     );
 
     assert_eq!(hunted(home), []);
+}
+
+#[test]
+fn never_lists_the_disk_of_a_machine_kept_right_in_the_home_folder() {
+    let machine = machine();
+    let home = &machine.home;
+    write(&home.join("Ubuntu.vbox"), b"<VirtualBox/>");
+    write(&home.join("Ubuntu.vdi"), &vec![1; 2 * MIB]);
+    write(&home.join(r"Videos\trip.mp4"), &vec![1; 2 * MIB]);
+
+    let found = hunted(home);
+
+    let names: Vec<_> = found.iter().map(|finding| finding.name.as_str()).collect();
+    assert_eq!(names, ["trip.mp4"]);
 }
 
 #[test]

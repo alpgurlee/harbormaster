@@ -1,7 +1,7 @@
 //! The user's own large files: films, archives, disk images and installers
 //! kept around the home folder, found so the user can decide on each.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -127,15 +127,18 @@ pub(crate) fn hunt(
     // is looked through on its own.
     let mut found = Vec::new();
     let mut places = Vec::new();
-    for (name, stat) in home.entries_while(|| !stop.load(Ordering::Relaxed))? {
-        if passed_over(&name, &stat, device) || is_app_data(&name) {
+    let entries = home.entries_while(|| !stop.load(Ordering::Relaxed))?;
+    // A machine kept right in the home folder keeps its disks there too.
+    let machine = holds_a_machine(&entries);
+    for (name, stat) in entries {
+        if passed_over(&name, &stat, device) || is_named(&name, APP_DATA) {
             continue;
         }
         if walk::is_folder(&stat) {
             if entered(&name) {
                 places.push((name, stat));
             }
-        } else {
+        } else if !machine {
             found.extend(finding(hunt, &home, &name, Path::new(""), &stat));
         }
     }
@@ -191,11 +194,7 @@ fn looked(
     let Ok(entries) = dir.entries_while(|| !stop.load(Ordering::Relaxed)) else {
         return;
     };
-    let machine = entries.iter().any(|(name, stat)| {
-        walk::is_file(stat)
-            && extension(name).is_some_and(|extension| MACHINES.contains(&extension.as_str()))
-    });
-    if machine {
+    if holds_a_machine(&entries) {
         return;
     }
     for (name, stat) in entries {
@@ -235,23 +234,32 @@ fn passed_over(name: &OsStr, stat: &Stat, device: u64) -> bool {
     hidden || walk::is_link(stat) || stat.device != device
 }
 
-/// Whether `name`, in the home folder, is where apps keep their data.
-fn is_app_data(name: &OsStr) -> bool {
+/// Whether `name` is `expected`, compared as the disk compares names: on
+/// Windows, whatever the case.
+fn is_named(name: &OsStr, expected: &str) -> bool {
     #[cfg(windows)]
     {
-        walk::same_name(name, OsStr::new(APP_DATA))
+        walk::same_name(name, OsStr::new(expected))
     }
     #[cfg(not(windows))]
     {
-        name == APP_DATA
+        name == expected
     }
+}
+
+/// Whether the folder listed as `entries` is a virtual machine.
+fn holds_a_machine(entries: &[(OsString, Stat)]) -> bool {
+    entries.iter().any(|(name, stat)| {
+        walk::is_file(stat)
+            && extension(name).is_some_and(|extension| MACHINES.contains(&extension.as_str()))
+    })
 }
 
 /// Whether a folder called `name` is looked into: not a package, nor the
 /// packages a Node project downloaded, nor what an app keeps whole.
 fn entered(name: &OsStr) -> bool {
     let package = extension(name).is_some_and(|extension| PACKAGES.contains(&extension.as_str()));
-    !package && name != "node_modules" && !KEPT_WHOLE.iter().any(|kept| name == *kept)
+    !package && name != "node_modules" && !KEPT_WHOLE.iter().any(|kept| is_named(name, kept))
 }
 
 /// The file `name` in `dir`, which is `folder` from the home folder, listed
