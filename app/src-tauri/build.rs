@@ -19,6 +19,8 @@ fn main() {
         "clean_scan",
         "clean_hunt",
         "clean_apps",
+        "clean_programs",
+        "clean_uninstall",
         "clean_map",
         "clean_run",
         "clean_recheck",

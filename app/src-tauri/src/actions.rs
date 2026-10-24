@@ -1,12 +1,11 @@
 //! What the cleaner window may do to this machine: find and remove what
-//! could go. Listing apps and stopping dev daemons are a Mac's alone for
-//! now.
+//! could go. A Mac lists the user's own apps and stops dev daemons; Windows
+//! lists the installed programs and starts the uninstaller of one.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use harbormaster_cleaner::Finding;
-#[cfg(target_os = "macos")]
 use tauri::Manager;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
@@ -19,6 +18,8 @@ use crate::cleaning::{Cleaning, Refusal, RunEvent, ScanEvent};
 use crate::commands::blocking;
 #[cfg(target_os = "macos")]
 use crate::daemons::{DaemonPreview, Daemons};
+#[cfg(windows)]
+use crate::programs::{self, Programs};
 use crate::settings::Store;
 #[cfg(target_os = "macos")]
 use crate::stopping::{Reason, Stopped};
@@ -148,6 +149,43 @@ pub(crate) async fn clean_apps(
     })
     .await
     .map_err(|error| Refusal::Failed {
+        message: error.to_string(),
+    })?
+}
+
+/// Lists the programs installed on this PC, under the token starting one's
+/// uninstaller takes.
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) async fn clean_programs(app: AppHandle) -> Result<programs::Listed, Refusal> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Programs>().list())
+        .await
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })?
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })
+}
+
+/// Starts the uninstaller of the program `id` of the listing under `token`,
+/// once the user confirmed. It returns once the uninstaller started, or
+/// once the user answered Windows' prompt for an administrator.
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) async fn clean_uninstall(
+    token: u64,
+    id: u32,
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+) -> Result<(), programs::Refusal> {
+    // Windows' prompt belongs to this window, so that it comes to the front.
+    let owner = window.hwnd().ok().map(|window| window.0 as isize);
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Programs>().uninstall(token, id, owner)
+    })
+    .await
+    .map_err(|error| programs::Refusal::Failed {
         message: error.to_string(),
     })?
 }

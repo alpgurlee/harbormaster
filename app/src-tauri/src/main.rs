@@ -7,6 +7,8 @@ mod commands;
 #[cfg(target_os = "macos")]
 mod daemons;
 mod panel;
+#[cfg(windows)]
+mod programs;
 mod quitting;
 mod scanning;
 mod settings;
@@ -82,6 +84,8 @@ fn main() {
         commands::settings_set,
         actions::clean_scan,
         actions::clean_hunt,
+        actions::clean_programs,
+        actions::clean_uninstall,
         actions::clean_map,
         actions::clean_run,
         actions::clean_recheck,
@@ -104,6 +108,8 @@ fn main() {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 app.manage(daemons::Daemons::default());
             }
+            #[cfg(windows)]
+            app.manage(programs::Programs::default());
             app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
