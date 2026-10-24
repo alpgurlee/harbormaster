@@ -675,7 +675,7 @@ describe("the cleaner on Windows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Docker Desktop uygulamasını kaldır…" }));
 
     const sheet = within(screen.getByRole("dialog", { name: "Docker Desktop kaldırılsın mı?" }));
-    expect(sheet.getByRole("button", { name: "Kaldırıcıyı başlat" })).toBeTruthy();
+    expect(sheet.getByRole("button", { name: "Kaldırma aracını başlat" })).toBeTruthy();
     expect(
       sheet.getByText(
         "Bilgisayardaki herkes için yüklü, bu yüzden Windows yönetici izni isteyebilir. Yalnızca Windows'un gösterdiği yayıncıya güveniyorsan izin ver.",
