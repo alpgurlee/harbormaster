@@ -13,6 +13,12 @@ use crate::{Finding, Group, Hunt, Identity, Kind, Measured, in_use, measure, pro
 /// Folders deeper than this aren't looked into.
 const DEEPEST: usize = 32;
 
+/// Where apps keep their data in the home folder, which isn't looked in.
+#[cfg(not(windows))]
+const APP_DATA: &str = "Library";
+#[cfg(windows)]
+const APP_DATA: &str = "AppData";
+
 /// Folders macOS shows as one thing, such as an app, a photo library or a
 /// virtual machine, by their extension. They are left whole, never looked
 /// into: a file taken from inside one would break it.
@@ -112,7 +118,7 @@ pub(crate) fn hunt(
     let mut found = Vec::new();
     let mut places = Vec::new();
     for (name, stat) in home.entries_while(|| !stop.load(Ordering::Relaxed))? {
-        if passed_over(&name, &stat, device) || name == "Library" {
+        if passed_over(&name, &stat, device) || is_app_data(&name) {
             continue;
         }
         if walk::is_folder(&stat) {
@@ -203,9 +209,25 @@ fn looked(
     }
 }
 
-/// What is never looked at: a hidden name, a link, or another disk.
+/// What is never looked at: a hidden name, a link, or another disk, and on
+/// Windows what File Explorer hides.
 fn passed_over(name: &OsStr, stat: &Stat, device: u64) -> bool {
-    name.as_encoded_bytes().starts_with(b".") || walk::is_link(stat) || stat.device != device
+    let hidden = name.as_encoded_bytes().starts_with(b".");
+    #[cfg(windows)]
+    let hidden = hidden || stat.hidden;
+    hidden || walk::is_link(stat) || stat.device != device
+}
+
+/// Whether `name`, in the home folder, is where apps keep their data.
+fn is_app_data(name: &OsStr) -> bool {
+    #[cfg(windows)]
+    {
+        walk::same_name(name, OsStr::new(APP_DATA))
+    }
+    #[cfg(not(windows))]
+    {
+        name == APP_DATA
+    }
 }
 
 /// Whether a folder called `name` is looked into: not a package, nor the

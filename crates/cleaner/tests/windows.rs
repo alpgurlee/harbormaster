@@ -9,7 +9,11 @@ use std::time::SystemTime;
 
 use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
-    Cleaned, Finding, Group, Kind, Outcome, Survey, Usage, Why, remove, scan, usual_roots,
+    Cleaned, Finding, Group, Hunt, Kind, Outcome, Survey, Usage, Why, large, remove, scan,
+    usual_roots,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, SetFileAttributesW,
 };
 
 fn scanned(home: &Path, roots: &[PathBuf]) -> Vec<Finding> {
@@ -216,4 +220,102 @@ fn moves_a_personal_place_the_disk_spells_in_other_case_than_the_catalog() {
 
     assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
     assert!(bin.join(r"$R0001\newtonsoft.json\13.0.3\a.nupkg").exists());
+}
+
+fn hunted(home: &Path) -> Vec<Finding> {
+    let hunt = Hunt {
+        home,
+        smallest: MIB as u64,
+        busy: &[],
+    };
+    large(&hunt, &AtomicBool::new(false), &|_| {}).expect("the hunt should start")
+}
+
+/// Gives what is at `path` the `attributes` that keep it out of File
+/// Explorer's sight, as Windows does its own files in the home folder.
+fn hide(path: &Path, attributes: u32) {
+    use std::os::windows::ffi::OsStrExt;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: the path ends in a nul.
+    let set = unsafe { SetFileAttributesW(wide.as_ptr(), attributes) };
+    assert_ne!(set, 0, "{}", io::Error::last_os_error());
+}
+
+#[test]
+fn hunts_large_files_but_never_in_appdata_or_among_what_windows_hides() {
+    let machine = machine();
+    let home = &machine.home;
+    write(&home.join(r"Downloads\setup.exe"), &vec![1; 3 * MIB]);
+    write(&home.join(r"Videos\trip.mp4"), &vec![1; 2 * MIB]);
+    write(&home.join(r"AppData\Local\Temp\big.iso"), &vec![1; 2 * MIB]);
+    write(
+        &home.join(r"source\repos\app\node_modules\pkg\big.zip"),
+        &vec![1; 2 * MIB],
+    );
+    write(&home.join("NTUSER.DAT"), &vec![1; 2 * MIB]);
+    hide(
+        &home.join("NTUSER.DAT"),
+        FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM,
+    );
+    write(&home.join(r"Documents\Private\film.mkv"), &vec![1; 2 * MIB]);
+    hide(&home.join(r"Documents\Private"), FILE_ATTRIBUTE_HIDDEN);
+
+    let found = hunted(home);
+
+    let names: Vec<_> = found
+        .iter()
+        .map(|finding| (finding.name.as_str(), finding.group))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("trip.mp4", Group::Videos),
+            ("setup.exe", Group::Installers)
+        ]
+    );
+    assert_eq!(found[0].path, home.join(r"Videos\trip.mp4"));
+    assert_eq!((found[0].kind, found[0].picked), (Kind::Personal, false));
+}
+
+#[test]
+fn leaves_out_a_large_file_with_another_name_since_recycling_one_frees_nothing() {
+    let machine = machine();
+    let film = machine.home.join(r"Videos\trip.mp4");
+    write(&film, &vec![1; 2 * MIB]);
+    std::fs::create_dir_all(machine.home.join("Desktop")).expect("a folder");
+    std::fs::hard_link(&film, machine.home.join(r"Desktop\trip.mp4")).expect("a hard link");
+
+    assert_eq!(hunted(&machine.home), []);
+}
+
+#[test]
+fn never_hunts_through_a_junction() {
+    let mine = machine();
+    let elsewhere = machine();
+    write(&elsewhere.home.join(r"films\big.mp4"), &vec![1; 2 * MIB]);
+    std::fs::create_dir_all(mine.home.join("Videos")).expect("a folder");
+    link_folder(
+        &elsewhere.home.join("films"),
+        &mine.home.join(r"Videos\films"),
+    );
+
+    assert_eq!(hunted(&mine.home), []);
+}
+
+#[test]
+fn moves_a_large_file_to_the_recycle_bin_and_nothing_beside_it() {
+    let machine = machine();
+    let film = machine.home.join(r"Videos\trip.mp4");
+    write(&film, &vec![1; 2 * MIB]);
+    write(&machine.home.join(r"Videos\notes.txt"), b"keep");
+    let found = hunted(&machine.home);
+
+    let cleaned = removed(&machine.home, &found[0], &|path| {
+        harbormaster_platform::trash(path).map_err(io::Error::other)
+    });
+
+    assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
+    assert!(!film.exists());
+    assert!(machine.home.join(r"Videos\notes.txt").exists());
 }

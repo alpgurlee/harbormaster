@@ -26,7 +26,8 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
+    CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM, FILE_BASIC_INFO,
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO, FILE_DISPOSITION_INFO_EX,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_EXTD_DIR_INFO, FILE_ID_INFO,
@@ -343,6 +344,7 @@ fn entries(bytes: &[u8], device: u64) -> Vec<(OsString, Stat)> {
                 links: None,
                 bytes: u64::try_from(entry.AllocationSize).unwrap_or(0),
                 modified: from_ticks(entry.LastWriteTime),
+                hidden: hidden(entry.FileAttributes),
             },
         ));
         // The next entry starts past this one's name, or there is none.
@@ -503,7 +505,13 @@ fn stat_of(handle: &OwnedHandle) -> io::Result<Stat> {
         links: Some(u64::from(standard.NumberOfLinks)),
         bytes: u64::try_from(standard.AllocationSize).unwrap_or(0),
         modified: from_ticks(basic.LastWriteTime),
+        hidden: hidden(basic.FileAttributes),
     })
+}
+
+/// Whether `attributes` keep a file out of File Explorer's sight.
+fn hidden(attributes: u32) -> bool {
+    attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0
 }
 
 fn kind_of(attributes: u32, directory: bool) -> FileType {

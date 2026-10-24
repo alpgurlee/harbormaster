@@ -35,6 +35,10 @@ pub(crate) struct Stat {
     /// What it is locked against, as `chflags` sets it.
     #[cfg(target_os = "macos")]
     pub(crate) flags: u32,
+    /// Whether File Explorer keeps it out of sight, as it does the system's
+    /// own files in the home folder.
+    #[cfg(windows)]
+    pub(crate) hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
