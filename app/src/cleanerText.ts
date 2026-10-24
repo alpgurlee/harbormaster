@@ -1,5 +1,6 @@
 import { largeFile } from "./cleanup";
 import type { TextKey, Translator } from "./i18n";
+import { bin } from "./platform";
 import type { CleanGroup, CleanRefusal, Finding, Removal, Why } from "./types";
 
 export const NAMES: Record<CleanGroup, TextKey> = {
@@ -64,7 +65,7 @@ export function note(finding: Finding, home: string, now: number, i18n: Translat
     finding.touched !== null
       ? i18n.t(largeFile(finding) ? "changedAgo" : "lastTouched", { ago: i18n.ago(now - finding.touched * 1000) })
       : finding.kind === "personal"
-        ? i18n.t("goesToTrash")
+        ? i18n.t(bin.goes)
         : finding.kind === "discarded"
           ? i18n.t("emptiedForGood")
           : finding.picked
@@ -92,7 +93,7 @@ export function outcomeText(removal: Removal, i18n: Translator): string {
     case "deleted":
       return i18n.t("outcomeDeleted");
     case "trashed":
-      return i18n.t("outcomeTrashed");
+      return i18n.t(bin.outcome);
     case "stopped":
       return i18n.t("outcomeNotReached");
     case "interrupted":

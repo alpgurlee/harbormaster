@@ -23,3 +23,22 @@ export const mapsHome = platform === "mac";
 
 /** What shows a file where it is. */
 export const revealsIn = platform === "windows" ? "revealInExplorer" : "revealInFinder";
+
+/** How the window speaks of where personal things go: the Trash, or on
+ * Windows the Recycle Bin. */
+export const bin =
+  platform === "windows"
+    ? ({
+        goes: "goesToRecycleBin",
+        confirm: "confirmRecycled",
+        moved: "movedToRecycleBin",
+        hint: "recycleBinHint",
+        outcome: "outcomeRecycled",
+      } as const)
+    : ({
+        goes: "goesToTrash",
+        confirm: "confirmTrashed",
+        moved: "movedToTrash",
+        hint: "trashHint",
+        outcome: "outcomeTrashed",
+      } as const);

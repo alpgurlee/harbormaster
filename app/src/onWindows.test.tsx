@@ -8,7 +8,7 @@ import { I18nProvider } from "./i18n";
 import { Panel } from "./Panel";
 import { QuitSheet, type Quitter } from "./QuitSheet";
 import { StopSheet, type Stopper } from "./StopSheet";
-import type { AppUsage, Finding, ScanEvent, Service, Update } from "./types";
+import type { AppUsage, Finding, RunEvent, ScanEvent, Service, Update } from "./types";
 
 // Where a stop is the forced one, the panel says so.
 vi.mock("./platform", () => ({
@@ -18,6 +18,13 @@ vi.mock("./platform", () => ({
   cleanerSections: ["developer"],
   mapsHome: false,
   revealsIn: "revealInExplorer",
+  bin: {
+    goes: "goesToRecycleBin",
+    confirm: "confirmRecycled",
+    moved: "movedToRecycleBin",
+    hint: "recycleBinHint",
+    outcome: "outcomeRecycled",
+  },
 }));
 
 afterEach(cleanup);
@@ -278,6 +285,7 @@ describe("the cleaner on Windows", () => {
 
   function cleaner() {
     const scans: ((event: ScanEvent) => void)[] = [];
+    const runs: ((event: RunEvent) => void)[] = [];
     const revealed: string[] = [];
     const nothing = () => Promise.resolve();
     const backend: CleanerBackend = {
@@ -287,7 +295,10 @@ describe("the cleaner on Windows", () => {
       },
       hunt: nothing,
       apps: nothing,
-      run: nothing,
+      run: (_token, _paths, onEvent) => {
+        runs.push(onEvent);
+        return Promise.resolve();
+      },
       stop: nothing,
       disk: () => Promise.resolve({ total: 500 * 1024 ** 3, free: 100 * 1024 ** 3 }),
       reveal: (path) => {
@@ -306,7 +317,24 @@ describe("the cleaner on Windows", () => {
         <Cleaner backend={backend} now={NOW} />
       </I18nProvider>,
     );
-    return { scans, revealed };
+    return { scans, runs, revealed };
+  }
+
+  /** Ends the scan with `findings`, as the app sends them. */
+  function scanned(driver: ReturnType<typeof cleaner>, findings: Finding[]) {
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    act(() =>
+      driver.scans[0]({
+        kind: "done",
+        token: 3,
+        home: "C:\\Users\\dev",
+        findings,
+        scanned: true,
+        hunted: false,
+        appsListed: false,
+        idleDays: 30,
+      }),
+    );
   }
 
   it("offers only what developer tools leave, and no map", async () => {
@@ -335,5 +363,35 @@ describe("the cleaner on Windows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show in File Explorer: npm" }));
 
     expect(driver.revealed).toEqual([npm.path]);
+  });
+
+  it("sends what may be wanted back to the Recycle Bin, and says so", async () => {
+    const maven: Finding = {
+      ...npm,
+      kind: "personal",
+      name: "Maven",
+      path: "C:\\Users\\dev\\.m2\\repository",
+      picked: false,
+      emptied: false,
+    };
+    const driver = cleaner();
+    await act(async () => {});
+    scanned(driver, [maven]);
+    fireEvent.click(screen.getByRole("button", { name: /^Developer/ }));
+    expect(screen.getByText("~\\.m2\\repository · goes to the Recycle Bin")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Maven" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clean up…" }));
+    const sheet = within(screen.getByRole("dialog", { name: "Clean up 1.0 GB?" }));
+    expect(sheet.getByText("1 item goes to the Recycle Bin, where you can restore it.")).toBeTruthy();
+    fireEvent.click(sheet.getByRole("button", { name: "Clean up" }));
+    act(() => driver.runs[0]({ kind: "removed", path: maven.path, outcome: "trashed" }));
+    act(() =>
+      driver.runs[0]({ kind: "done", removals: [], freedBytes: 0, token: 9, findings: [], scanned: true, hunted: false, appsListed: false }),
+    );
+
+    expect(screen.getByTestId("hero").textContent).toBe("1.0 GB moved to the Recycle Bin1 item cleaned up · 0 MB freed so far");
+    expect(screen.getByText("The room comes back once the Recycle Bin is emptied.")).toBeTruthy();
+    expect(screen.getByText("moved to the Recycle Bin")).toBeTruthy();
   });
 });

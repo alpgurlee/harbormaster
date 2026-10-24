@@ -20,7 +20,7 @@ import { TINTS, asRefusal, outcomeText, refusalText } from "./cleanerText";
 import { DaemonSheet, type DaemonStopper } from "./DaemonSheet";
 import { useI18n, type TextKey, type Translator } from "./i18n";
 import { Review } from "./Review";
-import { cleanerSections, mapsHome, platform } from "./platform";
+import { bin, cleanerSections, mapsHome, platform } from "./platform";
 import { keepFocusInside } from "./sheet";
 import { SpaceMap } from "./SpaceMap";
 import type { Area, CleanRefusal, Cleaned, Disk, Finding, MapEvent, Removal, RunEvent, ScanEvent } from "./types";
@@ -819,7 +819,7 @@ function Confirm({ plan, onCancel, onConfirm }: { plan: Plan; onCancel: () => vo
         </h2>
         <ul className={styles.consequences}>
           {plan.deleted.count > 0 ? <li>{i18n.plural("confirmDeleted", plan.deleted.count)}</li> : null}
-          {plan.trashed.count > 0 ? <li>{i18n.plural("confirmTrashed", plan.trashed.count)}</li> : null}
+          {plan.trashed.count > 0 ? <li>{i18n.plural(bin.confirm, plan.trashed.count)}</li> : null}
           {plan.emptied ? <li>{i18n.t("confirmEmptied")}</li> : null}
         </ul>
         <p className={sheet.note}>{i18n.t("confirmChecked")}</p>
@@ -862,11 +862,11 @@ function Done({
     <>
       <section className={styles.hero} data-testid="hero">
         <p className={styles.figure}>
-          {trashed > 0 ? i18n.t("movedToTrash", { bytes: i18n.bytes(trashed) }) : i18n.t("freed", { bytes: freed })}
+          {trashed > 0 ? i18n.t(bin.moved, { bytes: i18n.bytes(trashed) }) : i18n.t("freed", { bytes: freed })}
         </p>
         <p className={styles.caption}>{caption.filter((part) => part !== null).join(" · ")}</p>
       </section>
-      {trashed > 0 ? <p className={styles.hint}>{i18n.t("trashHint")}</p> : null}
+      {trashed > 0 ? <p className={styles.hint}>{i18n.t(bin.hint)}</p> : null}
       <button type="button" className={styles.cardButton} onClick={onBack}>
         {i18n.t("backToList")}
       </button>

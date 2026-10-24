@@ -155,6 +155,7 @@ export interface Messages {
   lastTouched: string;
   changedAgo: string;
   goesToTrash: string;
+  goesToRecycleBin: string;
   emptiedForGood: string;
   usedLast: string;
   items: Plural;
@@ -162,18 +163,22 @@ export interface Messages {
   confirmClean: string;
   confirmDeleted: Plural;
   confirmTrashed: Plural;
+  confirmRecycled: Plural;
   confirmEmptied: string;
   confirmChecked: string;
   removing: string;
   freed: string;
   freedSoFar: string;
   movedToTrash: string;
+  movedToRecycleBin: string;
   trashHint: string;
+  recycleBinHint: string;
   backToList: string;
   cleanedItems: Plural;
   leftItems: Plural;
   outcomeDeleted: string;
   outcomeTrashed: string;
+  outcomeRecycled: string;
   outcomeLeft: string;
   outcomeFailedWith: string;
   outcomeNotReached: string;
@@ -434,6 +439,7 @@ export const en: Messages = {
   lastTouched: "last touched {ago}",
   changedAgo: "changed {ago}",
   goesToTrash: "goes to the Trash",
+  goesToRecycleBin: "goes to the Recycle Bin",
   emptiedForGood: "emptied for good",
   usedLast: "used most recently",
   items: { one: "{count} item", other: "{count} items" },
@@ -441,18 +447,25 @@ export const en: Messages = {
   confirmClean: "Clean up {bytes}?",
   confirmDeleted: { one: "{count} item is deleted for good; its tool makes it again.", other: "{count} items are deleted for good; their tools make them again." },
   confirmTrashed: { one: "{count} item goes to the Trash, where you can put it back.", other: "{count} items go to the Trash, where you can put them back." },
+  confirmRecycled: {
+    one: "{count} item goes to the Recycle Bin, where you can restore it.",
+    other: "{count} items go to the Recycle Bin, where you can restore them.",
+  },
   confirmEmptied: "The Trash is emptied for good.",
   confirmChecked: "Each item is checked again right before it goes; anything in use by then is left alone.",
   removing: "Cleaning up… {done} of {total}",
   freed: "{bytes} freed",
   freedSoFar: "{bytes} freed so far",
   movedToTrash: "{bytes} moved to the Trash",
+  movedToRecycleBin: "{bytes} moved to the Recycle Bin",
   trashHint: "The room comes back once the Trash is emptied.",
+  recycleBinHint: "The room comes back once the Recycle Bin is emptied.",
   backToList: "Back to the list",
   cleanedItems: { one: "{count} item cleaned up", other: "{count} items cleaned up" },
   leftItems: { one: "{count} not cleaned up", other: "{count} not cleaned up" },
   outcomeDeleted: "deleted",
   outcomeTrashed: "moved to the Trash",
+  outcomeRecycled: "moved to the Recycle Bin",
   outcomeLeft: "left alone: {why}",
   outcomeFailedWith: "failed: {why}",
   outcomeNotReached: "stopped before its turn",
@@ -716,6 +729,7 @@ export const tr: Messages = {
   lastTouched: "son dokunuş {ago}",
   changedAgo: "{ago} değişti",
   goesToTrash: "Çöp Sepeti'ne gider",
+  goesToRecycleBin: "Geri Dönüşüm Kutusu'na gider",
   emptiedForGood: "kalıcı olarak boşaltılır",
   usedLast: "en son kullanılan",
   items: { one: "{count} öğe", other: "{count} öğe" },
@@ -723,18 +737,25 @@ export const tr: Messages = {
   confirmClean: "{bytes} temizlensin mi?",
   confirmDeleted: { one: "{count} öğe kalıcı olarak silinir; aracı onu yeniden oluşturur.", other: "{count} öğe kalıcı olarak silinir; araçları onları yeniden oluşturur." },
   confirmTrashed: { one: "{count} öğe Çöp Sepeti'ne gider; oradan geri alınabilir.", other: "{count} öğe Çöp Sepeti'ne gider; oradan geri alınabilir." },
+  confirmRecycled: {
+    one: "{count} öğe Geri Dönüşüm Kutusu'na gider; oradan geri yüklenebilir.",
+    other: "{count} öğe Geri Dönüşüm Kutusu'na gider; oradan geri yüklenebilir.",
+  },
   confirmEmptied: "Çöp Sepeti kalıcı olarak boşaltılır.",
   confirmChecked: "Her öğe gitmeden hemen önce yeniden denetlenir; o an kullanımda olan bırakılır.",
   removing: "Temizleniyor… {done}/{total}",
   freed: "{bytes} boşaldı",
   freedSoFar: "şimdilik {bytes} açıldı",
   movedToTrash: "{bytes} Çöp Sepeti'ne taşındı",
+  movedToRecycleBin: "{bytes} Geri Dönüşüm Kutusu'na taşındı",
   trashHint: "Bu alan, Çöp Sepeti boşaltılınca açılır.",
+  recycleBinHint: "Bu alan, Geri Dönüşüm Kutusu boşaltılınca açılır.",
   backToList: "Listeye dön",
   cleanedItems: { one: "{count} öğe temizlendi", other: "{count} öğe temizlendi" },
   leftItems: { one: "{count} öğe temizlenmedi", other: "{count} öğe temizlenmedi" },
   outcomeDeleted: "silindi",
   outcomeTrashed: "Çöp Sepeti'ne taşındı",
+  outcomeRecycled: "Geri Dönüşüm Kutusu'na taşındı",
   outcomeLeft: "bırakıldı: {why}",
   outcomeFailedWith: "başarısız: {why}",
   outcomeNotReached: "sırası gelmeden durduruldu",
