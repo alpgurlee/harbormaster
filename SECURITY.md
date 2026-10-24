@@ -27,8 +27,9 @@ It can end processes and delete files, so both go through checks first:
   with whatever it holds by then, files added since the scan included. What may be yours to keep is
   never chosen for you and goes to the Trash, or on Windows the Recycle Bin; everything else, the
   Trash's contents included, is deleted for good. On Windows the move is the shell's, which deletes for
-  good what the Recycle Bin can't take, such as an item larger than the bin allows; Harbormaster stops
-  it before it does, and the item stays where it was.
+  good what the Recycle Bin can't take, such as an item larger than the bin allows. When the shell says
+  it won't recycle an item, Harbormaster stops it before it deletes anything, and the item stays where
+  it was; should the shell delete an item for good all the same, the removal says so.
 - The cleaner never follows a link. Each folder is opened one name at a time from the one above it, and
   a link in its place is refused: on Windows that is any reparse point, so junctions, mount points and
   files kept in the cloud are never entered, and one inside a folder being removed goes by itself,
