@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://harbormaster-site.vercel.app">harbormaster-site.vercel.app</a> ·
+  <a href="https://github.com/alpgurlee/harbormaster/releases">Download</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/alpgurlee/harbormaster/actions/workflows/ci.yml"><img src="https://github.com/alpgurlee/harbormaster/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 </p>
 
