@@ -123,12 +123,23 @@ $ harbormaster clean --yes   # removes what would be chosen, without asking
 `ls` and `clean` take `--json`. `stop` also takes `--yes`, `--force`, `--wait <seconds>`, `--pid <pid>`
 to stop the server a process belongs to, and `--address <ip>` to pick one server when several share a port.
 
+## Download
+
+Each release on the [Releases](https://github.com/alpgurlee/harbormaster/releases) page has the macOS app as
+a disk image for both Apple silicon and Intel Macs, the Windows installer, the command line tool for each as an
+archive with one `harbormaster` program in it to put on your PATH, and a `SHA256SUMS.txt` to check them
+against.
+
+The releases aren't signed with an Apple or Microsoft certificate yet (the Mac app is signed ad hoc, by no
+one in particular), so each system asks once before the first start. On macOS, open the app, then go to System Settings → Privacy & Security and choose Open Anyway
+next to Harbormaster; on an older macOS, Control-click the app and choose Open. On Windows, SmartScreen says
+it protected your PC: choose More info, then Run anyway.
+
 ## Building
 
-There is no signed release yet. You need macOS 12 or later, the Xcode Command Line Tools
-(`xcode-select --install`), [rustup](https://rustup.rs), which installs the Rust version pinned in
-`rust-toolchain.toml` on the first build, and Node.js 22.22.2 or a later 22.x, 24.15.0 or a later 24.x, or
-26 and up.
+You need macOS 12 or later, the Xcode Command Line Tools (`xcode-select --install`),
+[rustup](https://rustup.rs), which installs the Rust version pinned in `rust-toolchain.toml` on the first
+build, and Node.js 22.22.2 or a later 22.x, 24.15.0 or a later 24.x, or 26 and up.
 
 ```sh
 git clone https://github.com/alpgurlee/harbormaster.git
@@ -159,7 +170,8 @@ a force quit: once you confirm, the server's processes are ended at once, withou
 Closing an app asks its windows to close, as their close buttons do; whatever stays open is ended only if
 you ask again, after seeing exactly which processes that ends.
 Each change to the code on `main` leaves an unsigned Windows installer in the
-[Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs.
+[Windows preview](https://github.com/alpgurlee/harbormaster/actions/workflows/windows-preview.yml) runs, and
+each version tag leaves a draft release with the builds for both systems.
 
 ## License
 
