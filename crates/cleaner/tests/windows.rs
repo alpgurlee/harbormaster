@@ -86,7 +86,11 @@ fn never_lists_a_cache_reached_through_a_junction() {
 
     let findings = scanned(&mine.home, &[]);
 
-    assert!(findings.is_empty(), "{findings:?}");
+    // The Recycle Bin is the PC's, and another test may have filled it meanwhile.
+    assert!(
+        findings.iter().all(|finding| finding.group == Group::Trash),
+        "{findings:?}"
+    );
 }
 
 #[test]
