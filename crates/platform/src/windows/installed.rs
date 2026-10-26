@@ -41,13 +41,35 @@ pub struct Installed {
     pub location: Option<PathBuf>,
     /// How much room its installer says it takes, if it says.
     pub estimated: Option<u64>,
+    /// The file its icon is in, as written, often the program itself.
+    pub icon: Option<PathBuf>,
     /// The command its installer left to uninstall it, with the environment
-    /// variables it names filled in.
+    /// variables it names filled in; empty for an entry that isn't listed to
+    /// be uninstalled.
     pub uninstall: String,
 }
 
 /// Where each installer leaves how to uninstall what it installed.
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+/// Where programs register the names they are started by, such as `code.exe`.
+const APP_PATHS: &str = r"Software\Microsoft\Windows\CurrentVersion\App Paths";
+/// The lists of the registry an entry may be in: this user's, and the whole
+/// PC's as both the 64-bit and the 32-bit registry list them. This user's
+/// entries are the same in both views.
+const REGISTRIES: [Registry; 3] = [
+    Registry {
+        scope: Scope::User,
+        wide: true,
+    },
+    Registry {
+        scope: Scope::Machine,
+        wide: true,
+    },
+    Registry {
+        scope: Scope::Machine,
+        wide: false,
+    },
+];
 /// What an entry is when it is an update to another program, not one itself.
 const UPDATES: &[&str] = &[
     "Update",
@@ -61,27 +83,24 @@ const UPDATES: &[&str] = &[
 /// the 64-bit and the 32-bit registry list them, but for parts of Windows,
 /// updates and what can't be uninstalled.
 pub fn installed() -> io::Result<Vec<Installed>> {
+    gathered(Entries::Shown)
+}
+
+/// Every uninstall entry with a name, parts of Windows, updates and what
+/// can't be uninstalled included: what is installed, rather than what is
+/// listed to be uninstalled.
+pub fn every_installed() -> io::Result<Vec<Installed>> {
+    gathered(Entries::Every)
+}
+
+fn gathered(which: Entries) -> io::Result<Vec<Installed>> {
     let mut found = Vec::new();
-    // This user's entries are the same in both views.
-    for registry in [
-        Registry {
-            scope: Scope::User,
-            wide: true,
-        },
-        Registry {
-            scope: Scope::Machine,
-            wide: true,
-        },
-        Registry {
-            scope: Scope::Machine,
-            wide: false,
-        },
-    ] {
+    for registry in REGISTRIES {
         let Some(entries) = Key::open(registry, UNINSTALL)? else {
             continue;
         };
         for key in entries.subkeys()? {
-            if let Some(program) = read(&entries, registry, &key)? {
+            if let Some(program) = read(&entries, registry, &key, which)? {
                 found.push(program);
             }
         }
@@ -93,22 +112,59 @@ pub fn installed() -> io::Result<Vec<Installed>> {
 /// still there and still a program to list.
 pub fn entry(registry: Registry, key: &str) -> io::Result<Option<Installed>> {
     match Key::open(registry, UNINSTALL)? {
-        Some(entries) => read(&entries, registry, key),
+        Some(entries) => read(&entries, registry, key, Entries::Shown),
         None => Ok(None),
     }
 }
 
-fn read(entries: &Key, registry: Registry, key: &str) -> io::Result<Option<Installed>> {
+/// Whether the entry `key` of `registry`'s uninstall entries is still
+/// there at all, listed or not.
+pub fn still_there(registry: Registry, key: &str) -> io::Result<bool> {
+    match Key::open(registry, UNINSTALL)? {
+        Some(entries) => entries.has(key),
+        None => Ok(false),
+    }
+}
+
+/// The names programs are started by, as App Paths lists them: `code.exe`.
+pub fn app_paths() -> io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for registry in REGISTRIES {
+        if let Some(entries) = Key::open(registry, APP_PATHS)? {
+            names.extend(entries.subkeys()?);
+        }
+    }
+    Ok(names)
+}
+
+/// Which uninstall entries are read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entries {
+    /// Those a user may uninstall from: no parts of Windows, no updates.
+    Shown,
+    /// Every one with a name.
+    Every,
+}
+
+fn read(
+    entries: &Key,
+    registry: Registry,
+    key: &str,
+    which: Entries,
+) -> io::Result<Option<Installed>> {
     let text = |name: &str| entries.text(key, name);
     let number = |name: &str| entries.number(key, name);
-    let hidden = number("SystemComponent")? == Some(1)
-        || number("NoRemove")? == Some(1)
-        || text("ParentKeyName")?.is_some()
-        || text("ReleaseType")?.is_some_and(|kind| UPDATES.contains(&kind.as_str()));
-    let (Some(name), Some(uninstall)) = (text("DisplayName")?, text("UninstallString")?) else {
+    let hidden = which == Entries::Shown
+        && (number("SystemComponent")? == Some(1)
+            || number("NoRemove")? == Some(1)
+            || text("ParentKeyName")?.is_some()
+            || text("ReleaseType")?.is_some_and(|kind| UPDATES.contains(&kind.as_str())));
+    let Some(name) = text("DisplayName")? else {
         return Ok(None);
     };
-    if hidden || name.trim().is_empty() || uninstall.trim().is_empty() {
+    let uninstall = text("UninstallString")?.unwrap_or_default();
+    if hidden || name.trim().is_empty() || (which == Entries::Shown && uninstall.trim().is_empty())
+    {
         return Ok(None);
     }
     Ok(Some(Installed {
@@ -124,6 +180,10 @@ fn read(entries: &Key, registry: Registry, key: &str) -> io::Result<Option<Insta
         estimated: number("EstimatedSize")?
             .filter(|kilobytes| *kilobytes > 0)
             .map(|kilobytes| u64::from(kilobytes) * 1024),
+        icon: text("DisplayIcon")?
+            .map(|icon| icon.trim().trim_matches('"').to_owned())
+            .filter(|icon| !icon.is_empty())
+            .map(PathBuf::from),
         uninstall,
     }))
 }
@@ -150,6 +210,22 @@ impl Key {
         match opened {
             ERROR_SUCCESS => Ok(Some(Self(key))),
             ERROR_FILE_NOT_FOUND => Ok(None),
+            error => Err(failure(error)),
+        }
+    }
+
+    /// Whether the key `below` this one is there.
+    fn has(&self, below: &str) -> io::Result<bool> {
+        let below = wide(below);
+        let mut key: HKEY = std::ptr::null_mut();
+        // SAFETY: the key is open, the name ends in a nul and `key` is ours to fill.
+        let opened = unsafe { RegOpenKeyExW(self.0, below.as_ptr(), 0, KEY_READ, &mut key) };
+        match opened {
+            ERROR_SUCCESS => {
+                drop(Self(key));
+                Ok(true)
+            }
+            ERROR_FILE_NOT_FOUND => Ok(false),
             error => Err(failure(error)),
         }
     }

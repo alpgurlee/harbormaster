@@ -225,3 +225,4 @@ mod tests {
         );
     }
 }
+            icon: None,

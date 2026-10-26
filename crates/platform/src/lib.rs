@@ -21,10 +21,12 @@ use self::windows as sys;
 pub use self::windows::control::{Ended, Held, hold, watch};
 /// The programs installed on Windows, as their uninstall entries list them.
 #[cfg(windows)]
-pub use self::windows::installed::{Installed, Registry, Scope, entry, installed};
+pub use self::windows::installed::{
+    Installed, Registry, Scope, app_paths, entry, every_installed, installed, still_there,
+};
 /// Starting an installed program's own uninstaller on Windows.
 #[cfg(windows)]
-pub use self::windows::uninstall::{NotStarted, start_uninstaller, uninstaller};
+pub use self::windows::uninstall::{NotStarted, program_folders, start_uninstaller, uninstaller};
 #[cfg(windows)]
 pub use self::windows::window::has_windows;
 

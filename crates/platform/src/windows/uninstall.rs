@@ -28,8 +28,9 @@ use windows_sys::Win32::System::Threading::{
     CreateProcessW, GetCurrentProcess, OpenProcessToken, PROCESS_INFORMATION, STARTUPINFOW,
 };
 use windows_sys::Win32::UI::Shell::{
-    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
-    SHELLEXECUTEINFOW, SHEvaluateSystemCommandTemplate, SHGetKnownFolderPath, ShellExecuteExW,
+    FOLDERID_CommonPrograms, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Programs,
+    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHEvaluateSystemCommandTemplate,
+    SHGetKnownFolderPath, ShellExecuteExW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, SW_SHOWNORMAL};
 use windows_sys::core::{GUID, PWSTR};
@@ -91,6 +92,20 @@ pub fn start_uninstaller(listed: &Installed, owner: Option<isize>) -> Result<(),
 /// entry, unless Windows can't be sure which it is.
 pub fn uninstaller(listed: &Installed) -> Option<PathBuf> {
     evaluated(&listed.uninstall).map(|(program, ..)| program)
+}
+
+/// Where installed programs are kept and listed: Program Files, for 32-bit
+/// programs too, and the Start Menu's programs, this user's and everyone's.
+pub fn program_folders() -> Vec<PathBuf> {
+    [
+        FOLDERID_ProgramFiles,
+        FOLDERID_ProgramFilesX86,
+        FOLDERID_Programs,
+        FOLDERID_CommonPrograms,
+    ]
+    .iter()
+    .filter_map(known_folder)
+    .collect()
 }
 
 /// The program `template` names, the command line to start it with, and
