@@ -46,6 +46,17 @@ checks first:
   installed for you alone is never started as an administrator, since any program of yours can change
   its entry. Whether the app is then removed is the uninstaller's to say, and Harbormaster doesn't
   check.
+- On Windows the cleaner lists, as data an app removed from here may have left, only a folder right
+  inside AppData's Roaming, Local or LocalLow folders named like an app whose uninstaller was started
+  from Harbormaster in this run and whose uninstall entry is gone since: like its name, its publisher or
+  a folder it was installed in or ran from. One named like anything the scan can see is still on the PC
+  stays out of sight: an installed app or its publisher, a running program or where it runs from, a
+  program on the PATH or in App Paths, a packaged app, an app in the user's Programs folder, a Start
+  Menu shortcut, a folder in Program Files, a tool known to keep data in AppData without any of those, a
+  folder the cleaner's catalog knows, or one of Windows' own and the user's. An app none of these list,
+  such as one run without being installed, can't be seen, and when the installed apps can't be read in
+  full nothing is listed. Named like is all that can be told, so none is chosen for you, each goes to the
+  Recycle Bin, and nothing is remembered across runs.
 - The cleaner never follows a link. Each folder is opened one name at a time from the one above it, and
   a link in its place is refused: on Windows that is any reparse point, so junctions, mount points and
   files kept in the cloud are never entered, and one inside a folder being removed goes by itself,

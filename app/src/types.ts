@@ -91,6 +91,7 @@ export type CleanGroup =
   | "packages"
   | "xcode"
   | "apps"
+  | "remnants"
   | "temp"
   | "logs"
   | "trash"

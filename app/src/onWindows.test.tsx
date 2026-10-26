@@ -514,6 +514,34 @@ describe("the cleaner on Windows", () => {
     expect(screen.getByTestId("hero").textContent).toBe("900 MB freed1 item cleaned up");
   });
 
+  it("lists what an app removed from here may have left in AppData, for the Recycle Bin", async () => {
+    const remnant: Finding = {
+      ...npm,
+      group: "remnants",
+      kind: "personal",
+      name: "Docker Desktop · Docker",
+      path: "C:\\Users\\dev\\AppData\\Roaming\\Docker",
+      bytes: 3 * 1024 ** 2,
+      picked: false,
+      emptied: false,
+    };
+    const driver = cleaner();
+    await act(async () => {});
+    scanned(driver, [remnant]);
+    fireEvent.click(screen.getByRole("button", { name: /^Leftovers/ }));
+
+    expect(screen.getByRole("button", { name: /^Removed apps' data/ })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Folders in AppData named like an app whose uninstaller you started from here and that is gone from the installed apps since. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Recycle Bin. The removed apps are forgotten when Harbormaster quits.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("~\\AppData\\Roaming\\Docker · goes to the Recycle Bin")).toBeTruthy();
+    const box = screen.getByRole("checkbox", { name: "Docker Desktop · Docker" }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(false);
+  });
+
   it("maps the whole home folder, as Windows asks nothing before it is read", async () => {
     cleaner();
     await act(async () => {});

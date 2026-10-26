@@ -127,6 +127,7 @@ export interface Messages {
   groupPackages: string;
   groupXcode: string;
   groupApps: string;
+  groupRemnants: string;
   groupTemp: string;
   groupLogs: string;
   groupTrash: string;
@@ -143,6 +144,7 @@ export interface Messages {
   aboutPackages: string;
   aboutXcode: string;
   aboutApps: string;
+  aboutRemnants: string;
   aboutTemp: string;
   aboutLogs: string;
   aboutLogsWindows: string;
@@ -446,6 +448,7 @@ export const en: Messages = {
   groupPackages: "Package caches",
   groupXcode: "Xcode",
   groupApps: "App caches",
+  groupRemnants: "Removed apps' data",
   groupTemp: "Temporary files",
   groupLogs: "Logs",
   groupTrash: "Trash",
@@ -465,6 +468,8 @@ export const en: Messages = {
   aboutPackages: "Downloads your package managers keep. They come back when needed.",
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
+  aboutRemnants:
+    "Folders in AppData named like an app whose uninstaller you started from here and that is gone from the installed apps since. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Recycle Bin. The removed apps are forgotten when Harbormaster quits.",
   aboutTemp: "What apps put aside while they ran. Only what nothing has touched for a week goes, and none of what a program works in.",
   aboutLogs: "What apps wrote down about their past runs.",
   aboutLogsWindows: "What apps left behind when they crashed, kept to find out why. It goes to the Recycle Bin.",
@@ -779,6 +784,7 @@ export const tr: Messages = {
   groupPackages: "Paket önbellekleri",
   groupXcode: "Xcode",
   groupApps: "Uygulama önbellekleri",
+  groupRemnants: "Kaldırılan uygulamaların verileri",
   groupTemp: "Geçici dosyalar",
   groupLogs: "Kayıtlar",
   groupTrash: "Çöp Sepeti",
@@ -798,6 +804,8 @@ export const tr: Messages = {
   aboutPackages: "Paket yöneticilerinin sakladığı indirmeler. Gerektiğinde yeniden iner.",
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
+  aboutRemnants:
+    "AppData içinde, kaldırma aracını buradan başlattığın ve o zamandan beri yüklü uygulamalar arasında görünmeyen bir uygulamanın adını taşıyan klasörler. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Geri Dönüşüm Kutusu'na gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
   aboutTemp: "Uygulamaların çalışırken bir kenara koydukları. Yalnızca bir haftadır dokunulmamış olanlar gider; bir programın içinde çalıştığı hiçbir şey gitmez.",
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",
   aboutLogsWindows: "Uygulamaların çöktüklerinde geride bıraktıkları, nedenini bulmak için tutulan dökümler. Geri Dönüşüm Kutusu'na gider.",

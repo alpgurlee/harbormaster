@@ -6,6 +6,7 @@ export const GROUPS: CleanGroup[] = [
   "packages",
   "xcode",
   "apps",
+  "remnants",
   "temp",
   "logs",
   "trash",
@@ -24,7 +25,7 @@ export type CleanModule = "developer" | "system" | "large" | "apps";
 
 export const MODULES: Record<CleanModule, CleanGroup[]> = {
   developer: ["projects", "packages", "xcode"],
-  system: ["apps", "temp", "logs", "trash"],
+  system: ["apps", "remnants", "temp", "logs", "trash"],
   large: ["videos", "archives", "installers", "audio", "images", "documents", "otherFiles"],
   apps: ["applications"],
 };

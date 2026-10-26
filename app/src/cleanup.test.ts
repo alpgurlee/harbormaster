@@ -121,7 +121,7 @@ describe("reviewing a group", () => {
 
   it("splits the groups between the developer's things and the system's", () => {
     expect(MODULES.developer).toEqual(["projects", "packages", "xcode"]);
-    expect(MODULES.system).toEqual(["apps", "temp", "logs", "trash"]);
+    expect(MODULES.system).toEqual(["apps", "remnants", "temp", "logs", "trash"]);
     expect(MODULES.large).toEqual(["videos", "archives", "installers", "audio", "images", "documents", "otherFiles"]);
   });
 });
