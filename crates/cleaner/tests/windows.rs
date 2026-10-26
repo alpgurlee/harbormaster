@@ -9,8 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{DAY, MIB, NPM, age, link_folder, machine, node_project, reach, write};
 use harbormaster_cleaner::{
-    Chart, Cleaned, Finding, Group, Hunt, Kind, Outcome, Survey, Usage, Why, large, map, remove,
-    scan, usual_roots,
+    App, Apps, Chart, Cleaned, Finding, Group, Hunt, Kind, Outcome, Survey, Usage, Why, large, map,
+    remove, scan, usual_roots,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, SetFileAttributesW,
@@ -29,6 +29,7 @@ fn scanned_while(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> 
         idle_after: 30 * DAY,
         now: SystemTime::now(),
         temp: None,
+        apps: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }
@@ -221,6 +222,108 @@ fn moves_a_personal_place_the_disk_spells_in_other_case_than_the_catalog() {
 
     assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
     assert!(bin.join(r"$R0001\newtonsoft.json\13.0.3\a.nupkg").exists());
+}
+
+fn scanned_knowing(home: &Path, apps: &Apps) -> Vec<Finding> {
+    let survey = Survey {
+        home,
+        roots: &[],
+        busy: &[],
+        running: &[],
+        idle_after: 30 * DAY,
+        now: SystemTime::now(),
+        temp: None,
+        apps: Some(apps),
+    };
+    scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
+}
+
+fn app(name: &str, publisher: &str, folders: &[&Path]) -> App {
+    App {
+        name: name.to_owned(),
+        publisher: Some(publisher.to_owned()),
+        folders: folders.iter().map(|folder| folder.to_path_buf()).collect(),
+    }
+}
+
+#[test]
+fn lists_what_an_app_removed_from_here_left_in_appdata_and_moves_it_to_the_recycle_bin() {
+    let machine = machine();
+    let roaming = machine.home.join(r"AppData\Roaming");
+    let local = machine.home.join(r"AppData\Local");
+    write(&roaming.join(r"Old App\settings.json"), &vec![1; 2 * MIB]);
+    // Small, yet worth listing: what an app left is listed however small.
+    write(&local.join(r"OldApp\state.db"), &vec![1; 64 * 1024]);
+    write(&roaming.join(r"Vendor\other.ini"), &vec![1; 2 * MIB]);
+    write(&roaming.join(r"Microsoft\Windows\a"), &vec![1; 2 * MIB]);
+    write(
+        &local.join(r"Programs\Kept App\kept.exe"),
+        &vec![1; 2 * MIB],
+    );
+    write(&roaming.join(r"Kept App\a"), &vec![1; 2 * MIB]);
+    let apps = Apps {
+        removed: vec![
+            app(
+                "Old App 2.1",
+                "Old Co Ltd.",
+                &[&local.join(r"Programs\Old App")],
+            ),
+            app("Kept App", "Old Co Ltd.", &[]),
+            app("Vendor Tool", "Vendor Inc.", &[]),
+        ],
+        installed: vec![app("Vendor Suite", "Vendor Inc.", &[])],
+        names: Vec::new(),
+    };
+
+    let findings = scanned_knowing(&machine.home, &apps);
+
+    let mut left: Vec<(String, PathBuf)> = findings
+        .iter()
+        .filter(|finding| finding.group == Group::Remnants)
+        .map(|finding| (finding.name.clone(), finding.path.clone()))
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            ("Old App 2.1 · Old App".to_owned(), roaming.join("Old App")),
+            ("Old App 2.1 · OldApp".to_owned(), local.join("OldApp")),
+        ]
+    );
+    let remnant = named(&findings, "Old App 2.1 · Old App").expect("the leftover");
+    assert_eq!(
+        (
+            remnant.kind,
+            remnant.picked,
+            remnant.emptied,
+            remnant.in_use.as_deref()
+        ),
+        (Kind::Personal, false, false, None)
+    );
+    let cleaned = removed(&machine.home, remnant, &|path| {
+        harbormaster_platform::trash(path).map_err(io::Error::other)
+    });
+
+    assert_eq!(cleaned.removals[0].outcome, Outcome::Trashed, "{cleaned:?}");
+    assert!(!roaming.join("Old App").exists());
+    assert!(local.join("OldApp").exists());
+}
+
+#[test]
+fn lists_nothing_of_appdata_while_no_app_was_removed_from_here() {
+    let machine = machine();
+    write(
+        &machine.home.join(r"AppData\Roaming\Old App\settings.json"),
+        &vec![1; 2 * MIB],
+    );
+
+    let findings = scanned_knowing(&machine.home, &Apps::default());
+
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.group != Group::Remnants)
+    );
 }
 
 fn hunted(home: &Path) -> Vec<Finding> {
@@ -514,6 +617,7 @@ fn scanned_with_temp(home: &Path, temp: &Path, busy: &[(PathBuf, String)]) -> Ve
         idle_after: 30 * DAY,
         now: SystemTime::now(),
         temp: Some(temp),
+        apps: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

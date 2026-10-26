@@ -12,6 +12,9 @@ mod large;
 mod map;
 mod measure;
 mod projects;
+/// Only Windows scans for them; the matching is the same everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod remnants;
 mod remove;
 mod space;
 mod temp;
@@ -24,6 +27,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
+
+pub use remnants::{App, Apps};
 
 /// Less than this isn't worth the list's room.
 const SMALLEST: u64 = 1024 * 1024;
@@ -55,6 +60,8 @@ pub enum Group {
     Xcode,
     /// Apps' own caches.
     Apps,
+    /// What an app removed from here may have left in AppData.
+    Remnants,
     /// What apps put aside while they ran and left behind.
     Temp,
     Logs,
@@ -297,6 +304,9 @@ pub struct Survey<'a> {
     pub now: SystemTime,
     /// Where this user's temporary files are, which `temp_folder` gives.
     pub temp: Option<&'a Path>,
+    /// What is known of the PC's apps, on Windows: which were removed from
+    /// here, for what they may have left behind, and which are still there.
+    pub apps: Option<&'a Apps>,
 }
 
 /// What a hunt for large files looks through.
@@ -424,6 +434,16 @@ pub fn scan_with(
     let root = walk::Dir::open(survey.home)?;
     let mut candidates = catalog::candidates(&root, survey.home, stop);
     candidates.extend(projects::candidates(&root, survey, stop));
+    #[cfg(windows)]
+    if let Some(apps) = survey.apps {
+        candidates.extend(remnants::candidates(
+            &root,
+            survey.home,
+            apps,
+            survey.busy,
+            stop,
+        ));
+    }
     for candidate in &mut candidates {
         candidate.in_use = using(
             survey.home,
@@ -446,7 +466,11 @@ pub fn scan_with(
     if let Some(temp) = survey.temp {
         findings.extend(temp::finding(&root, survey, temp, stop));
     }
-    findings.retain(|finding| finding.bytes >= SMALLEST);
+    // What an app left behind is worth listing however small, as long as it
+    // was measured at all.
+    findings.retain(|finding| {
+        finding.bytes >= SMALLEST || (finding.group == Group::Remnants && finding.bytes > 0)
+    });
     findings.sort_by(|a, b| a.group.cmp(&b.group).then(b.bytes.cmp(&a.bytes)));
     Ok(findings)
 }

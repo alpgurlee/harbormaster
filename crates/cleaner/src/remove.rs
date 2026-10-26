@@ -370,6 +370,7 @@ mod tests {
             idle_after: Duration::ZERO,
             now: SystemTime::now(),
             temp: None,
+            apps: None,
         };
         let findings = scan(&survey, &AtomicBool::new(false)).unwrap();
 

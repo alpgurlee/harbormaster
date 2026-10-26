@@ -74,9 +74,12 @@ pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
     cleaner::show(&app).map_err(|error| error.to_string())
 }
 
+/// Scans, telling the window as it goes. On Windows the scan is told of the
+/// PC's apps too, for what an app removed from here may have left behind.
 #[tauri::command]
 pub(crate) async fn clean_scan(
     channel: Channel<ScanEvent>,
+    app: AppHandle,
     cleaning: State<'_, Arc<Cleaning>>,
     store: State<'_, Store>,
 ) -> Result<(), Refusal> {
@@ -84,9 +87,21 @@ pub(crate) async fn clean_scan(
     // Taken before the work is queued, so a stop from here on holds.
     let working = cleaning.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
-        working.scan(&settings.roots, settings.idle_days, &|event| {
-            let _ = channel.send(event);
-        })
+        #[cfg(windows)]
+        let apps = app.state::<Programs>().known();
+        #[cfg(not(windows))]
+        let apps = {
+            let _ = &app;
+            None
+        };
+        working.scan(
+            &settings.roots,
+            settings.idle_days,
+            apps.as_ref(),
+            &|event| {
+                let _ = channel.send(event);
+            },
+        )
     })
     .await
     .map_err(|error| Refusal::Failed {

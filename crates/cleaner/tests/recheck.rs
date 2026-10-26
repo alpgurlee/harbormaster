@@ -17,6 +17,7 @@ fn scanned(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> Vec<Fi
         idle_after: 30 * DAY,
         now: SystemTime::now(),
         temp: None,
+        apps: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

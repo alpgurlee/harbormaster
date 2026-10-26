@@ -30,6 +30,7 @@ fn surveyed(
         idle_after: 30 * DAY,
         now: SystemTime::now(),
         temp: None,
+        apps: None,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

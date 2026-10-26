@@ -1,13 +1,18 @@
 //! The programs installed on Windows, as the cleaner window lists them, and
 //! starting the uninstaller of one it then names, once the user confirmed.
-//! None of them is ever taken to be removed the way a finding is.
+//! None of them is ever taken to be removed the way a finding is. Which
+//! uninstallers were started is remembered, so that a scan can look for
+//! what an app gone since left behind.
 
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use harbormaster_cleaner::{App, Apps};
 use harbormaster_platform::{Installed, NotStarted, Scope};
 use serde::Serialize;
 
-/// The programs last listed to the window, under the token it holds.
+/// The programs last listed to the window, under the token it holds, and
+/// those whose uninstaller was started from here.
 #[derive(Debug, Default)]
 pub(crate) struct Programs {
     last: Mutex<Listing>,
@@ -17,6 +22,7 @@ pub(crate) struct Programs {
 struct Listing {
     token: u64,
     listed: Vec<Installed>,
+    started: Vec<Installed>,
 }
 
 /// The programs installed on this PC as the window shows them, under the
@@ -110,7 +116,48 @@ impl Programs {
     ) -> Result<(), Refusal> {
         let listed = self.listed(token, id)?;
         // Started once the lock is let go: Windows may wait for the user to answer it.
-        harbormaster_platform::start_uninstaller(&listed, owner).map_err(Refusal::from)
+        harbormaster_platform::start_uninstaller(&listed, owner)?;
+        self.remember(listed);
+        Ok(())
+    }
+
+    /// What a scan needs to know of the PC's apps: which were removed from
+    /// here, which are still installed, and what else names them. Nothing,
+    /// when what is installed can't be read in full: a scan told less than
+    /// that could take an installed app's data for a removed app's.
+    pub(crate) fn known(&self) -> Option<Apps> {
+        let installed = harbormaster_platform::every_installed().ok()?;
+        let mut names = harbormaster_platform::app_paths().ok()?;
+        for folder in harbormaster_platform::program_folders() {
+            names.extend(names_in(&folder, 2));
+        }
+        Some(Apps {
+            removed: self.removed(|app| harbormaster_platform::still_there(app.registry, &app.key)),
+            installed: installed.iter().map(described).collect(),
+            names,
+        })
+    }
+
+    /// Keeps `installed` as one whose uninstaller was started.
+    fn remember(&self, installed: Installed) {
+        let mut last = self.lock();
+        let same =
+            |other: &Installed| other.registry == installed.registry && other.key == installed.key;
+        if !last.started.iter().any(same) {
+            last.started.push(installed);
+        }
+    }
+
+    /// Of the apps whose uninstaller was started, those gone from the
+    /// installed apps since, by `still_there`, as the cleaner names them.
+    fn removed(&self, still_there: impl Fn(&Installed) -> std::io::Result<bool>) -> Vec<App> {
+        let started = self.lock().started.clone();
+        started
+            .iter()
+            // One Windows won't say about is taken to be there still.
+            .filter(|app| !still_there(app).unwrap_or(true))
+            .map(described)
+            .collect()
     }
 
     /// Keeps `listed` as the listing shown from now on, and hands it back as
@@ -122,9 +169,12 @@ impl Programs {
             .map(|(installed, id)| Program::of(id, installed))
             .collect();
         let mut last = self.lock();
-        let token = last.token + 1;
-        *last = Listing { token, listed };
-        Listed { token, programs }
+        last.token += 1;
+        last.listed = listed;
+        Listed {
+            token: last.token,
+            programs,
+        }
     }
 
     fn listed(&self, token: u64, id: u32) -> Result<Installed, Refusal> {
@@ -139,6 +189,41 @@ impl Programs {
     fn lock(&self) -> MutexGuard<'_, Listing> {
         self.last.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// `installed` as the cleaner names an app: by its entry's name and
+/// publisher, and the folders it was installed in and ran from.
+fn described(installed: &Installed) -> App {
+    App {
+        name: installed.name.clone(),
+        publisher: installed.publisher.clone(),
+        folders: installed
+            .location
+            .iter()
+            .cloned()
+            .chain(harbormaster_platform::uninstaller(installed))
+            .chain(installed.icon.iter().cloned())
+            .collect(),
+    }
+}
+
+/// The names of what is in `folder`, `levels` deep: its folders, and its
+/// files without their extension, as a shortcut is named after its program.
+fn names_in(folder: &Path, levels: usize) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(stem) = path.file_stem() {
+            names.push(stem.to_string_lossy().into_owned());
+        }
+        if levels > 1 && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            names.extend(names_in(&path, levels - 1));
+        }
+    }
+    names
 }
 
 impl Program {
@@ -171,6 +256,7 @@ mod tests {
             version: Some("1.2".to_owned()),
             location: None,
             estimated: Some(4096),
+            icon: None,
             uninstall: r#""C:\Windows\System32\whoami.exe""#.to_owned(),
         }
     }
@@ -189,6 +275,50 @@ mod tests {
         assert_eq!(
             programs.listed(last.token, 1).map(|program| program.key),
             Ok("Other".to_owned())
+        );
+    }
+
+    #[test]
+    fn remembers_what_was_started_and_tells_what_is_gone_since() {
+        let programs = Programs::default();
+        programs.remember(installed("Gone", Scope::User));
+        programs.remember(installed("Gone", Scope::User));
+        programs.remember(installed("Kept", Scope::Machine));
+        programs.keep(Vec::new());
+
+        let removed = programs.removed(|app| Ok(app.key == "Kept"));
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].name, "Gone App");
+        assert_eq!(removed[0].publisher.as_deref(), Some("Example"));
+        assert_eq!(
+            removed[0]
+                .folders
+                .iter()
+                .map(|folder| folder.to_string_lossy().to_lowercase())
+                .collect::<Vec<_>>(),
+            [r"c:\windows\system32\whoami.exe"]
+        );
+        assert!(
+            programs
+                .removed(|_| Err(std::io::Error::other("no registry")))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn names_what_a_folder_holds_two_levels_down() {
+        let place = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(place.path().join("Docker").join("Docker")).unwrap();
+        std::fs::write(place.path().join("Docker Desktop.lnk"), b"").unwrap();
+        std::fs::create_dir_all(place.path().join("Vendor").join("Deep").join("Deeper")).unwrap();
+
+        let mut names = names_in(place.path(), 2);
+        names.sort();
+
+        assert_eq!(
+            names,
+            ["Deep", "Docker", "Docker", "Docker Desktop", "Vendor"]
         );
     }
 
@@ -225,4 +355,3 @@ mod tests {
         );
     }
 }
-            icon: None,

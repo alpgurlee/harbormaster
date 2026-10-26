@@ -437,6 +437,14 @@ pub(crate) fn candidates(home: &Dir, path: &Path, stop: &AtomicBool) -> Vec<Cand
 
 /// The programs that keep the place at `relative` from the home folder, or
 /// one of its entries, in use while they run.
+/// Whether the catalog reaches into the folder at `relative` from the home
+/// folder: a place of its is it, or is inside it.
+pub(crate) fn claimed(relative: &Path) -> bool {
+    PLACES
+        .iter()
+        .any(|place| crate::within(Path::new(place.path), relative))
+}
+
 pub(crate) fn used_by(relative: &Path) -> &'static [&'static str] {
     PLACES
         .iter()

@@ -31,6 +31,7 @@ pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
         idle_after: IDLE_AFTER,
         now,
         temp: temp.as_deref(),
+        apps: None,
     };
     let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
         .with_context(|| format!("could not look through {}", home.display()))?;
@@ -243,6 +244,7 @@ fn title(group: Group) -> &'static str {
         Group::Packages => "Packages",
         Group::Xcode => "Xcode",
         Group::Apps => "App caches",
+        Group::Remnants => "Removed apps' data",
         Group::Temp => "Temporary files",
         Group::Logs => "Logs",
         Group::Trash if cfg!(windows) => "Recycle Bin",

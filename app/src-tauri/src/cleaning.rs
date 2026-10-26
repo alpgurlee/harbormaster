@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use harbormaster_cleaner::{Area, Chart, Charting};
 use harbormaster_cleaner::{
-    Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
+    Apps, Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
 };
+use harbormaster_cleaner::{Area, Chart, Charting};
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
 
@@ -416,6 +416,7 @@ impl Working {
         &self,
         roots: &[PathBuf],
         idle_days: u32,
+        apps: Option<&Apps>,
         told: &(dyn Fn(ScanEvent) + Sync),
     ) -> Result<(), Refusal> {
         let cleaning = &self.0;
@@ -423,13 +424,16 @@ impl Working {
         let roots = roots_or_usual(&home, roots);
         let usage = usage_now().map_err(failed)?;
         let temp = harbormaster_cleaner::temp_folder(&home);
-        let survey = survey(
-            &home,
-            &roots,
-            idle_after(idle_days),
-            &usage,
-            temp.as_deref(),
-        );
+        let survey = Survey {
+            apps,
+            ..survey(
+                &home,
+                &roots,
+                idle_after(idle_days),
+                &usage,
+                temp.as_deref(),
+            )
+        };
         let mut findings = harbormaster_cleaner::scan_with(&survey, &cleaning.stop, &|measured| {
             told(ScanEvent::Measured(measured));
         })
@@ -623,6 +627,7 @@ fn survey<'a>(
         idle_after,
         now: SystemTime::now(),
         temp,
+        apps: None,
     }
 }
 
