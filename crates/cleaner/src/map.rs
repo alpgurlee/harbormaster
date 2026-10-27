@@ -117,8 +117,11 @@ impl Walker<'_> {
             };
             offered(&mut area, each);
         });
-        if !listed.is_ok_and(|missed| !missed) {
-            area.short = area.short.max(Some(Short::Denied));
+        match listed {
+            Ok(false) => {}
+            // What couldn't be read was left out, for a reason not known.
+            Ok(true) => area.short = area.short.max(Some(Short::Denied)),
+            Err(error) => area.short = area.short.max(Some(unopened(&error))),
         }
         // A stop while reading leaves the listing short without failing it.
         if self.stopped() {
@@ -239,11 +242,13 @@ fn record_of(inode: u128) -> Option<(u64, u8)> {
     (inode >> 64 == 0 && record < RECORDS).then_some((record, mark))
 }
 
-/// Why a folder listed a moment ago couldn't be opened: gone since, or made
-/// something else, or kept from us.
+/// Why a folder listed a moment ago couldn't be opened or read: gone since,
+/// or made something else, or kept from us by macOS or by its permissions.
 fn unopened(error: &io::Error) -> Short {
     if walk::changed(error) {
         Short::Changed
+    } else if walk::withheld(error) {
+        Short::Withheld
     } else {
         Short::Denied
     }
@@ -494,6 +499,16 @@ mod tests {
             let error = io::Error::from_raw_os_error(code);
             assert_eq!(unopened(&error), Short::Changed, "{error}");
         }
+        let denied = io::Error::from_raw_os_error(libc::EACCES);
+        assert_eq!(unopened(&denied), Short::Denied);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn tells_what_macos_withheld_from_what_permissions_deny() {
+        // macOS's privacy protection refuses with EPERM, a file's permissions with EACCES.
+        let withheld = io::Error::from_raw_os_error(libc::EPERM);
+        assert_eq!(unopened(&withheld), Short::Withheld);
         let denied = io::Error::from_raw_os_error(libc::EACCES);
         assert_eq!(unopened(&denied), Short::Denied);
     }

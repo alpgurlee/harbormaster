@@ -377,6 +377,12 @@ pub(crate) fn changed(error: &io::Error) -> bool {
     .contains(&error.raw_os_error())
 }
 
+/// Whether `error` is the system keeping something from this app whatever
+/// its permissions, which Windows doesn't do as macOS does.
+pub(crate) fn withheld(_error: &io::Error) -> bool {
+    false
+}
+
 /// Whether the names `a` and `b` name the same file, as Windows compares
 /// file names: ordinally, regardless of case.
 pub(crate) fn same_name(a: &OsStr, b: &OsStr) -> bool {

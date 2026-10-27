@@ -336,6 +336,13 @@ pub(crate) fn changed(error: &io::Error) -> bool {
     )
 }
 
+/// Whether `error` is the system keeping something from this app, as
+/// macOS's privacy protection does with EPERM, rather than its permissions,
+/// which refuse with EACCES. Elsewhere EPERM says other things.
+pub(crate) fn withheld(error: &io::Error) -> bool {
+    cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EPERM)
+}
+
 #[cfg(target_os = "macos")]
 fn errno() -> *mut libc::c_int {
     // SAFETY: __error has no preconditions; it returns this thread's errno.

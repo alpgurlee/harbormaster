@@ -381,8 +381,12 @@ pub enum Short {
     Deep,
     /// Something in it changed while it was being looked at.
     Changed,
-    /// Something in it couldn't be read, for its permissions or for macOS's.
+    /// Something in it couldn't be read, for its permissions or for a reason
+    /// not known.
     Denied,
+    /// The system kept something in it from being read, as macOS's privacy
+    /// protection does, which Full Disk Access may open.
+    Withheld,
     /// Other apps' data, left out unless asked for.
     Skipped,
     /// The map was stopped before it came to everything.

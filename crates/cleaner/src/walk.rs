@@ -12,9 +12,9 @@ mod unix;
 mod windows;
 
 #[cfg(unix)]
-pub(crate) use unix::{Dir, Item, changed};
+pub(crate) use unix::{Dir, Item, changed, withheld};
 #[cfg(windows)]
-pub(crate) use windows::{Dir, Item, changed, plain, same_name};
+pub(crate) use windows::{Dir, Item, changed, plain, same_name, withheld};
 
 /// How a folder or file is stored, as far as the cleaner looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
