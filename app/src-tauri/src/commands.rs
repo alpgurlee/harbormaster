@@ -140,8 +140,10 @@ pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reas
     blocking(move || app.state::<Quits>().quit(token)).await
 }
 
+/// Async, as a window Windows builds in a synchronous command deadlocks and
+/// stays white.
 #[tauri::command]
-pub(crate) fn open_settings(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn open_settings(app: AppHandle) -> Result<(), String> {
     settings::show(&app).map_err(|error| error.to_string())
 }
 

@@ -69,8 +69,10 @@ pub(crate) async fn clean_daemon_stop(approval: u64, app: AppHandle) -> Result<S
     .await
 }
 
+/// Async, as a window Windows builds in a synchronous command deadlocks and
+/// stays white.
 #[tauri::command]
-pub(crate) fn open_cleaner(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn open_cleaner(app: AppHandle) -> Result<(), String> {
     cleaner::show(&app).map_err(|error| error.to_string())
 }
 
