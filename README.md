@@ -5,7 +5,7 @@
 <h1 align="center">Harbormaster</h1>
 
 <p align="center">
-  A menu bar app for macOS that shows the dev servers running on your machine and lets you stop them,<br>
+  A menu bar and tray app for macOS and Windows that shows the dev servers running on your machine and lets you stop them,<br>
   and finds the build outputs and caches your tools leave behind.
 </p>
 
