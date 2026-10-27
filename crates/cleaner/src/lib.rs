@@ -12,8 +12,7 @@ mod large;
 mod map;
 mod measure;
 mod projects;
-/// Only Windows scans for them; the matching is the same everywhere.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// Each system scans its own places; the matching is the same everywhere.
 mod remnants;
 mod remove;
 mod space;
@@ -436,11 +435,22 @@ pub fn scan_with(
     candidates.extend(projects::candidates(&root, survey, stop));
     #[cfg(windows)]
     if let Some(apps) = survey.apps {
-        candidates.extend(remnants::candidates(
+        candidates.extend(remnants::in_app_data(
             &root,
             survey.home,
             apps,
             survey.busy,
+            stop,
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(apps) = survey.apps {
+        let owners = remnants::library_owners(survey.home, apps, survey.busy);
+        candidates.extend(remnants::in_library(
+            &root,
+            survey.home,
+            apps,
+            &owners,
             stop,
         ));
     }
@@ -520,6 +530,15 @@ pub fn apps(
     measured: &(dyn Fn(Measured) + Sync),
 ) -> io::Result<Vec<Finding>> {
     apps::listed(reach, busy, stop, measured)
+}
+
+/// `finding`, an app bundle listed by `reach`, as the app it is: its name
+/// and bundle identifier, read from its own Info.plist through real folders
+/// so that a scan can later tell what it left behind; none when the bundle
+/// or its identifier can't be read.
+#[cfg(target_os = "macos")]
+pub fn app_identity(reach: &Reach, finding: &Finding) -> Option<App> {
+    remnants::identity(reach, finding)
 }
 
 /// Whether the folder or file at `path` in `home` is still the one with

@@ -21,6 +21,7 @@ libproc = "=0.14.11"
 mach2 = "=0.7.0"
 objc2 = "=0.6.5"
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "libc", "NSRunningApplication"] }
+plist = "=1.10.1"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSError", "NSFileManager", "NSLocale", "NSProcessInfo", "NSString", "NSURL"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 socket2 = "=0.6.5"

@@ -204,6 +204,7 @@ fn described(installed: &Installed) -> App {
             .chain(harbormaster_platform::uninstaller(installed))
             .chain(installed.icon.iter().cloned())
             .collect(),
+        ids: Vec::new(),
     }
 }
 

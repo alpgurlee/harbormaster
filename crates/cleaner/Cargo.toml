@@ -14,6 +14,10 @@ serde.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# Reads an app bundle's Info.plist for its identifier.
+[target.'cfg(target_os = "macos")'.dependencies]
+plist.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
     "Wdk_Foundation",

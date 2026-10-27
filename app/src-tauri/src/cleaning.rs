@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+#[cfg(target_os = "macos")]
+use harbormaster_cleaner::App;
 use harbormaster_cleaner::{
     Apps, Cleaned, Finding, Group, Hunt, Measured, Outcome, Reach, Removal, Survey, Usage, Why,
 };
@@ -145,6 +147,10 @@ struct Ledger {
     /// The last map, kept whole so its places can be shown in Finder or File Explorer; none
     /// of them is ever taken to be removed.
     map: Option<Mapped>,
+    /// The apps moved to the Trash from here while the app runs, for what
+    /// they left behind.
+    #[cfg(target_os = "macos")]
+    trashed: Vec<App>,
     working: bool,
 }
 
@@ -403,6 +409,23 @@ impl Cleaning {
         Ok(path)
     }
 
+    /// Keeps `apps`, moved to the Trash from here, for what they left behind.
+    #[cfg(target_os = "macos")]
+    fn remember_trashed(&self, apps: impl IntoIterator<Item = App>) {
+        let mut ledger = self.lock();
+        for app in apps {
+            if !ledger.trashed.iter().any(|known| known.ids == app.ids) {
+                ledger.trashed.push(app);
+            }
+        }
+    }
+
+    /// The apps moved to the Trash from here while the app runs.
+    #[cfg(target_os = "macos")]
+    fn trashed(&self) -> Vec<App> {
+        self.lock().trashed.clone()
+    }
+
     fn lock(&self) -> MutexGuard<'_, Ledger> {
         self.ledger.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -424,6 +447,14 @@ impl Working {
         let roots = roots_or_usual(&home, roots);
         let usage = usage_now().map_err(failed)?;
         let temp = harbormaster_cleaner::temp_folder(&home);
+        // A Mac's scan is told what was moved to the Trash from here.
+        #[cfg(target_os = "macos")]
+        let trashed = Apps {
+            removed: cleaning.trashed(),
+            ..Apps::default()
+        };
+        #[cfg(target_os = "macos")]
+        let apps = apps.or(Some(&trashed));
         let survey = Survey {
             apps,
             ..survey(
@@ -526,7 +557,23 @@ impl Working {
             rest,
         } = cleaning.take(token, paths)?;
         let mut removals = Vec::new();
-        let cleaned = harbormaster_cleaner::account_home().and_then(|home| {
+        let home = harbormaster_cleaner::account_home();
+        // Who each app is must be read before it goes, from its own bundle.
+        #[cfg(target_os = "macos")]
+        let identities: Vec<(PathBuf, App)> = home
+            .as_ref()
+            .map(|home| {
+                chosen
+                    .iter()
+                    .filter(|finding| finding.group == Group::Applications)
+                    .filter_map(|finding| {
+                        harbormaster_cleaner::app_identity(&reach(home), finding)
+                            .map(|app| (finding.path.clone(), app))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let cleaned = home.and_then(|home| {
             harbormaster_cleaner::remove(
                 &reach(&home),
                 &chosen,
@@ -539,6 +586,14 @@ impl Working {
                 },
             )
         });
+        // Only an app that did go to the Trash is one to look for the data of.
+        #[cfg(target_os = "macos")]
+        cleaning.remember_trashed(identities.into_iter().filter_map(|(path, app)| {
+            removals
+                .iter()
+                .any(|removal| removal.path == path && removal.outcome == Outcome::Trashed)
+                .then_some(app)
+        }));
         // However it ended, the list is shown again before the window hears.
         let listed = cleaning.put_back(rest, stayed(shown, &removals)).into();
         told(match cleaned {

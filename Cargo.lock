@@ -1579,6 +1579,7 @@ version = "0.1.0"
 dependencies = [
  "harbormaster-platform",
  "libc",
+ "plist",
  "serde",
  "tempfile",
  "windows-sys 0.61.2",

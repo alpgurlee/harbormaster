@@ -247,6 +247,7 @@ fn app(name: &str, publisher: &str, folders: &[&Path]) -> App {
         name: name.to_owned(),
         publisher: Some(publisher.to_owned()),
         folders: folders.iter().map(|folder| folder.to_path_buf()).collect(),
+        ids: Vec::new(),
     }
 }
 
