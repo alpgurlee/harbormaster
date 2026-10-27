@@ -213,7 +213,7 @@ export type UninstallRefusal =
   | { code: "failed"; message: string };
 
 /** Why a place in the map may hold more than it says, the weightiest last. */
-export type Short = "deep" | "changed" | "denied" | "skipped" | "stopped";
+export type Short = "deep" | "changed" | "denied" | "withheld" | "skipped" | "stopped";
 
 /** A folder or file in a map of the home folder. */
 export interface Area {

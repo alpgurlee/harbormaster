@@ -107,6 +107,27 @@ describe("the space map", () => {
     expect(screen.queryByRole("button", { name: "Map with other apps' data" })).toBeNull();
   });
 
+  it("offers Full Disk Access where the system kept something from being read, where it has the setting", () => {
+    const mail = area("Mail", 4096, { folder: true, short: "withheld" });
+    const locked = area("locked", 4096, { folder: true, short: "denied" });
+    const home = { ...folder("dev", [mail, locked, notes], 0, { short: "withheld" }), id: 0 };
+    const onOpenFullDiskAccess = vi.fn();
+    const { rerender } = render(<SpaceMap root={home} onReveal={vi.fn()} onOpenFullDiskAccess={onOpenFullDiskAccess} />);
+    // Full Disk Access opens nothing a file's own permissions keep closed.
+    fireEvent.click(screen.getByRole("button", { name: /locked/ }));
+    expect(screen.queryByRole("button", { name: "Open Full Disk Access settings" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Mail/ }));
+    expect(screen.getByRole("region", { name: "Mail" }).textContent).toContain(
+      "The system kept some of it from being read; Full Disk Access may let Harbormaster read it",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Full Disk Access settings" }));
+
+    expect(onOpenFullDiskAccess).toHaveBeenCalledTimes(1);
+    rerender(<SpaceMap root={home} onReveal={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Open Full Disk Access settings" })).toBeNull();
+  });
+
   it("gives no size for a place it never looked in", () => {
     render(<SpaceMap root={root} onReveal={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Library/ }));

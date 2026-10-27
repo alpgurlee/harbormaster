@@ -104,6 +104,9 @@ export const cleanUninstall = (token: number, id: number) => invoke<void>("clean
 /** Opens Windows Settings at the installed apps; Windows only. Rejects with a `CleanRefusal`. */
 export const cleanOpenInstalledApps = () => invoke<void>("clean_open_installed_apps");
 
+/** Opens System Settings at Full Disk Access; macOS only. Rejects with a `CleanRefusal`. */
+export const cleanOpenFullDiskAccess = () => invoke<void>("clean_open_full_disk_access");
+
 /** Removes the findings at `paths`, which the scan under `token` listed. */
 export function cleanRun(token: number, paths: string[], onEvent: (event: RunEvent) => void): Promise<void> {
   const channel = new Channel<RunEvent>();

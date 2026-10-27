@@ -8,7 +8,7 @@ import { I18nProvider } from "./i18n";
 import { Panel } from "./Panel";
 import { QuitSheet, type Quitter } from "./QuitSheet";
 import { StopSheet, type Stopper } from "./StopSheet";
-import type { AppUsage, Finding, Program, ProgramList, RunEvent, ScanEvent, Service, UninstallRefusal, Update } from "./types";
+import type { AppUsage, Area, Finding, MapEvent, Program, ProgramList, RunEvent, ScanEvent, Service, UninstallRefusal, Update } from "./types";
 
 // Where a stop is the forced one, the panel says so.
 vi.mock("./platform", () => ({
@@ -29,7 +29,10 @@ vi.mock("./platform", () => ({
   },
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const NOW = Date.UTC(2026, 9, 16, 12, 0, 0);
 
@@ -293,6 +296,7 @@ describe("the cleaner on Windows", () => {
     const listings: ((list: ProgramList) => void)[] = [];
     const uninstalls: { token: number; id: number; answer: (refusal?: UninstallRefusal) => void }[] = [];
     const settings: "opened"[] = [];
+    const maps: ((event: MapEvent) => void)[] = [];
     const nothing = () => Promise.resolve();
     const backend: CleanerBackend = {
       scan: (onEvent) => {
@@ -315,8 +319,13 @@ describe("the cleaner on Windows", () => {
         return Promise.resolve();
       },
       recheck: () => new Promise(() => {}),
-      map: nothing,
+      map: (_others, onEvent) => {
+        maps.push(onEvent);
+        return Promise.resolve();
+      },
       revealArea: nothing,
+      // Windows has no Full Disk Access to open.
+      openFullDiskAccess: () => new Promise(() => {}),
       daemons: () => Promise.resolve([]),
       daemonPreview: () => new Promise(() => {}),
       daemonStop: () => new Promise(() => {}),
@@ -335,7 +344,7 @@ describe("the cleaner on Windows", () => {
         <Cleaner backend={backend} now={NOW} />
       </I18nProvider>,
     );
-    return { scans, runs, hunts, revealed, listings, uninstalls, settings };
+    return { scans, runs, hunts, revealed, listings, uninstalls, settings, maps };
   }
 
   /** Ends the scan with `findings`, as the app sends them. */
@@ -551,6 +560,28 @@ describe("the cleaner on Windows", () => {
       screen.getByText("Shows where the room in your home folder goes, AppData and hidden folders too. Nothing is moved or deleted."),
     ).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Also look in other apps' data" })).toBeNull();
+  });
+
+  it("offers no Full Disk Access where something couldn't be read, as Windows has none", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const driver = cleaner();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /^Space map/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Map" }));
+    const locked: Area = { id: 1, name: "Locked", bytes: 4096, folder: true, short: "denied", inside: [], rest: 0, folded: false };
+    const root: Area = { ...locked, id: 0, name: "dev", short: "denied", inside: [locked] };
+    act(() => driver.maps[0]({ kind: "done", token: 4, area: root }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Locked/ }));
+
+    expect(screen.getByRole("region", { name: "Locked" }).textContent).toContain("Some of it couldn't be read");
+    expect(screen.queryByRole("button", { name: "Open Full Disk Access settings" })).toBeNull();
   });
 
   const docker: Program = {

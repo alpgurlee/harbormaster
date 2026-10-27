@@ -8,6 +8,7 @@ import {
   cleanDisk,
   cleanHunt,
   cleanMap,
+  cleanOpenFullDiskAccess,
   cleanOpenInstalledApps,
   cleanPrograms,
   cleanRecheck,
@@ -43,6 +44,8 @@ export interface CleanerBackend extends DaemonStopper, Uninstaller {
   recheck: (token: number) => Promise<Finding[]>;
   map: (others: boolean, onEvent: (event: MapEvent) => void) => Promise<void>;
   revealArea: (token: number, id: number) => Promise<void>;
+  /** Opens System Settings at Full Disk Access, which a Mac alone has. */
+  openFullDiskAccess: () => Promise<void>;
   /** Of the items listed under `token`, those only known dev daemons keep in use. */
   daemons: (token: number) => Promise<string[]>;
 }
@@ -58,6 +61,7 @@ const BACKEND: CleanerBackend = {
   recheck: cleanRecheck,
   map: cleanMap,
   revealArea: cleanRevealArea,
+  openFullDiskAccess: cleanOpenFullDiskAccess,
   daemons: cleanDaemons,
   daemonPreview: cleanDaemonPreview,
   daemonStop: cleanDaemonStop,
@@ -515,6 +519,7 @@ export function Cleaner({
                 chart(true);
               },
               onReveal: (token, id) => backend.revealArea(token, id),
+              onOpenFullDiskAccess: () => backend.openFullDiskAccess().catch(console.error),
             })
           ) : first !== null ? (
             <Start
@@ -675,9 +680,14 @@ interface MapPage {
   /** Maps again with other apps' data too. */
   onMapOthers: () => void;
   onReveal: (token: number, id: number) => Promise<void>;
+  /** Opens System Settings at Full Disk Access, without which macOS 27 keeps other apps' data closed. */
+  onOpenFullDiskAccess: () => void;
 }
 
-function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMap, onMapOthers, onReveal }: MapPage) {
+function mapPage(
+  mapping: Mapping,
+  { disk, others, working, i18n, onOthers, onMap, onMapOthers, onReveal, onOpenFullDiskAccess }: MapPage,
+) {
   switch (mapping.kind) {
     case "ready":
       return (
@@ -697,7 +707,14 @@ function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMa
                   <input type="checkbox" checked={others} onChange={(event) => onOthers(event.target.checked)} />
                   {i18n.t("mapOthers")}
                 </label>
-                {others ? <p className={styles.hint}>{i18n.t("mapOthersHint")}</p> : null}
+                {others ? (
+                  <p className={styles.hint}>
+                    {i18n.t("mapOthersHint")}{" "}
+                    <button type="button" className={styles.settings} onClick={onOpenFullDiskAccess}>
+                      {i18n.t("openFullDiskAccess")}
+                    </button>
+                  </p>
+                ) : null}
               </>
             )}
           </Start>
@@ -725,6 +742,7 @@ function mapPage(mapping: Mapping, { disk, others, working, i18n, onOthers, onMa
           root={mapping.root}
           onReveal={(id) => onReveal(mapping.token, id)}
           onMapOthers={others || working ? undefined : onMapOthers}
+          onOpenFullDiskAccess={platform === "windows" ? undefined : onOpenFullDiskAccess}
         />
       );
   }

@@ -113,8 +113,10 @@ What gets chosen, and what happens to it:
 
 Shows where the space in your home folder goes, the Library and hidden folders included. Click a folder to
 go inside it. Nothing is moved or deleted from here. Other apps' data in `Library/Containers` and
-`Library/Group Containers` is left out unless you ask for it, since macOS asks for your permission first,
-and a folder that couldn't be read in full says so.
+`Library/Group Containers` is left out unless you ask for it. Earlier versions of macOS may ask for your
+permission before Harbormaster reads it; macOS 27 and later don't ask, but block the access and may show a
+notification about it, until you give Harbormaster Full Disk Access. A folder that couldn't be read in full
+says so, and one that the system kept from being read offers to open Full Disk Access in System Settings.
 
 ## Command line
 

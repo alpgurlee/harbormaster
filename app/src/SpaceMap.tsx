@@ -22,10 +22,12 @@ export interface SpaceMapProps {
   onReveal: (id: number) => Promise<void>;
   /** Maps again with other apps' data too, when that can start now. */
   onMapOthers?: () => void;
+  /** Opens the system's settings at Full Disk Access, where the system has it, for what macOS kept from being read. */
+  onOpenFullDiskAccess?: () => void;
 }
 
 /** A map of the home folder to go through: what each folder holds, as a list and as tiles sized by their room. */
-export function SpaceMap({ root, onReveal, onMapOthers }: SpaceMapProps) {
+export function SpaceMap({ root, onReveal, onMapOthers, onOpenFullDiskAccess }: SpaceMapProps) {
   const i18n = useI18n();
   const [trail, setTrail] = useState<Area[]>([root]);
   const [chosen, setChosen] = useState<Area | null>(null);
@@ -122,6 +124,11 @@ export function SpaceMap({ root, onReveal, onMapOthers }: SpaceMapProps) {
         {focus.short === "skipped" && onMapOthers !== undefined ? (
           <button type="button" className={styles.reveal} onClick={onMapOthers}>
             {i18n.t("mapWithOthers")}
+          </button>
+        ) : null}
+        {focus.short === "withheld" && onOpenFullDiskAccess !== undefined ? (
+          <button type="button" className={styles.reveal} onClick={onOpenFullDiskAccess}>
+            {i18n.t("openFullDiskAccess")}
           </button>
         ) : null}
         {focus === root ? null : (

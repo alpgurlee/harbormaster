@@ -235,6 +235,7 @@ export interface Messages {
   mapHintWindows: string;
   mapOthers: string;
   mapOthersHint: string;
+  openFullDiskAccess: string;
   mapLooking: string;
   mapCounted: Plural;
   mapAgain: string;
@@ -316,6 +317,7 @@ export interface Messages {
   shortDeep: string;
   shortChanged: string;
   shortDenied: string;
+  shortWithheld: string;
   shortSkipped: string;
   shortStopped: string;
 }
@@ -571,7 +573,9 @@ export const en: Messages = {
     "Shows where the room in your home folder goes, the Library and hidden folders too. Nothing is moved or deleted. macOS may ask whether Harbormaster may look in Desktop, Documents and Downloads.",
   mapHintWindows: "Shows where the room in your home folder goes, AppData and hidden folders too. Nothing is moved or deleted.",
   mapOthers: "Also look in other apps' data",
-  mapOthersHint: "macOS asks before Harbormaster can look there.",
+  mapOthersHint:
+    "macOS 27 and later won't ask for permission: they block the access and may show a notification about it. To let Harbormaster look there, give it Full Disk Access. Earlier versions may ask first.",
+  openFullDiskAccess: "Open Full Disk Access settings",
   mapLooking: "Mapping your home folder…",
   mapCounted: { one: "{items} item looked at", other: "{items} items looked at" },
   mapAgain: "Map again",
@@ -654,6 +658,7 @@ export const en: Messages = {
   shortDeep: "Goes deeper than the map looks",
   shortChanged: "Something in it changed while it was mapped",
   shortDenied: "Some of it couldn't be read",
+  shortWithheld: "The system kept some of it from being read; Full Disk Access may let Harbormaster read it",
   shortSkipped: "Holds other apps' data, not looked in",
   shortStopped: "Not all of it was mapped before the stop",
 };
@@ -909,7 +914,9 @@ export const tr: Messages = {
     "Ana klasöründeki alanın nereye gittiğini, Library ve gizli klasörler dahil gösterir. Hiçbir şey taşınmaz ya da silinmez. macOS, Masaüstü, Belgeler ve İndirilenler için izin isteyebilir.",
   mapHintWindows: "Ana klasöründeki alanın nereye gittiğini, AppData ve gizli klasörler dahil gösterir. Hiçbir şey taşınmaz ya da silinmez.",
   mapOthers: "Diğer uygulamaların verilerine de bak",
-  mapOthersHint: "macOS oraya bakılmadan önce izin ister.",
+  mapOthersHint:
+    "macOS 27 ve sonrası izin istemiyor: erişimi engelliyor ve bir bildirim gösterebiliyor. Harbormaster'ın bu verilere bakabilmesi için ona Tam Disk Erişimi vermen gerekir. Daha eski sürümler önce izin isteyebilir.",
+  openFullDiskAccess: "Tam Disk Erişimi ayarlarını aç",
   mapLooking: "Ana klasörün haritalanıyor…",
   mapCounted: { one: "{items} öğeye bakıldı", other: "{items} öğeye bakıldı" },
   mapAgain: "Yeniden haritala",
@@ -992,6 +999,7 @@ export const tr: Messages = {
   shortDeep: "Haritanın baktığından daha derine iniyor",
   shortChanged: "Haritalanırken içinde bir şey değişti",
   shortDenied: "Bir kısmı okunamadı",
+  shortWithheld: "Sistem bir kısmının okunmasına izin vermedi; Tam Disk Erişimi verirsen okunabilir",
   shortSkipped: "Diğer uygulamaların verisini içeriyor; bakılmadı",
   shortStopped: "Durdurulmadan önce tamamı haritalanamadı",
 };

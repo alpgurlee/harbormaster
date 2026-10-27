@@ -20,6 +20,7 @@ export const SHORT_TEXT: Record<Short, TextKey> = {
   deep: "shortDeep",
   changed: "shortChanged",
   denied: "shortDenied",
+  withheld: "shortWithheld",
   skipped: "shortSkipped",
   stopped: "shortStopped",
 };

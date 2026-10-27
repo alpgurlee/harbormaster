@@ -217,6 +217,22 @@ pub(crate) fn clean_open_installed_apps(app: AppHandle) -> Result<(), Refusal> {
         })
 }
 
+/// Opens System Settings at Full Disk Access: from macOS 27 on, macOS no
+/// longer asks before other apps' data is read, and keeps it closed to an
+/// app without that access.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) fn clean_open_full_disk_access(app: AppHandle) -> Result<(), Refusal> {
+    app.opener()
+        .open_url(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+            None::<&str>,
+        )
+        .map_err(|error| Refusal::Failed {
+            message: error.to_string(),
+        })
+}
+
 /// Maps this user's home folder, telling the window as it goes; the map
 /// comes last, under the token showing its places in Finder or File Explorer
 /// takes.

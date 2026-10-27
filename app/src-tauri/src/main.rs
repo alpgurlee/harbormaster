@@ -50,6 +50,7 @@ fn main() {
         actions::clean_scan,
         actions::clean_hunt,
         actions::clean_apps,
+        actions::clean_open_full_disk_access,
         actions::clean_map,
         actions::clean_run,
         actions::clean_recheck,

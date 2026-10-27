@@ -60,6 +60,7 @@ function fake() {
   const listings: ((event: ScanEvent) => void)[] = [];
   const runs: { token: number; paths: string[]; onEvent: (event: RunEvent) => void }[] = [];
   let stops = 0;
+  let fullDiskAccess = 0;
   let refusal: unknown = null;
   const revealed: string[] = [];
   const rechecks: { token: number; answer: (findings: Finding[]) => void }[] = [];
@@ -104,6 +105,10 @@ function fake() {
       shownAreas.push({ token, id });
       return Promise.resolve();
     },
+    openFullDiskAccess: () => {
+      fullDiskAccess += 1;
+      return Promise.resolve();
+    },
     daemons: () => stoppable(),
     daemonPreview: (token, path) => {
       daemonPreviews.push({ token, path });
@@ -145,6 +150,7 @@ function fake() {
     revealed,
     rechecks,
     stops: () => stops,
+    fullDiskAccess: () => fullDiskAccess,
     refuse: (next: unknown) => {
       refusal = next;
     },
@@ -1059,6 +1065,36 @@ describe("the space map", () => {
     fireEvent.click(screen.getByRole("button", { name: "Map with other apps' data" }));
 
     expect(driver.maps.map((map) => map.others)).toEqual([false, true]);
+  });
+
+  it("says macOS may keep other apps' data closed until Harbormaster has Full Disk Access, and opens it", () => {
+    const driver = fake();
+    show(driver.backend);
+    fireEvent.click(section());
+    expect(screen.queryByRole("button", { name: "Open Full Disk Access settings" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Also look in other apps' data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Full Disk Access settings" }));
+
+    screen.getByText(
+      "macOS 27 and later won't ask for permission: they block the access and may show a notification about it. To let Harbormaster look there, give it Full Disk Access. Earlier versions may ask first.",
+    );
+    expect(driver.fullDiskAccess()).toBe(1);
+    expect(driver.maps).toHaveLength(0);
+  });
+
+  it("opens Full Disk Access from a place the system kept from being read", () => {
+    const driver = fake();
+    show(driver.backend);
+    asked(true);
+    const containers = { ...mapped(4, "Containers", 0), folder: true, short: "withheld" as const };
+    const root = { ...ROOT, short: "withheld" as const, inside: [...ROOT.inside, containers] };
+    act(() => driver.maps[0].onEvent({ kind: "done", token: 4, area: root }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Containers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Full Disk Access settings" }));
+
+    expect(driver.fullDiskAccess()).toBe(1);
   });
 
   it("offers no map with other apps' data while a scan runs", () => {

@@ -111,7 +111,7 @@ const MAP: Area = numbered(
           held("Caches", 14, [held("Google", 4.2, []), held("Homebrew", 3.1, []), held("com.spotify.client", 1.8, [])]),
           held("Containers", 0, [], { short: "skipped" }),
           held("Group Containers", 0, [], { short: "skipped" }),
-          held("Mail", 0.4, [], { short: "denied" }),
+          held("Mail", 0.4, [], { short: "withheld" }),
         ],
         { short: "skipped" },
       ),
@@ -241,6 +241,7 @@ export const demo: CleanerBackend = {
     onEvent({ kind: "done", token: 9, area: MAP });
   },
   revealArea: () => Promise.resolve(),
+  openFullDiskAccess: () => Promise.resolve(),
   async programs() {
     await wait(400);
     return { token: 5, programs: PROGRAMS };
