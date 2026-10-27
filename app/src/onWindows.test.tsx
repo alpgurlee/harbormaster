@@ -15,6 +15,7 @@ vi.mock("./platform", () => ({
   platform: "windows",
   stopsAtOnce: true,
   closesWindows: true,
+  panelIsWindow: true,
   cleanerSections: ["developer", "system", "large", "apps"],
   listsPrograms: true,
   mapsHome: true,

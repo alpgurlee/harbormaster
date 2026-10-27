@@ -120,6 +120,11 @@ body {
   -webkit-user-select: none;
 }
 
+/* Windows draws every window opaque, so the page fills it. */
+:root[data-platform="windows"] body {
+  background: var(--surface);
+}
+
 button {
   cursor: default;
 }

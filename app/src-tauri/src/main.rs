@@ -124,6 +124,9 @@ fn main() {
             tray::create(app.handle())?;
             tray::speak(app.handle(), &app.state::<settings::Store>());
             app.manage(scanning::start(app.handle().clone()));
+            // Started on Windows, Harbormaster opens its window, as an app does.
+            #[cfg(windows)]
+            panel::show(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

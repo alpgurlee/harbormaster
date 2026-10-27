@@ -4,6 +4,7 @@ import { anchorPanel, dragPanel, hidePanel, inApp, openCleaner, openInBrowser, o
 import { Detail } from "./Detail";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
+import { panelIsWindow } from "./platform";
 import { QuitSheet } from "./QuitSheet";
 import { Settled } from "./Settled";
 import { StopSheet } from "./StopSheet";
@@ -56,10 +57,10 @@ function usePlaced(): [boolean, (placed: boolean) => void] {
   return [placed, setPlaced];
 }
 
-/** An Escape that nothing in the panel wanted closes it. */
+/** An Escape that nothing in the panel wanted closes it, unless it is a window of its own. */
 function useEscapeHides() {
   useEffect(() => {
-    if (!inApp) return;
+    if (!inApp || panelIsWindow) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) hidePanel().catch(console.error);
     };
@@ -144,7 +145,7 @@ export function App() {
 
   return (
     <Settled>
-      <div ref={frame} className={styles.frame}>
+      <div ref={frame} className={panelIsWindow ? `${styles.frame} ${styles.windowed}` : styles.frame}>
         <div ref={content} className={styles.content} inert={asking}>
           <Panel
             hidden={shown !== null}
@@ -157,7 +158,7 @@ export function App() {
             onQuit={askQuit}
             onClean={inApp ? clean : undefined}
             onSettings={inApp ? settle : undefined}
-            onDrag={inApp ? drag : undefined}
+            onDrag={inApp && !panelIsWindow ? drag : undefined}
             placed={placed}
             onAnchor={anchor}
           />
@@ -171,7 +172,7 @@ export function App() {
               onCopy={copy}
               onReveal={reveal}
               onStop={askStop}
-              onDrag={inApp ? drag : undefined}
+              onDrag={inApp && !panelIsWindow ? drag : undefined}
             />
           )}
         </div>

@@ -16,6 +16,11 @@ export const closesWindows = platform === "windows";
 /** The cleaner's sections. */
 export const cleanerSections: CleanModule[] = ["developer", "system", "large", "apps"];
 
+/** Whether the panel is a window of its own, with a title bar and a place
+ * in the taskbar that goes to the tray when minimized or closed, as on
+ * Windows, rather than hanging from the menu bar icon as on a Mac. */
+export const panelIsWindow = platform === "windows";
+
 /** Whether the apps section lists the programs installed, each removed by
  * its own uninstaller, as on Windows, rather than the user's own apps, each
  * moved to the Trash. */

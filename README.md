@@ -35,7 +35,9 @@ server. From a row you can open a server in the browser, show its project in Fin
 macOS slows the Mac down to cool it, the panel says so, and names the dev server using the most CPU if
 one uses half a core or more. The panel hangs from its menu bar icon and closes when you click away;
 drag it by its header and it stays open where you put it, on another screen too, until a button in its
-header puts it back.
+header puts it back. On Windows the panel is a window of its own: it opens when Harbormaster starts, goes
+to the tray when you minimize or close it, and comes back with a click on the tray icon, whose menu quits
+Harbormaster.
 
 How a stop works:
 

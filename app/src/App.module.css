@@ -12,6 +12,12 @@
   font: 13px/1.35 var(--font);
 }
 
+/* On Windows the panel is a window of its own, which Windows frames. */
+.windowed {
+  border: 0;
+  border-radius: 0;
+}
+
 .content {
   display: flex;
   flex: 1;

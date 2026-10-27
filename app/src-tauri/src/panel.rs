@@ -18,6 +18,10 @@ const GAP: f64 = 6.0;
 /// A click on the icon takes the panel's focus and so closes it; that same
 /// click must not open it again.
 const REOPEN_AFTER: Duration = Duration::from_millis(250);
+/// On Windows the panel is a window of its own, with a title bar and a place
+/// in the taskbar, that goes to the tray when minimized or closed; on a Mac
+/// it hangs from the menu bar icon and goes when it loses focus.
+const WINDOWED: bool = cfg!(windows);
 
 /// The tray icon's last place, which the panel hangs from.
 #[derive(Debug, Default)]
@@ -37,27 +41,32 @@ impl Anchor {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The icon the panel hangs from, unless the user put it elsewhere.
+    /// The icon the panel hangs from, unless the user put it elsewhere or
+    /// it is a window of its own.
     fn hung_from(&self) -> Option<Rect> {
         let hold = self.lock();
-        hold.icon.filter(|_| !hold.placed)
+        hold.icon.filter(|_| !hold.placed && !WINDOWED)
     }
 }
 
 /// The panel exists from the start, hidden, so it shows at once.
 pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
-    let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::default())
         .title("Harbormaster")
         .inner_size(WIDTH, 420.0)
         .resizable(false)
+        .visible(false);
+    #[cfg(windows)]
+    let builder = builder.center();
+    #[cfg(not(windows))]
+    let builder = builder
         .decorations(false)
         .transparent(true)
         .shadow(true)
         .always_on_top(true)
         .visible_on_all_workspaces(true)
-        .skip_taskbar(true)
-        .visible(false)
-        .build()?;
+        .skip_taskbar(true);
+    let window = builder.build()?;
     #[cfg(target_os = "macos")]
     {
         use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy};
@@ -70,14 +79,25 @@ pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
         );
     }
     let handle = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Focused(false) = event
-            && !handle.state::<Anchor>().lock().placed
-        {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(false) if !WINDOWED && !handle.state::<Anchor>().lock().placed => {
             hide(&handle);
         }
+        // Minimized or closed, the window goes to the tray, and Harbormaster runs on.
+        WindowEvent::Resized(_) if WINDOWED && minimized(&handle) => hide(&handle),
+        WindowEvent::CloseRequested { api, .. } if WINDOWED => {
+            api.prevent_close();
+            hide(&handle);
+        }
+        _ => {}
     });
     Ok(())
+}
+
+fn minimized(app: &AppHandle) -> bool {
+    app.get_webview_window(LABEL)
+        .and_then(|window| window.is_minimized().ok())
+        .unwrap_or(false)
 }
 
 /// The user drags the panel away from its icon. It stays where they put it.
@@ -97,11 +117,16 @@ pub(crate) fn placed(app: &AppHandle) -> bool {
     app.state::<Anchor>().lock().placed
 }
 
-/// The tray icon was clicked: open the panel under it, or close it.
+/// The tray icon was clicked: open the panel under it, or close it. A
+/// window of its own comes back instead, as from the taskbar.
 pub(crate) fn toggle(app: &AppHandle, icon: Rect) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
     };
+    if WINDOWED {
+        reveal(app, &window);
+        return;
+    }
     let just_hidden = {
         let anchor = app.state::<Anchor>();
         let mut hold = anchor.lock();
@@ -130,12 +155,21 @@ pub(crate) fn show(app: &AppHandle) {
 }
 
 fn reveal(app: &AppHandle, window: &WebviewWindow) {
-    // Put on a screen that is gone since, it would open out of reach.
-    let anchor = app.state::<Anchor>();
-    if anchor.lock().placed && !on_a_screen(app, window) {
-        anchor.lock().placed = false;
+    if WINDOWED {
+        // Back from the tray where it went minimized, at its own place again.
+        let _ = window.unminimize();
+        // Left on a screen that is gone since, it would open out of reach.
+        if !on_a_screen(app, window) {
+            let _ = window.center();
+        }
+    } else {
+        // Put on a screen that is gone since, it would open out of reach.
+        let anchor = app.state::<Anchor>();
+        if anchor.lock().placed && !on_a_screen(app, window) {
+            anchor.lock().placed = false;
+        }
+        place(app, window);
     }
-    place(app, window);
     let _ = window.show();
     let _ = window.set_focus();
     if let Some(scanning) = app.try_state::<Arc<Scanning>>() {
