@@ -1,8 +1,13 @@
 name: Release
 
 # A draft release for a version tag: the macOS app and the Windows installer,
-# the command line tool for each, and their checksums. Publishing the draft
-# is a person's step. Started by hand, it only builds, as a rehearsal.
+# the command line tool for each, the files the app's updater reads (the
+# Mac app as an archive, a signature for it and for the installer, and
+# latest.json naming them), and checksums. The signing key is the
+# TAURI_SIGNING_PRIVATE_KEY secret, with its password beside it; without the
+# key no update can be signed, and none installs unsigned. Publishing the
+# draft is a person's step, and only then does the updater see the release.
+# Started by hand, it only builds, as a rehearsal.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
@@ -76,9 +81,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # The updater's archive and signature are asked for here only, so a
+      # build from a checkout needs no key.
       - name: App
         working-directory: app
-        run: npx tauri build --bundles dmg --target universal-apple-darwin -- --locked
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: >
+          npx tauri build --bundles dmg --target universal-apple-darwin
+          --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
       - name: Command line tool
         run: |
@@ -94,6 +106,10 @@ jobs:
           mkdir release
           cp target/universal-apple-darwin/release/bundle/dmg/*.dmg \
             "release/Harbormaster-$VERSION-macos-universal.dmg"
+          cp target/universal-apple-darwin/release/bundle/macos/Harbormaster.app.tar.gz \
+            "release/Harbormaster-$VERSION-macos-universal.app.tar.gz"
+          cp target/universal-apple-darwin/release/bundle/macos/Harbormaster.app.tar.gz.sig \
+            "release/Harbormaster-$VERSION-macos-universal.app.tar.gz.sig"
           tar -czf "release/harbormaster-cli-$VERSION-macos-universal.tar.gz" -C cli harbormaster
           cd release
           shasum -a 256 -- * > SHA256SUMS-macos.txt
@@ -137,7 +153,10 @@ jobs:
 
       - name: Installer
         working-directory: app
-        run: npx tauri build --bundles nsis -- --locked
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
       - name: Command line tool
         run: cargo build --release --locked -p harbormaster-cli
@@ -146,6 +165,7 @@ jobs:
         run: |
           mkdir release
           cp target/release/bundle/nsis/*.exe "release/Harbormaster-$VERSION-windows-x64-setup.exe"
+          cp target/release/bundle/nsis/*.exe.sig "release/Harbormaster-$VERSION-windows-x64-setup.exe.sig"
           powershell -NoProfile -Command "Compress-Archive -Path target/release/harbormaster.exe -DestinationPath release/harbormaster-cli-$VERSION-windows-x64.zip"
           cd release
           sha256sum -- * > SHA256SUMS-windows.txt
@@ -181,5 +201,22 @@ jobs:
           cd release
           cat SHA256SUMS-*.txt > SHA256SUMS.txt
           rm SHA256SUMS-*.txt
+          # What the app's updater reads: the newest version, and where each system's
+          # package is with its signature. A universal Mac build serves both chips.
+          mac="Harbormaster-$VERSION-macos-universal.app.tar.gz"
+          win="Harbormaster-$VERSION-windows-x64-setup.exe"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "https://github.com/$GH_REPO/releases/tag/$TAG" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg mac "https://github.com/$GH_REPO/releases/download/$TAG/$mac" \
+            --arg macsig "$(cat "$mac.sig")" \
+            --arg win "https://github.com/$GH_REPO/releases/download/$TAG/$win" \
+            --arg winsig "$(cat "$win.sig")" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: {
+              "darwin-aarch64": {url: $mac, signature: $macsig},
+              "darwin-x86_64": {url: $mac, signature: $macsig},
+              "windows-x86_64": {url: $win, signature: $winsig}}}' > latest.json
+          sha256sum latest.json >> SHA256SUMS.txt
           gh release create "$TAG" --draft --verify-tag --generate-notes \
             --title "Harbormaster $VERSION" -- *
