@@ -145,6 +145,7 @@ export interface Messages {
   aboutXcode: string;
   aboutApps: string;
   aboutRemnants: string;
+  aboutRemnantsWindows: string;
   aboutTemp: string;
   aboutLogs: string;
   aboutLogsWindows: string;
@@ -469,6 +470,8 @@ export const en: Messages = {
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
   aboutRemnants:
+    "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
+  aboutRemnantsWindows:
     "Folders in AppData named like an app whose uninstaller you started from here and that is gone from the installed apps since. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Recycle Bin. The removed apps are forgotten when Harbormaster quits.",
   aboutTemp: "What apps put aside while they ran. Only what nothing has touched for a week goes, and none of what a program works in.",
   aboutLogs: "What apps wrote down about their past runs.",
@@ -805,6 +808,8 @@ export const tr: Messages = {
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
   aboutRemnants:
+    "Buradan Çöp Sepeti'ne taşıdığın bir uygulamadan Library klasöründe kalanlar: paket kimliğini taşıyan ya da tam adıyla adlandırılmış girdiler. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Çöp Sepeti'ne gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
+  aboutRemnantsWindows:
     "AppData içinde, kaldırma aracını buradan başlattığın ve o zamandan beri yüklü uygulamalar arasında görünmeyen bir uygulamanın adını taşıyan klasörler. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Geri Dönüşüm Kutusu'na gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
   aboutTemp: "Uygulamaların çalışırken bir kenara koydukları. Yalnızca bir haftadır dokunulmamış olanlar gider; bir programın içinde çalıştığı hiçbir şey gitmez.",
   aboutLogs: "Uygulamaların geçmiş çalışmaları hakkında tuttuğu kayıtlar.",

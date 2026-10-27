@@ -27,7 +27,7 @@ export const ABOUT: Record<CleanGroup, TextKey> = {
   packages: "aboutPackages",
   xcode: "aboutXcode",
   apps: "aboutApps",
-  remnants: "aboutRemnants",
+  remnants: platform === "windows" ? "aboutRemnantsWindows" : "aboutRemnants",
   temp: "aboutTemp",
   logs: platform === "windows" ? "aboutLogsWindows" : "aboutLogs",
   trash: "aboutTrash",

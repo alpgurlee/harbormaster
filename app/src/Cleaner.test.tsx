@@ -670,6 +670,34 @@ describe("the cleaner window", () => {
     expect(driver.listings).toHaveLength(2);
   });
 
+  it("lists what an app moved to the Trash from here left in the Library, for the Trash", () => {
+    const remnant: Finding = {
+      group: "remnants",
+      kind: "personal",
+      name: "Docker Desktop · com.docker.docker",
+      path: "/Users/dev/Library/Caches/com.docker.docker",
+      bytes: 3 * 1024 ** 2,
+      picked: false,
+      inUse: null,
+      touched: null,
+      project: null,
+      emptied: false,
+    };
+    const driver = fake();
+    show(driver.backend);
+    found(driver, [remnant]);
+    section("Leftovers");
+
+    expect(screen.getByRole("button", { name: /^Removed apps' data/ })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("~/Library/Caches/com.docker.docker · goes to the Trash")).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Docker Desktop · com.docker.docker" }) as HTMLInputElement).checked).toBe(false);
+  });
+
   it("shows an item in Finder through the app, by its path", () => {
     const driver = fake();
     show(driver.backend);

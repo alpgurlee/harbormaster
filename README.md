@@ -67,9 +67,11 @@ A scan looks for:
 - **Package caches** of npm, pnpm, Yarn, Bun, pip, uv, Poetry, Cargo, Go, Composer, Dart, Deno, SwiftPM,
   Carthage, Gradle, Maven, NuGet, CocoaPods, Homebrew and Playwright.
 - **Xcode data**: DerivedData, simulator caches, device support files and archives.
-- **Leftovers**: app caches, logs and the Trash. On Windows, also the folders in AppData named like an app
-  you uninstalled from Harbormaster's Apps section that is gone from the installed apps since; they are
-  never chosen for you, go to the Recycle Bin, and are forgotten when Harbormaster quits.
+- **Leftovers**: app caches, logs and the Trash. Also what an app you removed from the Apps section left
+  behind: on a Mac, entries in your Library carrying the bundle identifier of an app you moved to the Trash
+  from here, or named exactly like it; on Windows, folders in AppData named like an app whose uninstaller
+  you started from here and that is gone from the installed apps since. Never chosen for you; they go to the
+  Trash or the Recycle Bin, and the removed apps are forgotten when Harbormaster quits.
 
 Two more sections look only when you ask. **Large files** lists files taking 50 MB or more on disk in
 your home folder outside the Library (on Windows, AppData), leaving out hidden files, the insides of app
