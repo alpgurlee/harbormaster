@@ -12,8 +12,15 @@ and the steps that show the problem.
 Harbormaster runs as you, with no administrator rights and no helper tool, and it won't run as root:
 its checks judge what is safe to stop or remove by your own user. On Windows it may ask Windows to start
 an app's own uninstaller as an administrator, after you confirm and only once Windows' own prompt has
-your yes; Harbormaster itself stays as it was. It makes no network connections of its own: there is no
-telemetry and no update check. Opening a server in the browser hands its address to your browser.
+your yes; Harbormaster itself stays as it was. Opening a server in the browser hands its address to your
+browser.
+
+Its one network connection of its own is the update check. When it starts and every six hours after, unless
+you turn the check off in Settings → About, it asks GitHub for the newest release's `latest.json`; GitHub sees
+your IP address and the request, as any website does, and Harbormaster sends no account or device identifier.
+Only when you choose Update does it download the new version, from GitHub, and it installs nothing whose
+signature doesn't check against the key built into the app, nor a version older than the one running. There is
+no telemetry.
 
 It can end processes, delete files and, on Windows, start an app's uninstaller, so each goes through
 checks first:

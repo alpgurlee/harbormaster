@@ -146,6 +146,10 @@ one in particular), so each system asks once before the first start. On macOS, o
 next to Harbormaster; on an older macOS, Control-click the app and choose Open. On Windows, SmartScreen says
 it protected your PC: choose More info, then Run anyway.
 
+When a newer version is out, the panel says so and installs it when you choose Update, after checking its
+signature; nothing is downloaded before that. The check asks GitHub for the newest release when Harbormaster
+starts and every six hours, and can be turned off in Settings → About.
+
 ## Building
 
 You need macOS 12 or later, the Xcode Command Line Tools (`xcode-select --install`),
