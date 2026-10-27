@@ -4,12 +4,14 @@ import { anchorPanel, dragPanel, hidePanel, inApp, openCleaner, openInBrowser, o
 import { Detail } from "./Detail";
 import { projectOf, tintsOf } from "./model";
 import { Panel } from "./Panel";
-import { panelIsWindow } from "./platform";
+import { panelIsWindow, platform } from "./platform";
 import { QuitSheet } from "./QuitSheet";
 import { Settled } from "./Settled";
 import { StopSheet } from "./StopSheet";
 import { useUpdate } from "./store";
 import type { AppUsage, Service } from "./types";
+import { UpdateBar } from "./UpdateBar";
+import { UPDATER, useUpdateStatus } from "./updater";
 import styles from "./App.module.css";
 
 /** Re-renders now and then, so ages and uptimes move without a new scan. */
@@ -103,6 +105,19 @@ export function App() {
     anchorPanel().catch(console.error);
   };
   const now = Math.max(useNow(5_000), update?.scannedAt ?? 0);
+  const updating = useUpdateStatus(inApp ? UPDATER : null);
+  // A version put off with Later stays out of sight this run; a newer one shows.
+  const [later, setLater] = useState<string | null>(null);
+  const banner =
+    updating === null || (updating.kind === "available" && updating.version === later) ? null : (
+      <UpdateBar
+        status={updating}
+        onUpdate={() => UPDATER.install().catch(console.error)}
+        onLater={() => setLater(updating.kind === "available" ? updating.version : null)}
+        onWhatsNew={() => UPDATER.whatsNew().catch(console.error)}
+        onAllow={platform === "mac" ? () => UPDATER.openAppManagement().catch(console.error) : undefined}
+      />
+    );
   const [shown, setShown] = useState<string | null>(null);
   // The server as it was when asked about, so the question stays put while scans go on.
   const [stopping, setStopping] = useState<Service | null>(null);
@@ -161,6 +176,7 @@ export function App() {
             onDrag={inApp && !panelIsWindow ? drag : undefined}
             placed={placed}
             onAnchor={anchor}
+            banner={banner}
           />
           {shown === null ? null : (
             <Detail

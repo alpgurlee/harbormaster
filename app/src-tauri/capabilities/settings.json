@@ -1,12 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "What the settings window may ask of the app: to read and change the settings, to be told them as they change, and to be dragged by its top.",
+  "description": "What the settings window may ask of the app: to read and change the settings, to be told them and what is known of updates as they change, to have an update checked for, installed or its notes shown, on a Mac to open System Settings at App Management, and to be dragged by its top.",
   "windows": ["settings"],
   "permissions": [
     "allow-settings-get",
     "allow-settings-subscribe",
     "allow-settings-set",
+    "allow-update-subscribe",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-whats-new",
+    "allow-update-open-app-management",
     "core:window:allow-start-dragging"
   ]
 }

@@ -11,7 +11,7 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
 });
 
-const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30 };
+const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30, checkUpdates: true };
 
 /** Settings the test tells the window of, as the app does: what is in force first, then each change. */
 function source() {

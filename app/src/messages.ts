@@ -308,6 +308,27 @@ export interface Messages {
   aboutTextWindows: string;
   aboutLicense: string;
   version: string;
+  updateAvailable: string;
+  updateNow: string;
+  updateLater: string;
+  updateWhatsNew: string;
+  updateDownloading: string;
+  updateDownloadingSome: string;
+  updateInstalling: string;
+  updateFailed: string;
+  updateBusy: string;
+  updateCancelled: string;
+  updatePermission: string;
+  openAppManagement: string;
+  updateTryAgain: string;
+  updatesCheck: string;
+  updatesHint: string;
+  updatesCheckNow: string;
+  updatesChecking: string;
+  updatesUpToDate: string;
+  updatesNeverChecked: string;
+  updatesOff: string;
+  updatesCouldNotCheck: string;
   invalidIdleDays: string;
   invalidRoot: string;
   invalidTooMany: string;
@@ -649,6 +670,28 @@ export const en: Messages = {
   aboutTextWindows: "A tray app for the dev servers on your PC, and a cleaner for what your tools leave behind.",
   aboutLicense: "Free and open source, under the MIT License.",
   version: "Version {version}",
+  updateAvailable: "Harbormaster {version} is available",
+  updateNow: "Update",
+  updateLater: "Later",
+  updateWhatsNew: "What's new",
+  updateDownloading: "Downloading {version}… {percent}%",
+  updateDownloadingSome: "Downloading {version}…",
+  updateInstalling: "Installing {version}…",
+  updateFailed: "The update couldn't be installed: {message}",
+  updateBusy: "Finish what Harbormaster is doing first, then try again.",
+  updateCancelled: "The update was cancelled.",
+  updatePermission: "macOS didn't let Harbormaster replace itself. Allow it under App Management, then try again.",
+  openAppManagement: "Open App Management settings",
+  updateTryAgain: "Try again",
+  updatesCheck: "Check for updates when Harbormaster starts and every six hours",
+  updatesHint:
+    "The check asks GitHub for the latest version; GitHub sees your IP address, as any website does. Nothing is downloaded or installed until you choose Update.",
+  updatesCheckNow: "Check now",
+  updatesChecking: "Checking…",
+  updatesUpToDate: "Up to date · checked {time}",
+  updatesNeverChecked: "Not checked yet.",
+  updatesOff: "Automatic checks are off.",
+  updatesCouldNotCheck: "Couldn't check: {message}",
   invalidIdleDays: "Days must be from 1 to 365.",
   invalidRoot: "{path} isn't a folder inside your home folder.",
   invalidTooMany: "That is more than 64.",
@@ -990,6 +1033,29 @@ export const tr: Messages = {
   aboutTextWindows: "Bilgisayarındaki dev sunucuları için bir sistem tepsisi uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",
   aboutLicense: "Ücretsiz ve açık kaynak; MIT Lisansı ile.",
   version: "Sürüm {version}",
+  updateAvailable: "Harbormaster {version} yayınlandı",
+  updateNow: "Güncelle",
+  updateLater: "Daha sonra",
+  updateWhatsNew: "Yenilikler",
+  updateDownloading: "{version} indiriliyor… %{percent}",
+  updateDownloadingSome: "{version} indiriliyor…",
+  updateInstalling: "{version} kuruluyor…",
+  updateFailed: "Güncelleme kurulamadı: {message}",
+  updateBusy: "Önce Harbormaster'ın süren işi bitsin, sonra yeniden dene.",
+  updateCancelled: "Güncelleme iptal edildi.",
+  updatePermission:
+    "macOS, Harbormaster'ın kendini değiştirmesine izin vermedi. Uygulama Yönetimi'nden izin ver, sonra yeniden dene.",
+  openAppManagement: "Uygulama Yönetimi ayarlarını aç",
+  updateTryAgain: "Yeniden dene",
+  updatesCheck: "Harbormaster başlarken ve altı saatte bir güncellemeleri denetle",
+  updatesHint:
+    "Denetim GitHub'a son sürümü sorar; GitHub, her web sitesi gibi IP adresini görür. Sen Güncelle demeden hiçbir şey indirilmez ya da kurulmaz.",
+  updatesCheckNow: "Şimdi denetle",
+  updatesChecking: "Denetleniyor…",
+  updatesUpToDate: "Güncel · son denetim {time}",
+  updatesNeverChecked: "Henüz denetlenmedi.",
+  updatesOff: "Kendiliğinden denetim kapalı.",
+  updatesCouldNotCheck: "Denetlenemedi: {message}",
   invalidIdleDays: "Gün sayısı 1 ile 365 arasında olmalı.",
   invalidRoot: "{path}, ana klasörünün içinde bir klasör değil.",
   invalidTooMany: "Bu, 64'ten fazla.",

@@ -30,6 +30,7 @@ tauri = { version = "=2.12.4", features = ["tray-icon", "macos-private-api"] }
 tauri-build = { version = "=2.7.3", features = [] }
 tauri-plugin-opener = "=2.7.2"
 tauri-plugin-single-instance = "=2.5.4"
+tauri-plugin-updater = { version = "=2.14.0", default-features = false, features = ["native-tls", "system-proxy", "zip"] }
 tempfile = "=3.27.0"
 thiserror = "=2.0.21"
 toml = "=1.1.8"

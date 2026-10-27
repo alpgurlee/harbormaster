@@ -249,7 +249,22 @@ export interface Settings {
   roots: string[];
   /** How long a project sits untouched before its build outputs are chosen. */
   idleDays: number;
+  /** Whether to ask GitHub for a newer version now and then. */
+  checkUpdates: boolean;
 }
+
+/** Why an update didn't come through. */
+export type UpdateWhy = "check" | "busy" | "permission" | "cancelled" | "install";
+
+/** What the app knows of a newer version. */
+export type UpdateStatus =
+  | { kind: "off" }
+  | { kind: "idle"; checkedAt: number | null }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "downloading"; version: string; percent: number | null }
+  | { kind: "installing"; version: string }
+  | { kind: "failed"; version: string | null; why: UpdateWhy; message: string };
 
 /** Why settings were turned down. */
 export type SettingsRefusal =

@@ -18,6 +18,7 @@ use harbormaster_cleaner::{Area, Chart, Charting};
 use harbormaster_engine::{Classification, Scanner, live};
 use serde::Serialize;
 
+use crate::activity::{Activity, Doing};
 use crate::scanning;
 
 /// The least room a file takes to be listed as large: 50 MB, as the window says.
@@ -138,6 +139,8 @@ pub(crate) enum Refusal {
 pub(crate) struct Cleaning {
     ledger: Mutex<Ledger>,
     stop: AtomicBool,
+    /// What a restart must not cut short, shared with the stops and quits.
+    activity: Arc<Activity>,
 }
 
 #[derive(Debug, Default)]
@@ -211,11 +214,15 @@ impl Search {
 /// that a stop from then on holds; another can start once it is dropped.
 /// It outlives the window, which only hides when closed.
 #[derive(Debug)]
-pub(crate) struct Working(Arc<Cleaning>);
+pub(crate) struct Working {
+    cleaning: Arc<Cleaning>,
+    /// Counted as under way until the work ends, so an update waits for it.
+    _doing: Doing,
+}
 
 impl Drop for Working {
     fn drop(&mut self) {
-        self.0.lock().working = false;
+        self.cleaning.lock().working = false;
     }
 }
 
@@ -223,13 +230,27 @@ impl Cleaning {
     /// Takes the slot for a scan or removal. A stop from before is
     /// forgotten; one from then on holds.
     pub(crate) fn begin(self: &Arc<Self>) -> Result<Working, Refusal> {
+        let doing = self.activity.begin().map_err(|_| Refusal::Failed {
+            message: crate::commands::UPDATING.into(),
+        })?;
         let mut ledger = self.lock();
         if ledger.working {
             return Err(Refusal::Busy);
         }
         ledger.working = true;
         self.stop.store(false, Ordering::Relaxed);
-        Ok(Working(Arc::clone(self)))
+        Ok(Working {
+            cleaning: Arc::clone(self),
+            _doing: doing,
+        })
+    }
+
+    /// One that counts its work with `activity`, as the stops and quits do.
+    pub(crate) fn sharing(activity: Arc<Activity>) -> Self {
+        Self {
+            activity,
+            ..Self::default()
+        }
     }
 
     /// Cuts the scan or removal under way short.
@@ -442,7 +463,7 @@ impl Working {
         apps: Option<&Apps>,
         told: &(dyn Fn(ScanEvent) + Sync),
     ) -> Result<(), Refusal> {
-        let cleaning = &self.0;
+        let cleaning = &self.cleaning;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let roots = roots_or_usual(&home, roots);
         let usage = usage_now().map_err(failed)?;
@@ -481,7 +502,7 @@ impl Working {
 
     /// Hunts for this user's large files, telling `told` as it goes.
     pub(crate) fn hunt(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
-        let cleaning = &self.0;
+        let cleaning = &self.cleaning;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let usage = usage_now().map_err(failed)?;
         let hunt = Hunt {
@@ -506,7 +527,7 @@ impl Working {
     /// Maps this user's home folder, and other apps' data in it when
     /// `others` asks, telling `told` as it goes.
     pub(crate) fn map(&self, others: bool, told: &mut dyn FnMut(MapEvent)) -> Result<(), Refusal> {
-        let cleaning = &self.0;
+        let cleaning = &self.cleaning;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let chart = Chart {
             home: &home,
@@ -524,7 +545,7 @@ impl Working {
     /// Lists this user's own apps, telling `told` as it goes.
     #[cfg(target_os = "macos")]
     pub(crate) fn apps(&self, told: &(dyn Fn(ScanEvent) + Sync)) -> Result<(), Refusal> {
-        let cleaning = &self.0;
+        let cleaning = &self.cleaning;
         let home = harbormaster_cleaner::account_home().map_err(failed)?;
         let usage = usage_now().map_err(failed)?;
         let mut findings =
@@ -550,7 +571,7 @@ impl Working {
         paths: &[PathBuf],
         told: &mut dyn FnMut(RunEvent),
     ) -> Result<(), Refusal> {
-        let cleaning = &self.0;
+        let cleaning = &self.cleaning;
         let Taken {
             chosen,
             shown,

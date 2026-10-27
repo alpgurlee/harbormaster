@@ -222,6 +222,12 @@
   max-width: 460px;
 }
 
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .about p {
   margin: 0;
   line-height: 1.5;

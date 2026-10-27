@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-import type { Disk, Finding, Holder, MapEvent, ProgramList, Protection, RunEvent, ScanEvent, Settings, Update } from "./types";
+import type { Disk, Finding, Holder, MapEvent, ProgramList, Protection, RunEvent, ScanEvent, Settings, Update, UpdateStatus } from "./types";
 
 /** Why the app turned a stop down. */
 export type Reason =
@@ -73,6 +73,19 @@ export function settingsSubscribe(told: (settings: Settings) => void): Promise<v
   channel.onmessage = told;
   return invoke("settings_subscribe", { channel });
 }
+
+/** Calls `told` with what is known of updates, then each time it changes. */
+export function updateSubscribe(told: (status: UpdateStatus) => void): Promise<void> {
+  const channel = new Channel<UpdateStatus>();
+  channel.onmessage = told;
+  return invoke("update_subscribe", { channel });
+}
+export const updateCheck = () => invoke<void>("update_check");
+export const updateInstall = () => invoke<void>("update_install");
+/** Opens the release page of the version found in the browser. */
+export const updateWhatsNew = () => invoke<void>("update_whats_new");
+/** Opens System Settings at App Management; macOS only. */
+export const updateOpenAppManagement = () => invoke<void>("update_open_app_management");
 
 /** Rejects with a `CleanRefusal`; the findings come as the last event. */
 export function cleanScan(onEvent: (event: ScanEvent) => void): Promise<void> {

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
+mod activity;
 mod cleaner;
 mod cleaning;
 mod commands;
@@ -14,6 +15,7 @@ mod scanning;
 mod settings;
 mod stopping;
 mod tray;
+mod updates;
 
 use tauri::Manager;
 
@@ -31,7 +33,8 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             panel::show(app);
         }))
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "macos")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         commands::subscribe,
@@ -40,6 +43,7 @@ fn main() {
         commands::stop_preview,
         commands::stop,
         commands::force_stop,
+        commands::update_open_app_management,
         commands::quit_app_preview,
         commands::quit_app,
         actions::open_cleaner,
@@ -47,6 +51,10 @@ fn main() {
         commands::settings_get,
         commands::settings_subscribe,
         commands::settings_set,
+        commands::update_subscribe,
+        commands::update_check,
+        commands::update_install,
+        commands::update_whats_new,
         actions::clean_scan,
         actions::clean_hunt,
         actions::clean_apps,
@@ -83,6 +91,10 @@ fn main() {
         commands::settings_get,
         commands::settings_subscribe,
         commands::settings_set,
+        commands::update_subscribe,
+        commands::update_check,
+        commands::update_install,
+        commands::update_whats_new,
         actions::clean_scan,
         actions::clean_hunt,
         actions::clean_programs,
@@ -112,7 +124,10 @@ fn main() {
             }
             #[cfg(windows)]
             app.manage(programs::Programs::default());
-            app.manage(std::sync::Arc::new(cleaning::Cleaning::default()));
+            let activity = std::sync::Arc::new(activity::Activity::default());
+            app.manage(std::sync::Arc::clone(&activity));
+            app.manage(std::sync::Arc::new(cleaning::Cleaning::sharing(activity)));
+            app.manage(updates::Updates::default());
             app.manage(stopping::Approvals::default());
             app.manage(quitting::Quits::default());
             app.manage(panel::Anchor::default());
@@ -124,6 +139,7 @@ fn main() {
             tray::create(app.handle())?;
             tray::speak(app.handle(), &app.state::<settings::Store>());
             app.manage(scanning::start(app.handle().clone()));
+            updates::start(app.handle().clone());
             // Started on Windows, Harbormaster opens its window, as an app does.
             #[cfg(windows)]
             panel::show(app.handle());

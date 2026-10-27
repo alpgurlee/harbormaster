@@ -62,6 +62,7 @@ pub(crate) async fn clean_daemon_preview(
 #[tauri::command]
 pub(crate) async fn clean_daemon_stop(approval: u64, app: AppHandle) -> Result<Stopped, Reason> {
     blocking(move || {
+        let _doing = crate::commands::doing(&app)?;
         let cleaning = app.state::<Arc<Cleaning>>();
         app.state::<Daemons>()
             .stop(approval, |token| cleaning.shown(token).ok())
@@ -199,6 +200,13 @@ pub(crate) async fn clean_uninstall(
     // Windows' prompt belongs to this window, so that it comes to the front.
     let owner = window.hwnd().ok().map(|window| window.0 as isize);
     tauri::async_runtime::spawn_blocking(move || {
+        // Windows may wait for the user at its prompt; an update waits for that.
+        let _doing = app
+            .state::<Arc<crate::activity::Activity>>()
+            .begin()
+            .map_err(|_| programs::Refusal::Failed {
+                message: crate::commands::UPDATING.into(),
+            })?;
         app.state::<Programs>().uninstall(token, id, owner)
     })
     .await

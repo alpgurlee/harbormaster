@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { version } from "../package.json";
-import { settingsGet, settingsSet } from "./api";
+import { inApp, settingsGet, settingsSet } from "./api";
 import { useI18n, type TextKey, type Translator } from "./i18n";
 import { platform } from "./platform";
-import type { Appearance, Settings, SettingsRefusal } from "./types";
+import type { Appearance, Settings, SettingsRefusal, UpdateStatus } from "./types";
+import { UPDATER, failureText, progressText, useUpdateStatus, type Updater } from "./updater";
 import styles from "./SettingsWindow.module.css";
 
 /** Where the window reads and keeps the settings, which tests hand in themselves. */
@@ -31,8 +32,16 @@ const APPEARANCES: [Appearance, TextKey][] = [
 ];
 
 /** What the user can set, each kept as soon as it is changed. */
-export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBackend }) {
+export function SettingsWindow({
+  backend = BACKEND,
+  updater = inApp ? UPDATER : null,
+}: {
+  backend?: SettingsBackend;
+  /** Asks about and installs updates; without one, the About section only shows the version. */
+  updater?: Updater | null;
+}) {
   const i18n = useI18n();
+  const updating = useUpdateStatus(updater);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [section, setSection] = useState<Section>("general");
   const [refusal, setRefusal] = useState<SettingsRefusal | null>(null);
@@ -173,6 +182,35 @@ export function SettingsWindow({ backend = BACKEND }: { backend?: SettingsBacken
               <p>{i18n.t(platform === "windows" ? "aboutTextWindows" : "aboutText")}</p>
               <p className={styles.hint}>{i18n.t("aboutLicense")}</p>
               <p className={styles.hint}>github.com/alpgurlee/harbormaster</p>
+              <label className={styles.choice}>
+                <input
+                  type="checkbox"
+                  checked={settings.checkUpdates}
+                  onChange={(event) => {
+                    const checkUpdates = event.target.checked;
+                    void change((current) => ({ ...current, checkUpdates }));
+                  }}
+                />
+                {i18n.t("updatesCheck")}
+              </label>
+              <p className={styles.hint}>{i18n.t("updatesHint")}</p>
+              {updating === null ? null : (
+                <p className={styles.hint} role="status">
+                  {updateLine(updating, i18n)}
+                </p>
+              )}
+              {updater === null ? null : (
+                <div className={styles.row}>
+                  <button type="button" className={styles.button} onClick={() => updater.check().catch(console.error)}>
+                    {i18n.t("updatesCheckNow")}
+                  </button>
+                  {updating?.kind === "available" ? (
+                    <button type="button" className={styles.button} onClick={() => updater.install().catch(console.error)}>
+                      {i18n.t("updateNow")}
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
           {refusal === null ? null : (
@@ -243,6 +281,26 @@ function Entries({ title, hint, placeholder, entries, onChange }: EntriesProps) 
       </form>
     </section>
   );
+}
+
+/** What is known of updates, as a line for the About section. */
+function updateLine(status: UpdateStatus, i18n: Translator): string {
+  switch (status.kind) {
+    case "off":
+      return i18n.t("updatesOff");
+    case "checking":
+      return i18n.t("updatesChecking");
+    case "idle":
+      return status.checkedAt === null
+        ? i18n.t("updatesNeverChecked")
+        : i18n.t("updatesUpToDate", {
+            time: new Date(status.checkedAt * 1000).toLocaleTimeString(i18n.locale, { hour: "2-digit", minute: "2-digit" }),
+          });
+    case "failed":
+      return status.why === "check" ? i18n.t("updatesCouldNotCheck", { message: status.message }) : failureText(status, i18n, platform === "mac");
+    default:
+      return progressText(status, i18n) ?? "";
+  }
 }
 
 function refusalText(refusal: SettingsRefusal, i18n: Translator): string {

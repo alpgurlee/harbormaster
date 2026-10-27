@@ -38,6 +38,8 @@ export interface PanelProps {
   /** Whether the user put the panel elsewhere, which `onAnchor` undoes. */
   placed?: boolean;
   onAnchor?: () => void;
+  /** Word of a newer version, under the header. */
+  banner?: ReactNode;
 }
 
 export function Panel({
@@ -54,6 +56,7 @@ export function Panel({
   onDrag,
   placed = false,
   onAnchor,
+  banner,
 }: PanelProps) {
   const header = <Header onClean={onClean} onSettings={onSettings} onDrag={onDrag} onAnchor={placed ? onAnchor : undefined} />;
   const i18n = useI18n();
@@ -71,6 +74,7 @@ export function Panel({
     return (
       <div className={styles.panel} hidden={hidden}>
         {header}
+        {banner}
         <p className={styles.note}>{i18n.t("looking")}</p>
       </div>
     );
@@ -132,6 +136,7 @@ export function Panel({
   return (
     <div className={styles.panel} hidden={hidden}>
       {header}
+      {banner}
       <Summary dev={dev} tints={tints} memory={update.memory} apps={update.apps} thermal={update.thermal} onQuit={onQuit} />
       <label className={styles.search}>
         <Search className={styles.searchIcon} />

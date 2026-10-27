@@ -4,11 +4,39 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { I18nProvider } from "./i18n";
 import { SettingsWindow, type SettingsBackend } from "./SettingsWindow";
-import type { Settings } from "./types";
+import type { Settings, UpdateStatus } from "./types";
+import type { Updater } from "./updater";
 
 afterEach(cleanup);
 
-const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30 };
+const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30, checkUpdates: true };
+
+/** An updater that remembers what it was asked, and tells the window what the test says. */
+function updater() {
+  let subscriber: ((status: UpdateStatus) => void) | null = null;
+  const asked: ("check" | "install")[] = [];
+  const updater: Updater = {
+    subscribe: (told) => {
+      subscriber = told;
+      return Promise.resolve();
+    },
+    check: () => {
+      asked.push("check");
+      return Promise.resolve();
+    },
+    install: () => {
+      asked.push("install");
+      return Promise.resolve();
+    },
+    whatsNew: () => Promise.resolve(),
+    openAppManagement: () => Promise.resolve(),
+  };
+  const told = (status: UpdateStatus) => {
+    if (subscriber === null) throw new Error("the window hasn't subscribed to updates");
+    act(() => subscriber?.(status));
+  };
+  return { updater, asked, told };
+}
 
 /** A backend that keeps what it is told, unless told to turn the next one down. */
 function fake(first: Settings = DEFAULTS) {
@@ -185,5 +213,49 @@ describe("the settings window", () => {
 
     expect(screen.getByText("Version 0.1.0")).toBeTruthy();
     expect(screen.getByText("Free and open source, under the MIT License.")).toBeTruthy();
+  });
+});
+
+describe("the About section", () => {
+  it("keeps whether updates are checked for", async () => {
+    const { backend, kept } = fake();
+    await show(backend);
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+
+    const box = screen.getByRole<HTMLInputElement>("checkbox", { name: "Check for updates when Harbormaster starts and every six hours" });
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+
+    await screen.findByRole<HTMLInputElement>("checkbox", { checked: false });
+    expect(kept.map((settings) => settings.checkUpdates)).toEqual([false]);
+  });
+
+  it("checks for updates when asked, and says what came of it", async () => {
+    const { backend } = fake();
+    const updates = updater();
+    render(
+      <I18nProvider locale="en">
+        <SettingsWindow backend={backend} updater={updates.updater} />
+      </I18nProvider>,
+    );
+    await screen.findByRole("heading", { name: "General" });
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+    expect(updates.asked).toEqual(["check"]);
+
+    updates.told({ kind: "checking" });
+    screen.getByText("Checking…");
+    updates.told({ kind: "idle", checkedAt: Math.floor(Date.UTC(2026, 9, 27, 7, 42) / 1000) });
+    expect(screen.getByText(/^Up to date · checked \d{1,2}:\d{2}/).textContent).toBeTruthy();
+    updates.told({ kind: "failed", version: null, why: "check", message: "no route to host" });
+    screen.getByText("Couldn't check: no route to host");
+    updates.told({ kind: "off" });
+    screen.getByText("Automatic checks are off.");
+
+    updates.told({ kind: "available", version: "0.1.1" });
+    screen.getByText("Harbormaster 0.1.1 is available");
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    expect(updates.asked).toEqual(["check", "install"]);
   });
 });

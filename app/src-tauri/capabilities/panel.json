@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "panel",
-  "description": "What the tray panel may ask of the app: its own commands, to open the cleaner and the settings, to be told the settings as they change, nothing else.",
+  "description": "What the tray panel may ask of the app: its own commands, to open the cleaner and the settings, to be told the settings and what is known of updates as they change, to have an update checked for, installed or its notes shown, and on a Mac to open System Settings at App Management, nothing else.",
   "windows": ["panel"],
   "permissions": [
     "allow-subscribe",
@@ -16,6 +16,11 @@
     "allow-open-cleaner",
     "allow-open-settings",
     "allow-settings-subscribe",
+    "allow-update-subscribe",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-whats-new",
+    "allow-update-open-app-management",
     "allow-resize-panel",
     "allow-hide-panel",
     "allow-drag-panel",

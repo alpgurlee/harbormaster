@@ -6,10 +6,12 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::activity::Activity;
 use crate::quitting::{QuitPreview, Quits};
 use crate::scanning::{self, Scanning, Update};
 use crate::settings::{Invalid, Settings, Store};
 use crate::stopping::{Approvals, Preview, Reason, Stopped};
+use crate::updates::{Status, Updates};
 use crate::{panel, settings};
 
 #[tauri::command]
@@ -88,14 +90,22 @@ pub(crate) async fn stop_preview(id: String, app: AppHandle) -> Result<Preview, 
 
 #[tauri::command]
 pub(crate) async fn stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().stop(token)).await
+    blocking(move || {
+        let _doing = doing(&app)?;
+        app.state::<Approvals>().stop(token)
+    })
+    .await
 }
 
 /// Only a Mac stops in two rounds; on Windows the stop is the forced one.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn force_stop(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Approvals>().force(token)).await
+    blocking(move || {
+        let _doing = doing(&app)?;
+        app.state::<Approvals>().force(token)
+    })
+    .await
 }
 
 /// `id` names an app as the breakdown lists it.
@@ -137,7 +147,60 @@ pub(crate) async fn force_quit_app_preview(
 
 #[tauri::command]
 pub(crate) async fn quit_app(token: u64, app: AppHandle) -> Result<Stopped, Reason> {
-    blocking(move || app.state::<Quits>().quit(token)).await
+    blocking(move || {
+        let _doing = doing(&app)?;
+        app.state::<Quits>().quit(token)
+    })
+    .await
+}
+
+/// Counts a stop or a quit as under way, so an update waits for it; none
+/// starts while an update installs.
+pub(crate) fn doing(app: &AppHandle) -> Result<crate::activity::Doing, Reason> {
+    app.state::<Arc<Activity>>()
+        .begin()
+        .map_err(|_| Reason::Failed {
+            message: UPDATING.into(),
+        })
+}
+
+/// Why nothing starts while an update installs.
+pub(crate) const UPDATING: &str = "Harbormaster is updating.";
+
+/// Tells the window what is known of updates now and each time it changes.
+#[tauri::command]
+pub(crate) fn update_subscribe(
+    channel: Channel<Status>,
+    window: WebviewWindow,
+    updates: State<'_, Updates>,
+) {
+    updates.subscribe(window.label(), move |status| {
+        channel.send(status.clone()).is_ok()
+    });
+}
+
+#[tauri::command]
+pub(crate) fn update_check(updates: State<'_, Updates>) {
+    updates.check_now();
+}
+
+#[tauri::command]
+pub(crate) fn update_install(updates: State<'_, Updates>) {
+    updates.install();
+}
+
+/// Opens the release page of the version found in the browser.
+#[tauri::command]
+pub(crate) fn update_whats_new(app: AppHandle) -> Result<(), String> {
+    app.state::<Updates>().whats_new(&app)
+}
+
+/// Opens System Settings at App Management, where macOS lets Harbormaster
+/// replace itself once it refused to.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) fn update_open_app_management(app: AppHandle) -> Result<(), String> {
+    Updates::open_app_management(&app)
 }
 
 /// Async, as a window Windows builds in a synchronous command deadlocks and

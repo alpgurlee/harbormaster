@@ -7,7 +7,7 @@ use tauri::{
 };
 
 use crate::scanning::Scanning;
-use crate::tray;
+use crate::{tray, updates};
 
 const LABEL: &str = "panel";
 const WIDTH: f64 = 340.0;
@@ -80,7 +80,12 @@ pub(crate) fn create(app: &AppHandle) -> tauri::Result<()> {
     }
     let handle = app.clone();
     window.on_window_event(move |event| match event {
-        WindowEvent::Focused(false) if !WINDOWED && !handle.state::<Anchor>().lock().placed => {
+        // An update's password prompt takes the focus; the panel stays to show how it goes.
+        WindowEvent::Focused(false)
+            if !WINDOWED
+                && !handle.state::<Anchor>().lock().placed
+                && !updates::installing(&handle) =>
+        {
             hide(&handle);
         }
         // Minimized or closed, the window goes to the tray, and Harbormaster runs on.

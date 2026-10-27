@@ -1,0 +1,44 @@
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 0 10px 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.text {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.button {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+}
+
+.button:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+
+.main {
+  color: var(--text);
+  font-weight: 600;
+}

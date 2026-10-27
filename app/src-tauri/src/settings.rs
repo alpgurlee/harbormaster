@@ -32,6 +32,8 @@ pub(crate) struct Settings {
     pub(crate) roots: Vec<PathBuf>,
     /// How long a project sits untouched before its build outputs are chosen.
     pub(crate) idle_days: u32,
+    /// Whether to ask GitHub for a newer version now and then.
+    pub(crate) check_updates: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +44,7 @@ impl Default for Settings {
             hidden: Vec::new(),
             roots: Vec::new(),
             idle_days: 30,
+            check_updates: true,
         }
     }
 }
@@ -301,6 +304,18 @@ mod tests {
     }
 
     #[test]
+    fn checks_for_updates_as_a_file_from_before_the_setting_says_nothing() {
+        let (_folder, file) = place();
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, br#"{"idleDays": 14}"#).unwrap();
+
+        let settings = open(file).get();
+
+        assert_eq!(settings.idle_days, 14);
+        assert!(settings.check_updates);
+    }
+
+    #[test]
     fn starts_from_the_defaults_without_a_file() {
         let (_folder, file) = place();
 
@@ -317,6 +332,7 @@ mod tests {
             hidden: vec!["serena".into()],
             roots: vec![home().join("work")],
             idle_days: 14,
+            check_updates: true,
         };
 
         let kept = open(file.clone()).set(chosen.clone());
