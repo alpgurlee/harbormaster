@@ -82,14 +82,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # The updater's archive and signature are asked for here only, so a
-      # build from a checkout needs no key.
+      # build from a checkout needs no key. The archive is made from the app
+      # bundle, which a disk image alone doesn't keep, so both are asked for.
       - name: App
         working-directory: app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: >
-          npx tauri build --bundles dmg --target universal-apple-darwin
+          npx tauri build --bundles app,dmg --target universal-apple-darwin
           --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
       - name: Command line tool
