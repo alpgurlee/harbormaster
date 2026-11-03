@@ -697,7 +697,7 @@ describe("the cleaner window", () => {
     expect(screen.getByRole("button", { name: /^Removed apps' data/ })).toBeTruthy();
     expect(
       screen.getByText(
-        "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
+        "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it, and its containers when Settings → Clean up says to look there. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
       ),
     ).toBeTruthy();
     expect(screen.getByText("~/Library/Caches/com.docker.docker · goes to the Trash")).toBeTruthy();

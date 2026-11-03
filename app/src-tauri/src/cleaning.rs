@@ -455,11 +455,13 @@ impl Cleaning {
 impl Working {
     /// Scans this user's home folder, telling `told` as it goes: projects
     /// in `roots`, or the usual folders when there are none, their build
-    /// outputs picked once left alone for `idle_days`.
+    /// outputs picked once left alone for `idle_days`, and, if `containers`,
+    /// the containers of the apps moved to the Trash from here too.
     pub(crate) fn scan(
         &self,
         roots: &[PathBuf],
         idle_days: u32,
+        containers: bool,
         apps: Option<&Apps>,
         told: &(dyn Fn(ScanEvent) + Sync),
     ) -> Result<(), Refusal> {
@@ -478,6 +480,7 @@ impl Working {
         let apps = apps.or(Some(&trashed));
         let survey = Survey {
             apps,
+            containers,
             ..survey(
                 &home,
                 &roots,
@@ -704,6 +707,7 @@ fn survey<'a>(
         now: SystemTime::now(),
         temp,
         apps: None,
+        containers: false,
     }
 }
 

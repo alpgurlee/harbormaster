@@ -306,6 +306,10 @@ pub struct Survey<'a> {
     /// What is known of the PC's apps, on Windows: which were removed from
     /// here, for what they may have left behind, and which are still there.
     pub apps: Option<&'a Apps>,
+    /// Whether to look in the containers of the apps `apps` says were
+    /// removed too, on a Mac. They may hold the user's documents, and macOS
+    /// may keep them closed, so only when the user asked for it.
+    pub containers: bool,
 }
 
 /// What a hunt for large files looks through.
@@ -457,6 +461,15 @@ pub fn scan_with(
             &owners,
             stop,
         ));
+        if survey.containers {
+            candidates.extend(remnants::in_containers(
+                &root,
+                survey.home,
+                apps,
+                &owners,
+                stop,
+            ));
+        }
     }
     for candidate in &mut candidates {
         candidate.in_use = using(

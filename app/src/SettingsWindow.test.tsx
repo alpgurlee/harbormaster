@@ -9,7 +9,7 @@ import type { Updater } from "./updater";
 
 afterEach(cleanup);
 
-const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30, checkUpdates: true };
+const DEFAULTS: Settings = { language: "system", appearance: "system", hidden: [], roots: [], idleDays: 30, checkUpdates: true, containers: false };
 
 /** An updater that remembers what it was asked, and tells the window what the test says. */
 function updater() {
@@ -204,6 +204,29 @@ describe("the settings window", () => {
     await act(async () => {});
 
     expect(driver.kept).toEqual([{ ...DEFAULTS, idleDays: 45 }]);
+  });
+
+  it("keeps whether removed apps' containers are looked in, and offers Full Disk Access", async () => {
+    const { backend, kept } = fake();
+    const opened: string[] = [];
+    await show({ ...backend, openFullDiskAccess: () => Promise.resolve(opened.push("full disk access")).then(() => undefined) });
+    section("Clean up");
+
+    const box = screen.getByRole<HTMLInputElement>("checkbox", { name: "List containers named after apps moved to the Trash from here" });
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole("button", { name: "Open Full Disk Access settings" }));
+
+    await screen.findByRole<HTMLInputElement>("checkbox", { checked: true });
+    expect(kept.map((settings) => settings.containers)).toEqual([true]);
+    expect(opened).toEqual(["full disk access"]);
+  });
+
+  it("offers Full Disk Access only where it can be opened", async () => {
+    await show(fake().backend);
+    section("Clean up");
+
+    expect(screen.queryByRole("button", { name: "Open Full Disk Access settings" })).toBeNull();
   });
 
   it("says what it is", async () => {

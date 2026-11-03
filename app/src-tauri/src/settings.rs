@@ -34,6 +34,10 @@ pub(crate) struct Settings {
     pub(crate) idle_days: u32,
     /// Whether to ask GitHub for a newer version now and then.
     pub(crate) check_updates: bool,
+    /// Whether a scan looks in the containers of the apps moved to the Trash
+    /// from here too, on a Mac: they may hold the user's documents, and
+    /// macOS may keep them closed, so only when asked.
+    pub(crate) containers: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +49,7 @@ impl Default for Settings {
             roots: Vec::new(),
             idle_days: 30,
             check_updates: true,
+            containers: false,
         }
     }
 }
@@ -313,6 +318,7 @@ mod tests {
 
         assert_eq!(settings.idle_days, 14);
         assert!(settings.check_updates);
+        assert!(!settings.containers);
     }
 
     #[test]
@@ -333,6 +339,7 @@ mod tests {
             roots: vec![home().join("work")],
             idle_days: 14,
             check_updates: true,
+            containers: true,
         };
 
         let kept = open(file.clone()).set(chosen.clone());

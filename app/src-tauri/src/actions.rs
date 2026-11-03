@@ -100,6 +100,7 @@ pub(crate) async fn clean_scan(
         working.scan(
             &settings.roots,
             settings.idle_days,
+            settings.containers,
             apps.as_ref(),
             &|event| {
                 let _ = channel.send(event);

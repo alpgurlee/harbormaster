@@ -58,8 +58,15 @@ checks first:
   from here, whose bundle identifier is read from its own Info.plist right before the move: entries right
   inside the Library's Application Support, Caches, HTTPStorages, WebKit, Cookies, Saved Application
   State, Preferences and Logs folders carrying that identifier, or in Application Support and Logs named
-  exactly like the app; Containers and Group Containers are never looked into, since macOS treats them as
-  other apps' data. On Windows that is an app whose uninstaller was started from here and whose uninstall
+  exactly like the app. Containers right inside the Library's Containers and Group Containers folders
+  named by that identifier or by one below it, as an app's helpers' are, with a team's or `group.` prefix
+  in front or not, are listed only when the setting for that is on, since they may hold the user's
+  documents and macOS treats them as other apps' data. One named like, above or below anything the scan
+  can see as still installed or running stays out, and an app with a helper still installed isn't taken as
+  gone there; yet
+  a group container belongs to whatever apps declare it, which the scan doesn't read, so one named after
+  the removed app may still be another app's too, and the window says so. On Windows that is an app whose
+  uninstaller was started from here and whose uninstall
   entry is gone since: a folder right inside AppData's Roaming, Local or LocalLow folders named like its
   name, its publisher or a folder it was installed in or ran from. An entry named like anything the scan
   can see is still there stays out of sight: an installed app (on a Mac, every bundle in the Applications

@@ -31,6 +31,7 @@ fn surveyed(
         now: SystemTime::now(),
         temp: None,
         apps: None,
+        containers: false,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

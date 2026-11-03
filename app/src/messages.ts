@@ -302,6 +302,8 @@ export interface Messages {
   removeEntry: string;
   rootsTitle: string;
   rootsHint: string;
+  containersLook: string;
+  containersHint: string;
   folderPath: string;
   idleTitle: string;
   aboutText: string;
@@ -493,7 +495,7 @@ export const en: Messages = {
   aboutXcode: "Build data and device symbols Xcode makes again. Archives are your own builds, so they go to the Trash.",
   aboutApps: "Caches apps fill as they run, and fill again.",
   aboutRemnants:
-    "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
+    "What is left in your Library of an app you moved to the Trash from here: entries carrying its bundle identifier, or named exactly like it, and its containers when Settings → Clean up says to look there. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Trash. The removed apps are forgotten when Harbormaster quits.",
   aboutRemnantsWindows:
     "Folders in AppData named like an app whose uninstaller you started from here and that is gone from the installed apps since. They may hold that app's settings and data, or another's of the same name; Harbormaster can't tell. None is chosen for you, and what you choose goes to the Recycle Bin. The removed apps are forgotten when Harbormaster quits.",
   aboutTemp: "What apps put aside while they ran. Only what nothing has touched for a week goes, and none of what a program works in.",
@@ -664,6 +666,9 @@ export const en: Messages = {
   removeEntry: "Remove {name}",
   rootsTitle: "Folders with projects",
   rootsHint: "Where the cleaner looks for build outputs. With none, it looks in the usual folders, such as ~/code and ~/Developer. Each must be inside your home folder.",
+  containersLook: "List containers named after apps moved to the Trash from here",
+  containersHint:
+    "A container in the Library's Containers or Group Containers folder may hold documents you saved in the app, so it is listed with the removed apps' data only when this is on, never chosen for you, and goes to the Trash. It is matched by its name alone: a group container may still be shared with another app, so look before you choose. macOS 27 and later keep other apps' containers from Harbormaster without Full Disk Access, and may show a notification about it; a container it can't read isn't listed. Earlier versions may ask first.",
   folderPath: "Folder, such as ~/code",
   idleTitle: "Days a project sits untouched before its build outputs are chosen",
   aboutText: "A menu bar app for the dev servers on your Mac, and a cleaner for what your tools leave behind.",
@@ -856,7 +861,7 @@ export const tr: Messages = {
   aboutXcode: "Xcode'un yeniden oluşturduğu derleme verileri ve cihaz sembolleri. Arşivler senin derlemelerin; Çöp Sepeti'ne gider.",
   aboutApps: "Uygulamaların çalışırken doldurduğu ve yeniden dolduracağı önbellekler.",
   aboutRemnants:
-    "Buradan Çöp Sepeti'ne taşıdığın bir uygulamadan Library klasöründe kalanlar: paket kimliğini taşıyan ya da tam adıyla adlandırılmış girdiler. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Çöp Sepeti'ne gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
+    "Buradan Çöp Sepeti'ne taşıdığın bir uygulamadan Library klasöründe kalanlar: paket kimliğini taşıyan ya da tam adıyla adlandırılmış girdiler ve Ayarlar → Temizlik öyle diyorsa konteynerleri. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Çöp Sepeti'ne gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
   aboutRemnantsWindows:
     "AppData içinde, kaldırma aracını buradan başlattığın ve o zamandan beri yüklü uygulamalar arasında görünmeyen bir uygulamanın adını taşıyan klasörler. O uygulamanın ayarlarını ve verilerini ya da aynı adı taşıyan başka bir şeyi içeriyor olabilirler; Harbormaster bunu ayırt edemez. Hiçbiri senin yerine seçilmez; seçtiklerin Geri Dönüşüm Kutusu'na gider. Kaldırılan uygulamalar Harbormaster kapanınca unutulur.",
   aboutTemp: "Uygulamaların çalışırken bir kenara koydukları. Yalnızca bir haftadır dokunulmamış olanlar gider; bir programın içinde çalıştığı hiçbir şey gitmez.",
@@ -1027,6 +1032,9 @@ export const tr: Messages = {
   removeEntry: "{name} kaldır",
   rootsTitle: "Projelerin olduğu klasörler",
   rootsHint: "Temizleyicinin derleme çıktılarını aradığı yerler. Hiç yoksa ~/code ve ~/Developer gibi alışılmış klasörlere bakar. Her biri ana klasörünün içinde olmalı.",
+  containersLook: "Buradan Çöp Sepeti'ne taşınan uygulamaların adını taşıyan konteynerleri listele",
+  containersHint:
+    "Library içindeki Containers ya da Group Containers klasöründeki bir konteyner, o uygulamada kaydettiğin belgeleri içeriyor olabilir. Bu yüzden yalnızca bu seçenek açıkken kaldırılan uygulamaların verileri arasında listelenir, hiçbir zaman senin yerine seçilmez ve Çöp Sepeti'ne gider. Eşleme yalnızca ada göredir: bir grup konteyneri başka bir uygulamayla hâlâ paylaşılıyor olabilir, seçmeden önce bak. macOS 27 ve sonrası, Tam Disk Erişimi olmayan Harbormaster'ı diğer uygulamaların konteynerlerine sokmaz ve bununla ilgili bir bildirim gösterebilir; okuyamadığı konteyner listelenmez. Daha eski sürümler önce izin isteyebilir.",
   folderPath: "Klasör, örneğin ~/code",
   idleTitle: "Derleme çıktıları seçilmeden önce bir projenin dokunulmadan kalacağı gün",
   aboutText: "Mac'indeki dev sunucuları için bir menü çubuğu uygulaması ve araçlarının geride bıraktıkları için bir temizleyici.",

@@ -23,6 +23,7 @@ fn survey<'a>(home: &'a Path, roots: &'a [PathBuf], busy: &'a [(PathBuf, String)
         now: SystemTime::now(),
         temp: None,
         apps: None,
+        containers: false,
     }
 }
 

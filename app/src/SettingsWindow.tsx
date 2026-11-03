@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { version } from "../package.json";
-import { inApp, settingsGet, settingsSet } from "./api";
+import { cleanOpenFullDiskAccess, inApp, settingsGet, settingsSet } from "./api";
 import { useI18n, type TextKey, type Translator } from "./i18n";
 import { platform } from "./platform";
 import type { Appearance, Settings, SettingsRefusal, UpdateStatus } from "./types";
@@ -13,9 +13,11 @@ export interface SettingsBackend {
   get: () => Promise<Settings>;
   /** Keeps `settings`, handing back what is in force; rejects with a `SettingsRefusal`. */
   set: (settings: Settings) => Promise<Settings>;
+  /** Opens System Settings at Full Disk Access, which a Mac alone has. */
+  openFullDiskAccess?: () => Promise<void>;
 }
 
-const BACKEND: SettingsBackend = { get: settingsGet, set: settingsSet };
+const BACKEND: SettingsBackend = { get: settingsGet, set: settingsSet, openFullDiskAccess: cleanOpenFullDiskAccess };
 
 type Section = "general" | "servers" | "cleanup" | "about";
 const SECTIONS: Section[] = ["general", "servers", "cleanup", "about"];
@@ -174,6 +176,29 @@ export function SettingsWindow({
                   }}
                 />
               </label>
+              {platform === "windows" ? null : (
+                <div className={styles.field}>
+                  <label className={styles.choice}>
+                    <input
+                      type="checkbox"
+                      checked={settings.containers}
+                      onChange={(event) => {
+                        const containers = event.target.checked;
+                        void change((current) => ({ ...current, containers }));
+                      }}
+                    />
+                    {i18n.t("containersLook")}
+                  </label>
+                  <p className={styles.hint}>{i18n.t("containersHint")}</p>
+                  {backend.openFullDiskAccess === undefined ? null : (
+                    <div className={styles.row}>
+                      <button type="button" className={styles.button} onClick={() => backend.openFullDiskAccess?.().catch(console.error)}>
+                        {i18n.t("openFullDiskAccess")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className={styles.about}>

@@ -251,6 +251,8 @@ export interface Settings {
   idleDays: number;
   /** Whether to ask GitHub for a newer version now and then. */
   checkUpdates: boolean;
+  /** Whether a scan looks in the containers of the apps moved to the Trash from here too, which may hold documents. */
+  containers: boolean;
 }
 
 /** Why an update didn't come through. */

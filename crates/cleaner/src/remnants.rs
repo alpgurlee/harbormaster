@@ -556,6 +556,19 @@ const LIBRARY: &[Shelf] = &[
         never: &["DiagnosticReports", "CoreSimulator"],
     },
 ];
+/// Where macOS keeps a sandboxed app's data, and what the apps of one maker
+/// share: each entry named by an app's identifier or by an app group's,
+/// which apps declare in their signed entitlements, not read here. They may
+/// hold the user's documents, and macOS treats them as other apps' data, so
+/// they are looked in only when the user asked for it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const CONTAINERS: &[&[&str]] = &[&["Library", "Containers"], &["Library", "Group Containers"]];
+/// What an app group's name may start with besides its maker's team
+/// identifier: ten capitals and digits, then a dot.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const GROUP: &str = "group.";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const TEAM_LEN: usize = 10;
 /// What Apple's own identifiers start with; nothing so named is ever listed.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const APPLE: &str = "com.apple.";
@@ -650,6 +663,116 @@ fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> 
         .then(|| text.split_at(cut))
         .filter(|(_, end)| end.eq_ignore_ascii_case(suffix))
         .map(|(start, _)| start)
+}
+
+/// The containers right inside the Library's Containers and Group
+/// Containers folders of `root`, the home folder at `home`, named by the
+/// identifier of one of `apps.removed` or by one below it, as an app's
+/// helpers' are, each as a candidate to go to the Trash. One named like,
+/// above or below anything in `owners` stays out, and an app with anything
+/// in `owners` named below its identifier, as a helper still installed is,
+/// isn't gone. Named like is all that can be told: a group container
+/// belongs to whatever apps declare it, which isn't read, so one may still
+/// be another app's too.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn in_containers(
+    root: &Dir,
+    home: &Path,
+    apps: &Apps,
+    owners: &HashSet<String>,
+    stop: &AtomicBool,
+) -> Vec<Candidate> {
+    let removed: Vec<&App> = gone(&apps.removed, owners)
+        .into_iter()
+        .filter(|app| !app.ids.iter().any(|id| kin(owners, id)))
+        .collect();
+    if removed.is_empty() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for place in CONTAINERS {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let relative: PathBuf = place.iter().collect();
+        let Ok(dir) = root.descend(&relative) else {
+            continue;
+        };
+        let Ok(entries) = dir.entries_while(|| !stop.load(Ordering::Relaxed)) else {
+            continue;
+        };
+        for (name, stat) in entries {
+            if !walk::is_folder(&stat) {
+                continue;
+            }
+            let text = name.to_string_lossy();
+            if text.starts_with('.') {
+                continue;
+            }
+            let id = container_id(&text);
+            if id.starts_with(APPLE) || kin(owners, &id) {
+                continue;
+            }
+            let relative = relative.join(&name);
+            if catalog::claimed(&relative) {
+                continue;
+            }
+            let Some(app) = removed
+                .iter()
+                .find(|app| app.ids.iter().any(|own| id == *own || below(&id, own)))
+            else {
+                continue;
+            };
+            found.push(Candidate {
+                group: Group::Remnants,
+                kind: Kind::Personal,
+                name: format!("{} · {}", app.name, text),
+                path: home.join(&relative),
+                relative,
+                picked: false,
+                in_use: None,
+                project: None,
+                touched: None,
+                emptied: false,
+            });
+        }
+    }
+    found
+}
+
+/// The identifier a container `name` carries, lowercase: an app's, or an
+/// app group's without its team identifier or `group.` in front.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn container_id(name: &str) -> String {
+    let team = name
+        .split_once('.')
+        .filter(|(team, _)| {
+            team.len() == TEAM_LEN
+                && team
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+        })
+        .map(|(_, rest)| rest)
+        .unwrap_or(name);
+    let bare = team.strip_prefix(GROUP).unwrap_or(team);
+    bare.to_lowercase()
+}
+
+/// Whether `owners` holds `id`, or an identifier above or below it:
+/// `com.maker.app` is above `com.maker.app.helper`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn kin(owners: &HashSet<String>, id: &str) -> bool {
+    owners.contains(id)
+        || owners
+            .iter()
+            .any(|owner| below(owner, id) || below(id, owner))
+}
+
+/// Whether `id` is right below `above` or further down: `above` and a dot
+/// start it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn below(id: &str, above: &str) -> bool {
+    id.len() > above.len() && id.starts_with(above) && id.as_bytes()[above.len()] == b'.'
 }
 
 /// The names everything still on this Mac goes by: what the scan was told
@@ -1075,6 +1198,119 @@ mod tests {
                 && candidate.kind == Kind::Personal
                 && !candidate.picked
         }));
+    }
+
+    #[test]
+    fn lists_a_trashed_apps_containers_and_its_helpers_but_nothing_still_owned() {
+        let (_place, home) = home_with(&[
+            &["Library", "Containers", "com.docker.docker"],
+            &["Library", "Containers", "com.docker.docker.helper"],
+            &["Library", "Containers", "com.google.Chrome"],
+            &["Library", "Containers", "com.google.Chrome.helper"],
+            &["Library", "Containers", "com.tinyspeck.slackmacgap"],
+            &["Library", "Containers", "com.foo.app.pro"],
+            &["Library", "Containers", "com.apple.Notes"],
+            &["Library", "Containers", ".com.docker.docker"],
+            &[
+                "Library",
+                "Group Containers",
+                "ABCDE12345.com.docker.docker",
+            ],
+            &[
+                "Library",
+                "Group Containers",
+                "group.com.docker.docker.shared",
+            ],
+            &["Library", "Group Containers", "ABCDE12345.com.google"],
+            &["Library", "Group Containers", "group.com.apple.notes"],
+        ]);
+        std::fs::write(home.join("Library/Containers/com.docker.docker.txt"), b"x").unwrap();
+        let apps = Apps {
+            removed: vec![
+                mac_app("Docker Desktop", "com.docker.docker"),
+                // Its helper is still installed, so Chrome isn't gone.
+                mac_app("Google Chrome", "com.google.chrome"),
+                mac_app("Slack", "com.tinyspeck.slackmacgap"),
+                // An app above it is still installed, so its container may be shared.
+                mac_app("Foo Pro", "com.foo.app.pro"),
+            ],
+            installed: vec![
+                mac_app("Google Chrome Helper", "com.google.chrome.helper"),
+                mac_app("Foo", "com.foo.app"),
+            ],
+            names: Vec::new(),
+        };
+        let root = Dir::open(&home).unwrap();
+        // Slack runs on: whatever is named like it stays.
+        let busy = [(home.join("somewhere"), "Slack".to_owned())];
+        let owners = owner_keys(&apps, &busy);
+
+        let found = in_containers(&root, &home, &apps, &owners, &AtomicBool::new(false));
+
+        let mut listed: Vec<(String, PathBuf)> = found
+            .iter()
+            .map(|candidate| (candidate.name.clone(), candidate.relative.clone()))
+            .collect();
+        listed.sort();
+        let at = |folder: &[&str]| folder.iter().collect::<PathBuf>();
+        assert_eq!(
+            listed,
+            [
+                (
+                    "Docker Desktop · ABCDE12345.com.docker.docker".to_owned(),
+                    at(&[
+                        "Library",
+                        "Group Containers",
+                        "ABCDE12345.com.docker.docker"
+                    ])
+                ),
+                (
+                    "Docker Desktop · com.docker.docker".to_owned(),
+                    at(&["Library", "Containers", "com.docker.docker"])
+                ),
+                (
+                    "Docker Desktop · com.docker.docker.helper".to_owned(),
+                    at(&["Library", "Containers", "com.docker.docker.helper"])
+                ),
+                (
+                    "Docker Desktop · group.com.docker.docker.shared".to_owned(),
+                    at(&[
+                        "Library",
+                        "Group Containers",
+                        "group.com.docker.docker.shared"
+                    ])
+                ),
+            ]
+        );
+        assert!(found.iter().all(|candidate| {
+            candidate.group == Group::Remnants
+                && candidate.kind == Kind::Personal
+                && !candidate.picked
+                && candidate.path == home.join(&candidate.relative)
+        }));
+    }
+
+    #[test]
+    fn reads_the_identifier_a_container_is_named_by() {
+        assert_eq!(container_id("com.Docker.Docker"), "com.docker.docker");
+        assert_eq!(container_id("UBF8T346G9.Office"), "office");
+        assert_eq!(container_id("group.com.foo.app"), "com.foo.app");
+        assert_eq!(container_id("UBF8T346G9.group.com.foo"), "com.foo");
+        // Only a team identifier is cut: ten capitals and digits, then a dot.
+        assert_eq!(container_id("ubf8t346g9.com.foo"), "ubf8t346g9.com.foo");
+        assert_eq!(container_id("UBF8T346G.com.foo"), "ubf8t346g.com.foo");
+        assert_eq!(container_id("UBF8T346G9"), "ubf8t346g9");
+        assert_eq!(container_id(""), "");
+    }
+
+    #[test]
+    fn tells_an_identifier_below_another_from_one_merely_starting_alike() {
+        assert!(below("com.foo.app.helper", "com.foo.app"));
+        assert!(below("com.foo.app.helper.xpc", "com.foo.app"));
+        assert!(!below("com.foo.app", "com.foo.app"));
+        assert!(!below("com.foo.apple", "com.foo.app"));
+        assert!(!below("com.foo", "com.foo.app"));
+        assert!(!below("", "com.foo.app"));
     }
 
     #[test]

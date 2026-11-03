@@ -36,6 +36,7 @@ fn survey(home: &Path) -> Survey<'_> {
         now: SystemTime::now(),
         temp: None,
         apps: None,
+        containers: false,
     }
 }
 

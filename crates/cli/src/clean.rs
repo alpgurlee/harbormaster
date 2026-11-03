@@ -32,6 +32,7 @@ pub(crate) fn run(json: bool, yes: bool) -> anyhow::Result<u8> {
         now,
         temp: temp.as_deref(),
         apps: None,
+        containers: false,
     };
     let findings = harbormaster_cleaner::scan(&survey, &AtomicBool::new(false))
         .with_context(|| format!("could not look through {}", home.display()))?;

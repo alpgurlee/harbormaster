@@ -30,6 +30,7 @@ fn scanned_while(home: &Path, roots: &[PathBuf], busy: &[(PathBuf, String)]) -> 
         now: SystemTime::now(),
         temp: None,
         apps: None,
+        containers: false,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }
@@ -238,6 +239,7 @@ fn scanned_knowing(home: &Path, apps: &Apps) -> Vec<Finding> {
         now: SystemTime::now(),
         temp: None,
         apps: Some(apps),
+        containers: false,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }
@@ -623,6 +625,7 @@ fn scanned_with_temp(home: &Path, temp: &Path, busy: &[(PathBuf, String)]) -> Ve
         now: SystemTime::now(),
         temp: Some(temp),
         apps: None,
+        containers: false,
     };
     scan(&survey, &AtomicBool::new(false)).expect("the scan should start")
 }

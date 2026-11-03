@@ -371,6 +371,7 @@ mod tests {
             now: SystemTime::now(),
             temp: None,
             apps: None,
+            containers: false,
         };
         let findings = scan(&survey, &AtomicBool::new(false)).unwrap();
 
